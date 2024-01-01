@@ -1,5 +1,35 @@
 # codediff.nvim
 
+> [!NOTE]
+> This is a generated downstream build containing pending improvements to
+> [upstream codediff.nvim](https://github.com/esmuellert/codediff.nvim). Install an
+> immutable snapshot rather than the repository's moving default branch.
+
+[Install the latest immutable snapshot](https://github.com/richardgill/codediff.nvim/releases/latest) · [See list of old versions](https://github.com/richardgill/codediff.nvim/releases)
+
+[View README.md diff](https://github.com/richardgill/codediff.nvim/compare/31510a9b34c032b6fe98fc158d4066702f68cff2...bcd49037f23c7ab08ff0db6e6d7db8f06502f5bd#diff-b335630551682c19a781afebcf4d07bf978fb1f8ac04c6bf87428ed5106870f5) · [View all downstream changes](https://github.com/richardgill/codediff.nvim/compare/31510a9b34c032b6fe98fc158d4066702f68cff2...bcd49037f23c7ab08ff0db6e6d7db8f06502f5bd)
+
+To test a variety of changes, use the [CodeDiff testing repository](https://github.com/richardgill/codediff-testing) and run the `scripts/*.sh` launchers to exercise a variety of test cases.
+
+### Included pending upstream PRs
+
+Sorted by increasing complexity:
+
+- [PR #517 — fix(scrollsync): ignore follower redraw echoes](https://github.com/esmuellert/codediff.nvim/pull/517)
+- [PR #458 — Add local performance benchmarks](https://github.com/esmuellert/codediff.nvim/pull/458)
+- [PR #459 — feat: add line matching strategies](https://github.com/esmuellert/codediff.nvim/pull/459)
+- [PR #451 — Added native gutter signs support](https://github.com/esmuellert/codediff.nvim/pull/451)
+- [PR #492 — feat(explorer): custom keymaps](https://github.com/esmuellert/codediff.nvim/pull/492)
+
+### Reference patches (not included)
+
+Retained for future investigation; these patches are not applied to this build:
+
+- [perf improvements](https://github.com/richardgill/codediff.nvim/blob/fork-stack/patches/018-perf-improvements.patch)
+- [design: synchronized line wrapping and viewport rendering](https://github.com/richardgill/codediff.nvim/blob/fork-stack/patches/019-design-line-wrapping.patch)
+- [feat: add diff annotation integration API](https://github.com/richardgill/codediff.nvim/blob/fork-stack/patches/021-pi-code-annotations.patch)
+
+
 [![Downloads](https://img.shields.io/github/downloads/esmuellert/vscode-diff.nvim/total?label=⬇%20downloads&color=blue)](https://github.com/esmuellert/vscode-diff.nvim/releases)
 
 A Neovim plugin that provides VSCode-style diff rendering with two-tier highlighting, supporting both side-by-side and inline (unified) layouts.
@@ -46,7 +76,8 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 **Minimal installation:**
 ```lua
 {
-  "esmuellert/codediff.nvim",
+  "richardgill/codediff.nvim",
+  commit = "<snapshot-sha>",
   cmd = "CodeDiff",
 }
 ```
@@ -56,7 +87,8 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 **With custom configuration:**
 ```lua
 {
-  "esmuellert/codediff.nvim",
+  "richardgill/codediff.nvim",
+  commit = "<snapshot-sha>",
   cmd = "CodeDiff",
   opts = {
     -- Highlight configuration
@@ -466,7 +498,8 @@ If you prefer to install manually without a plugin manager:
 
 1. **Clone the repository:**
 ```bash
-git clone https://github.com/esmuellert/codediff.nvim ~/.local/share/nvim/codediff.nvim
+git clone https://github.com/richardgill/codediff.nvim ~/.local/share/nvim/codediff.nvim
+git -C ~/.local/share/nvim/codediff.nvim checkout --detach <snapshot-sha>
 ```
 
 2. **Add to your Neovim runtime path in `init.lua`:**
