@@ -1,5 +1,58 @@
 # codediff.nvim
 
+> [!NOTE]
+> This is a generated downstream build containing pending improvements to
+> [upstream codediff.nvim](https://github.com/esmuellert/codediff.nvim). Install an
+> immutable snapshot rather than the repository's moving default branch.
+>
+> [Install the latest immutable snapshot](https://github.com/richardgill/codediff.nvim/releases/latest) · [See list of old versions](https://github.com/richardgill/codediff.nvim/releases)
+> [View README.md diff](https://github.com/richardgill/codediff.nvim/compare/7608f3b436ce1f84a4888f75e53079caa981a2e9...4029c64ae3e7d9408e8c10d8bc409f1736e2bd1c#diff-b335630551682c19a781afebcf4d07bf978fb1f8ac04c6bf87428ed5106870f5) · [View all downstream changes](https://github.com/richardgill/codediff.nvim/compare/7608f3b436ce1f84a4888f75e53079caa981a2e9...4029c64ae3e7d9408e8c10d8bc409f1736e2bd1c)
+
+### Included pending upstream PRs
+
+Sorted by increasing complexity:
+
+- [PR #437 — fix: trust manual builds before checking libgomp](https://github.com/esmuellert/codediff.nvim/pull/437)
+- [PR #457 — fix(keymaps): align moved blocks with nonzero scrolloff](https://github.com/esmuellert/codediff.nvim/pull/457)
+- [PR #458 — Add local performance benchmarks](https://github.com/esmuellert/codediff.nvim/pull/458)
+- [PR #321 — fix: "gf" shortcut should open selected explorer file in previous tab](https://github.com/esmuellert/codediff.nvim/pull/321)
+- [PR #460 — fix(explorer): select the first visible file on initial open](https://github.com/esmuellert/codediff.nvim/pull/460)
+- [PR #438 — fix(navigation): include zero-hunk files in cross-file cycling](https://github.com/esmuellert/codediff.nvim/pull/438)
+- [PR #440 — fix: keep Neovim open when closing the last diff tab](https://github.com/esmuellert/codediff.nvim/pull/440)
+- [PR #441 — fix(ui): hide the native tabline in CodeDiff views](https://github.com/esmuellert/codediff.nvim/pull/441)
+- [PR #442 — feat: highlight added and deleted single-file views](https://github.com/esmuellert/codediff.nvim/pull/442)
+- [PR #443 — fix(explorer): preserve tree state across refreshes](https://github.com/esmuellert/codediff.nvim/pull/443)
+- [PR #444 — feat: make filler text configurable](https://github.com/esmuellert/codediff.nvim/pull/444)
+- [PR #447 — fix(highlights): preserve character group attributes](https://github.com/esmuellert/codediff.nvim/pull/447)
+- [PR #459 — feat: add native line matching strategies](https://github.com/esmuellert/codediff.nvim/pull/459)
+- [PR #451 — Added native gutter signs support](https://github.com/esmuellert/codediff.nvim/pull/451)
+- [PR #448 — feat(explorer): add optional line change statistics](https://github.com/esmuellert/codediff.nvim/pull/448)
+
+## Install this fork
+
+[Install the latest immutable snapshot](https://github.com/richardgill/codediff.nvim/releases/latest), or choose an older snapshot from [the releases list](https://github.com/richardgill/codediff.nvim/releases). Replace `<snapshot-sha>` below with its commit SHA. Each release also contains ready-to-copy installation snippets.
+
+### lazy.nvim
+
+```lua
+{
+  "richardgill/codediff.nvim",
+  commit = "<snapshot-sha>",
+  cmd = "CodeDiff",
+}
+```
+
+### vim.pack (Neovim 0.12+)
+
+```lua
+vim.pack.add({
+  {
+    src = "https://github.com/richardgill/codediff.nvim",
+    version = "<snapshot-sha>",
+  },
+})
+```
+
 [![Downloads](https://img.shields.io/github/downloads/esmuellert/vscode-diff.nvim/total?label=⬇%20downloads&color=blue)](https://github.com/esmuellert/vscode-diff.nvim/releases)
 
 A Neovim plugin that provides VSCode-style diff rendering with two-tier highlighting, supporting both side-by-side and inline (unified) layouts.
@@ -49,7 +102,8 @@ This fork builds its C diff engine locally on first use. Build output is cached 
 **Minimal installation:**
 ```lua
 {
-  "esmuellert/codediff.nvim",
+  "richardgill/codediff.nvim",
+  commit = "<snapshot-sha>",
   cmd = "CodeDiff",
 }
 ```
@@ -59,7 +113,8 @@ This fork builds its C diff engine locally on first use. Build output is cached 
 **With custom configuration:**
 ```lua
 {
-  "esmuellert/codediff.nvim",
+  "richardgill/codediff.nvim",
+  commit = "<snapshot-sha>",
   cmd = "CodeDiff",
   opts = {
     -- Highlight configuration
@@ -443,7 +498,8 @@ If you prefer to install manually without a plugin manager:
 
 1. **Clone the repository:**
 ```bash
-git clone https://github.com/esmuellert/codediff.nvim ~/.local/share/nvim/codediff.nvim
+git clone https://github.com/richardgill/codediff.nvim ~/.local/share/nvim/codediff.nvim
+git -C ~/.local/share/nvim/codediff.nvim checkout --detach <snapshot-sha>
 ```
 
 2. **Add to your Neovim runtime path in `init.lua`:**
