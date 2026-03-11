@@ -28,10 +28,16 @@ function M.create_tree_data(status_result, git_root, base_revision, is_dir_mode,
   local staged = nodes.filter_merge_artifacts(filter_files(status_result.staged))
   local conflicts = status_result.conflicts and nodes.filter_merge_artifacts(filter_files(status_result.conflicts)) or {}
 
+  local flatten_context = nil
+  if view_mode == "tree" then
+    local all_files = vim.list_extend(vim.deepcopy(unstaged), staged)
+    flatten_context = nodes.create_flatten_context(vim.list_extend(all_files, conflicts))
+  end
+
   local create_nodes = (view_mode == "tree") and nodes.create_tree_file_nodes or nodes.create_file_nodes
-  local unstaged_nodes = create_nodes(unstaged, git_root, "unstaged")
-  local staged_nodes = create_nodes(staged, git_root, "staged")
-  local conflict_nodes = create_nodes(conflicts, git_root, "conflicts")
+  local unstaged_nodes = create_nodes(unstaged, git_root, "unstaged", flatten_context)
+  local staged_nodes = create_nodes(staged, git_root, "staged", flatten_context)
+  local conflict_nodes = create_nodes(conflicts, git_root, "conflicts", flatten_context)
 
   if is_dir_mode or base_revision then
     -- Dir or revision mode: single group showing all changes

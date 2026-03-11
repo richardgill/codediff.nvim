@@ -3,6 +3,7 @@
 
 local config = require("codediff.config")
 local nodes = require("codediff.ui.explorer.nodes")
+local explorer_tree = require("codediff.ui.explorer.tree")
 
 -- Helper: collect directory names from tree nodes recursively
 local function collect_dir_names(tree_nodes)
@@ -133,5 +134,36 @@ describe("Directory Flattening", function()
     -- src/ has a file (index.ts) and a dir (lib/) -> not flattened
     assert.equals(1, #tree_nodes)
     assert.equals("src", tree_nodes[1].data.name)
+  end)
+
+  it("Keeps directory shape stable across staged and unstaged groups", function()
+    config.options.explorer.view_mode = "tree"
+    config.options.explorer.flatten_dirs = true
+
+    local status_result = {
+      unstaged = {
+        { path = "docs/guide/readme.md", status = "M" },
+        { path = "src/alpha/two/c.txt", status = "M" },
+        { path = "src/beta/gamma/d.txt", status = "M" },
+      },
+      staged = {
+        { path = "src/alpha/one/a.txt", status = "M" },
+        { path = "src/alpha/one/b.txt", status = "M" },
+      },
+      conflicts = {},
+    }
+
+    local root_nodes = explorer_tree.create_tree_data(status_result, "/tmp/repo", nil, false, {
+      unstaged = true,
+      staged = true,
+      conflicts = true,
+    })
+
+    local staged_group = root_nodes[2]
+    local staged_src = staged_group._children[1]
+
+    assert.equals("src", staged_src.data.name)
+    assert.equals("alpha", staged_src._children[1].data.name)
+    assert.equals("one", staged_src._children[1]._children[1].data.name)
   end)
 end)

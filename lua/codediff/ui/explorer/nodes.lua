@@ -112,9 +112,7 @@ function M.create_file_nodes(files, git_root, group)
   return nodes
 end
 
--- Create tree nodes with directory hierarchy (tree mode)
-function M.create_tree_file_nodes(files, git_root, group)
-  -- Build directory structure
+local function build_directory_tree(files)
   local dir_tree = {}
 
   for _, file in ipairs(files) do
@@ -132,7 +130,6 @@ function M.create_tree_file_nodes(files, git_root, group)
       current = current[dir_name]._children
     end
 
-    -- Add file at leaf
     local filename = parts[#parts]
     current[filename] = {
       _is_dir = false,
@@ -140,105 +137,151 @@ function M.create_tree_file_nodes(files, git_root, group)
     }
   end
 
-  -- Flatten single-child directory chains (e.g., src/ -> components/ -> ui/ becomes src/components/ui/)
-  local function flatten_tree(subtree)
-    for key, item in pairs(subtree) do
-      if item._is_dir then
-        flatten_tree(item._children)
-        -- Check if this dir has exactly one child and it's a directory
-        local children_keys = {}
-        for k in pairs(item._children) do
-          children_keys[#children_keys + 1] = k
-        end
-        if #children_keys == 1 and item._children[children_keys[1]]._is_dir then
-          local child_key = children_keys[1]
-          local child = item._children[child_key]
-          local merged_key = key .. "/" .. child_key
-          subtree[merged_key] = child
-          subtree[key] = nil
-        end
-      end
+  return dir_tree
+end
+
+local function get_single_directory_child(subtree)
+  local child_key = nil
+  local child_count = 0
+
+  for key, child in pairs(subtree) do
+    child_count = child_count + 1
+    if child_count > 1 or not child._is_dir then
+      return nil
     end
+    child_key = key
   end
 
-  local explorer_config = config.options.explorer or {}
-  if explorer_config.flatten_dirs ~= false then
-    flatten_tree(dir_tree)
-  end
+  return child_key
+end
 
-  -- Convert to Tree.Node recursively
-  -- indent_state: array of booleans, true = ancestor at that level is last child
-  local function build_nodes(subtree, parent_path, indent_state)
-    local nodes = {}
-    local sorted_keys = {}
-
-    for key in pairs(subtree) do
-      sorted_keys[#sorted_keys + 1] = key
-    end
-    -- Sort: directories first, then files, alphabetically
-    table.sort(sorted_keys, function(a, b)
-      local a_is_dir = subtree[a]._is_dir
-      local b_is_dir = subtree[b]._is_dir
-      if a_is_dir ~= b_is_dir then
-        return a_is_dir
-      end
-      return a < b
-    end)
-
-    local total = #sorted_keys
-    for idx, key in ipairs(sorted_keys) do
-      local item = subtree[key]
+local function mark_flattenable_paths(subtree, parent_path, flattenable_paths)
+  for key, item in pairs(subtree) do
+    if item._is_dir then
       local full_path = parent_path ~= "" and (parent_path .. "/" .. key) or key
-      local is_last = (idx == total)
-
-      -- Copy parent indent state and add current level
-      local node_indent_state = {}
-      for i, v in ipairs(indent_state) do
-        node_indent_state[i] = v
-      end
-      node_indent_state[#node_indent_state + 1] = is_last
-
-      if item._is_dir then
-        -- Directory node - children need to know this dir's is_last status
-        local children = build_nodes(item._children, full_path, node_indent_state)
-        nodes[#nodes + 1] = Tree.Node({
-          text = key,
-          data = {
-            type = "directory",
-            name = key,
-            dir_path = full_path,
-            group = group,
-            indent_state = node_indent_state,
-          },
-        }, children)
-      else
-        -- File node
-        local file = item._file
-        local icon, icon_color = M.get_file_icon(file.path)
-        local status_info = STATUS_SYMBOLS[file.status] or { symbol = file.status, color = "Normal" }
-
-        nodes[#nodes + 1] = Tree.Node({
-          text = key,
-          data = {
-            path = file.path,
-            status = file.status,
-            old_path = file.old_path,
-            icon = icon,
-            icon_color = icon_color,
-            status_symbol = status_info.symbol,
-            status_color = status_info.color,
-            git_root = git_root,
-            group = group,
-            indent_state = node_indent_state,
-          },
-        })
+      mark_flattenable_paths(item._children, full_path, flattenable_paths)
+      local child_key = get_single_directory_child(item._children)
+      if child_key then
+        flattenable_paths[full_path] = true
       end
     end
+  end
+end
 
-    return nodes
+function M.create_flatten_context(files)
+  local flattenable_paths = {}
+  mark_flattenable_paths(build_directory_tree(files), "", flattenable_paths)
+  return { flattenable_paths = flattenable_paths }
+end
+
+local function flatten_tree(subtree, parent_path, flatten_context)
+  for key, item in pairs(subtree) do
+    if item._is_dir then
+      local full_path = parent_path ~= "" and (parent_path .. "/" .. key) or key
+      flatten_tree(item._children, full_path, flatten_context)
+      local child_key = get_single_directory_child(item._children)
+      local can_flatten = child_key
+
+      if can_flatten and flatten_context and flatten_context.flattenable_paths then
+        can_flatten = flatten_context.flattenable_paths[full_path]
+      end
+
+      if can_flatten and child_key then
+        local child = item._children[child_key]
+        local merged_key = key .. "/" .. child_key
+        subtree[merged_key] = child
+        subtree[key] = nil
+      end
+    end
+  end
+end
+
+local function copy_indent_state(indent_state, is_last)
+  local next_indent_state = {}
+  for i, value in ipairs(indent_state) do
+    next_indent_state[i] = value
+  end
+  next_indent_state[#next_indent_state + 1] = is_last
+  return next_indent_state
+end
+
+local function sort_subtree_keys(subtree)
+  local sorted_keys = {}
+
+  for key in pairs(subtree) do
+    sorted_keys[#sorted_keys + 1] = key
   end
 
-  return build_nodes(dir_tree, "", {})
+  table.sort(sorted_keys, function(a, b)
+    local a_is_dir = subtree[a]._is_dir
+    local b_is_dir = subtree[b]._is_dir
+    if a_is_dir ~= b_is_dir then
+      return a_is_dir
+    end
+    return a < b
+  end)
+
+  return sorted_keys
+end
+
+local function build_tree_nodes(subtree, parent_path, indent_state, git_root, group)
+  local tree_nodes = {}
+  local sorted_keys = sort_subtree_keys(subtree)
+  local total = #sorted_keys
+
+  for idx, key in ipairs(sorted_keys) do
+    local item = subtree[key]
+    local full_path = parent_path ~= "" and (parent_path .. "/" .. key) or key
+    local node_indent_state = copy_indent_state(indent_state, idx == total)
+
+    if item._is_dir then
+      local children = build_tree_nodes(item._children, full_path, node_indent_state, git_root, group)
+      tree_nodes[#tree_nodes + 1] = Tree.Node({
+        text = key,
+        data = {
+          type = "directory",
+          name = key,
+          dir_path = full_path,
+          group = group,
+          indent_state = node_indent_state,
+        },
+      }, children)
+    else
+      local file = item._file
+      local icon, icon_color = M.get_file_icon(file.path)
+      local status_info = STATUS_SYMBOLS[file.status] or { symbol = file.status, color = "Normal" }
+
+      tree_nodes[#tree_nodes + 1] = Tree.Node({
+        text = key,
+        data = {
+          path = file.path,
+          status = file.status,
+          old_path = file.old_path,
+          icon = icon,
+          icon_color = icon_color,
+          status_symbol = status_info.symbol,
+          status_color = status_info.color,
+          git_root = git_root,
+          group = group,
+          indent_state = node_indent_state,
+        },
+      })
+    end
+  end
+
+  return tree_nodes
+end
+
+-- Create tree nodes with directory hierarchy (tree mode)
+function M.create_tree_file_nodes(files, git_root, group, flatten_context)
+  local dir_tree = build_directory_tree(files)
+  local explorer_config = config.options.explorer or {}
+
+  if explorer_config.flatten_dirs ~= false then
+    flatten_tree(dir_tree, "", flatten_context)
+  end
+
+  return build_tree_nodes(dir_tree, "", {}, git_root, group)
 end
 
 -- Prepare node for rendering (format display)
