@@ -274,16 +274,21 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       side = "modified"
     end
 
-    -- Only operate on diff buffers; ignore explorer/history/result silently
-    if not side then
+    local explorer = lifecycle.get_explorer(tabpage)
+    local is_explorer_buf = explorer and explorer.bufnr and current_buf == explorer.bufnr
+
+    -- Only operate on diff and explorer buffers; ignore history/result silently
+    if not side and not is_explorer_buf then
       return
     end
 
-    local is_virtual = (side == "original" and lifecycle.is_original_virtual(tabpage)) or (side == "modified" and lifecycle.is_modified_virtual(tabpage))
+    local is_virtual = side
+      and ((side == "original" and lifecycle.is_original_virtual(tabpage)) or (side == "modified" and lifecycle.is_modified_virtual(tabpage)) or false)
+      or false
 
-    -- For virtual buffers, resolve the real file on disk
+    -- Resolve target file path
     local target_file
-    if is_virtual then
+    if side and is_virtual then
       local original_path, modified_path = lifecycle.get_paths(tabpage)
       local rel_path = side == "original" and original_path or modified_path
       if not rel_path or rel_path == "" then
@@ -292,15 +297,28 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       end
       local git_root = session.git_root
       target_file = git_root .. "/" .. rel_path
-    else
+    elseif side then
       target_file = vim.api.nvim_buf_get_name(current_buf)
       if target_file == "" then
         vim.notify("Buffer has no name; cannot open in previous tab", vim.log.levels.WARN)
         return
       end
+    else
+      local rel_path = explorer.current_file_path
+      if not rel_path or rel_path == "" then
+        vim.notify("No file selected in explorer", vim.log.levels.WARN)
+        return
+      end
+      local git_root = session.git_root or explorer.git_root
+      if not git_root or git_root == "" then
+        vim.notify("Unable to resolve explorer file path", vim.log.levels.WARN)
+        return
+      end
+      target_file = git_root .. "/" .. rel_path
+      is_virtual = true
     end
 
-    local cursor = vim.api.nvim_win_get_cursor(0)
+    local cursor = side and vim.api.nvim_win_get_cursor(0) or nil
     local current_tab = vim.api.nvim_get_current_tabpage()
     local tabs = vim.api.nvim_list_tabpages()
 
@@ -342,7 +360,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return
     end
 
-    pcall(vim.api.nvim_win_set_cursor, target_win, cursor)
+    if cursor then
+      pcall(vim.api.nvim_win_set_cursor, target_win, cursor)
+    end
 
     -- Optionally close codediff after navigating to file
     if config.options.keymaps.view.close_on_open_in_prev_tab then
