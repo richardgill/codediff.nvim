@@ -306,12 +306,10 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     else
       local rel_path = explorer.current_file_path
       if not rel_path or rel_path == "" then
-        vim.notify("No file selected in explorer", vim.log.levels.WARN)
         return
       end
       local git_root = session.git_root or explorer.git_root
       if not git_root or git_root == "" then
-        vim.notify("Unable to resolve explorer file path", vim.log.levels.WARN)
         return
       end
       target_file = git_root .. "/" .. rel_path
