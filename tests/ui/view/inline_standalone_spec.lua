@@ -38,14 +38,22 @@ local function get_inline_extmarks(bufnr)
   local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_inline, 0, -1, { details = true })
   local has_virt_lines = false
   local has_insert_hl = false
+  local has_change_hl = false
+  local has_char_insert_hl = false
 
   for _, mark in ipairs(extmarks) do
     local details = mark[4]
     if details.virt_lines and #details.virt_lines > 0 then
       has_virt_lines = true
     end
-    if details.hl_group and (details.hl_group == "CodeDiffLineInsert" or details.hl_group == "CodeDiffCharInsert") then
+    if details.hl_group == "CodeDiffLineInsert" then
       has_insert_hl = true
+    end
+    if details.hl_group == "CodeDiffLineChange" then
+      has_change_hl = true
+    end
+    if details.hl_group == "CodeDiffCharInsert" then
+      has_char_insert_hl = true
     end
   end
 
@@ -53,6 +61,8 @@ local function get_inline_extmarks(bufnr)
     total = #extmarks,
     has_virt_lines = has_virt_lines,
     has_insert_hl = has_insert_hl,
+    has_change_hl = has_change_hl,
+    has_char_insert_hl = has_char_insert_hl,
     extmarks = extmarks,
   }
 end
@@ -144,7 +154,8 @@ describe("Inline standalone view", function()
 
     local info = get_inline_extmarks(result.modified_buf)
     assert.is_true(info.has_virt_lines, "Should have virt_lines for deleted original line")
-    assert.is_true(info.has_insert_hl, "Should have insert highlight for new modified line")
+    assert.is_true(info.has_change_hl, "Should have change highlight for new modified line")
+    assert.is_false(info.has_insert_hl, "Modified line should not use insert highlight")
 
     vim.fn.delete(left_path)
     vim.fn.delete(right_path)
@@ -335,7 +346,10 @@ describe("Inline standalone view", function()
     assert.is_truthy(session.stored_diff_result, "Diff should compute")
 
     local info = get_inline_extmarks(result.modified_buf)
-    assert.is_true(info.has_virt_lines or info.has_insert_hl, "Should have some decoration for changed line")
+    assert.is_true(
+      info.has_virt_lines or info.has_insert_hl or info.has_change_hl or info.has_char_insert_hl,
+      "Should have some decoration for changed line"
+    )
 
     vim.fn.delete(left_path)
     vim.fn.delete(right_path)
@@ -422,7 +436,7 @@ describe("Inline standalone view", function()
 
     local info = get_inline_extmarks(result.modified_buf)
     assert.is_true(info.has_virt_lines, "Should have virt_lines for changed lines")
-    assert.is_true(info.has_insert_hl, "Should have insert highlights for changed lines")
+    assert.is_true(info.has_change_hl, "Should have change highlights for changed lines")
 
     vim.fn.delete(left_path)
     vim.fn.delete(right_path)

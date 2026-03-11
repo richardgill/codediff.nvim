@@ -6,6 +6,7 @@ M.defaults = {
   highlights = {
     -- Line-level highlights: accepts highlight group names (e.g., "DiffAdd") or color values (e.g., "#2ea043")
     line_insert = "DiffAdd", -- Line-level insertions (base color)
+    line_change = "DiffChange",
     line_delete = "DiffDelete", -- Line-level deletions (base color)
 
     -- Character-level highlights: accepts highlight group names or color values

@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 }
 ```
 
-> **Note:** The plugin automatically adapts to your colorscheme's background (dark/light). It uses `DiffAdd` and `DiffDelete` for line-level diffs, and auto-adjusts brightness for character-level highlights (1.4x brighter for dark themes, 0.92x darker for light themes). See [Highlight Groups](#highlight-groups) for customization.
+> **Note:** The plugin automatically adapts to your colorscheme's background (dark/light). It uses `DiffAdd`, `DiffChange`, and `DiffDelete` for line-level diffs, and auto-adjusts brightness for character-level highlights (1.4x brighter for dark themes, 0.92x darker for light themes). See [Highlight Groups](#highlight-groups) for customization.
 
 **With custom configuration:**
 ```lua
@@ -63,6 +63,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
     highlights = {
       -- Line-level: accepts highlight group names or hex colors (e.g., "#2ea043")
       line_insert = "DiffAdd",      -- Line-level insertions
+      line_change = "DiffChange",   -- Line-level modifications on the modified side
       line_delete = "DiffDelete",   -- Line-level deletions
 
       -- Character-level: accepts highlight group names or hex colors
@@ -472,6 +473,7 @@ git difftool -y                   # Skip confirmation prompts
 require("codediff").setup({
   highlights = {
     line_insert = "DiffAdd",
+    line_change = "DiffChange",
     line_delete = "DiffDelete",
     char_brightness = 1.4,
   },
@@ -596,6 +598,7 @@ The plugin handles syntax highlighting differently based on buffer type:
 The plugin defines highlight groups matching VSCode's diff colors:
 
 - `CodeDiffLineInsert` - Light green background for inserted lines
+- `CodeDiffLineChange` - Background for modified lines on the modified side
 - `CodeDiffLineDelete` - Light red background for deleted lines
 - `CodeDiffCharInsert` - Deep/dark green for inserted characters
 - `CodeDiffCharDelete` - Deep/dark red for deleted characters
@@ -623,7 +626,7 @@ The plugin defines highlight groups matching VSCode's diff colors:
 </details>
 
 **Default behavior:**
-- Uses your colorscheme's `DiffAdd` and `DiffDelete` for line-level highlights
+- Uses your colorscheme's `DiffAdd`, `DiffChange`, and `DiffDelete` for line-level highlights
 - Character-level highlights are auto-adjusted based on `vim.o.background`:
   - **Dark themes** (`background = "dark"`): Brightness multiplied by `1.4` (40% brighter)
   - **Light themes** (`background = "light"`): Brightness multiplied by `0.92` (8% darker)
@@ -636,6 +639,7 @@ The plugin defines highlight groups matching VSCode's diff colors:
 -- Use hex colors directly
 highlights = {
   line_insert = "#1d3042",
+  line_change = "#24384f",
   line_delete = "#351d2b",
   char_brightness = 1.5,  -- Override auto-detection with explicit value
 }
@@ -643,6 +647,7 @@ highlights = {
 -- Override character colors explicitly
 highlights = {
   line_insert = "DiffAdd",
+  line_change = "DiffChange",
   line_delete = "DiffDelete",
   char_insert = "#3fb950",
   char_delete = "#ff7b72",
@@ -651,6 +656,7 @@ highlights = {
 -- Mix highlight groups and hex colors
 highlights = {
   line_insert = "String",
+  line_change = "DiffChange",
   char_delete = "#ff0000",
 }
 ```

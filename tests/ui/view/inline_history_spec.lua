@@ -111,12 +111,12 @@ describe("Inline diff with history-like configurations", function()
     local marks = vim.api.nvim_buf_get_extmarks(mod_buf, inline.ns_inline, 0, -1, { details = true })
 
     -- Should have extmarks for the changes (insert highlights, virtual lines for deletes)
-    local has_insert_hl = false
+    local has_line_hl = false
     local has_virt_lines = false
     for _, mark in ipairs(marks) do
       local details = mark[4]
-      if details.hl_group == "CodeDiffLineInsert" then
-        has_insert_hl = true
+      if details.hl_group == "CodeDiffLineInsert" or details.hl_group == "CodeDiffLineChange" then
+        has_line_hl = true
       end
       if details.virt_lines and #details.virt_lines > 0 then
         has_virt_lines = true
@@ -124,7 +124,7 @@ describe("Inline diff with history-like configurations", function()
     end
 
     -- We expect at least insert highlights for the changed/added lines
-    assert.is_true(has_insert_hl, "Should have CodeDiffLineInsert extmarks for changed lines")
+    assert.is_true(has_line_hl, "Should have inline line highlights for changed lines")
     -- The modification of "line 2" -> "line 2 changed" should produce virtual lines showing the old text
     assert.is_true(has_virt_lines, "Should have virtual lines for deleted/modified original text")
 
@@ -271,15 +271,15 @@ describe("Inline diff with history-like configurations", function()
     local _, mod_buf = lifecycle.get_buffers(tabpage)
     if mod_buf and vim.api.nvim_buf_is_valid(mod_buf) then
       local marks = vim.api.nvim_buf_get_extmarks(mod_buf, inline.ns_inline, 0, -1, { details = true })
-      local has_insert_hl = false
+      local has_line_hl = false
       for _, mark in ipairs(marks) do
         local details = mark[4]
-        if details.hl_group == "CodeDiffLineInsert" then
-          has_insert_hl = true
+        if details.hl_group == "CodeDiffLineInsert" or details.hl_group == "CodeDiffLineChange" then
+          has_line_hl = true
           break
         end
       end
-      assert.is_true(has_insert_hl, "Updated view should have inline diff extmarks for new changes")
+      assert.is_true(has_line_hl, "Updated view should have inline diff extmarks for new changes")
     end
 
     vim.fn.delete(left_path)

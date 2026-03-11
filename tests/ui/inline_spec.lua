@@ -5,6 +5,18 @@ local inline = require("codediff.ui.inline")
 local highlights = require("codediff.ui.highlights")
 local diff = require("codediff.core.diff")
 
+local function has_highlight(bufnr, hl_group)
+  local marks = vim.api.nvim_buf_get_extmarks(bufnr, inline.ns_inline, 0, -1, { details = true })
+
+  for _, mark in ipairs(marks) do
+    if mark[4].hl_group == hl_group then
+      return true
+    end
+  end
+
+  return false
+end
+
 describe("Inline Diff Rendering", function()
   before_each(function()
     highlights.setup()
@@ -23,16 +35,8 @@ describe("Inline Diff Rendering", function()
     inline.render_inline_diff(buf, lines_diff, original, modified)
 
     -- Added line should have highlight extmark
-    local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
-    local has_insert_hl = false
-    for _, mark in ipairs(marks) do
-      local details = mark[4]
-      if details.hl_group == "CodeDiffLineInsert" then
-        has_insert_hl = true
-        break
-      end
-    end
-    assert.is_true(has_insert_hl, "Added line should have CodeDiffLineInsert highlight")
+    assert.is_true(has_highlight(buf, "CodeDiffLineInsert"), "Added line should have CodeDiffLineInsert highlight")
+    assert.is_false(has_highlight(buf, "CodeDiffLineChange"), "Added line should not have CodeDiffLineChange highlight")
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
@@ -68,7 +72,7 @@ describe("Inline Diff Rendering", function()
   end)
 
   -- Test 3: Modified lines get both virtual lines and highlights
-  it("renders modified lines with both delete virt_lines and insert highlights", function()
+  it("renders modified lines with both delete virt_lines and change highlights", function()
     local buf = vim.api.nvim_create_buf(false, true)
 
     local original = { "line 1", "old content", "line 3" }
@@ -82,20 +86,17 @@ describe("Inline Diff Rendering", function()
     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
 
     local has_virt_lines = false
-    local has_insert_hl = false
 
     for _, mark in ipairs(marks) do
       local details = mark[4]
       if details.virt_lines and #details.virt_lines > 0 then
         has_virt_lines = true
       end
-      if details.hl_group == "CodeDiffLineInsert" then
-        has_insert_hl = true
-      end
     end
 
     assert.is_true(has_virt_lines, "Modified line should have virtual line showing original")
-    assert.is_true(has_insert_hl, "Modified line should have insert highlight")
+    assert.is_true(has_highlight(buf, "CodeDiffLineChange"), "Modified line should have change highlight")
+    assert.is_false(has_highlight(buf, "CodeDiffLineInsert"), "Modified line should not have insert highlight")
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
@@ -192,13 +193,13 @@ describe("Inline Diff Rendering", function()
       if details.virt_lines then
         virt_line_count = virt_line_count + 1
       end
-      if details.hl_group == "CodeDiffLineInsert" then
+      if details.hl_group == "CodeDiffLineChange" then
         hl_count = hl_count + 1
       end
     end
 
     assert.is_true(virt_line_count >= 2, "Should have virtual lines for at least 2 hunks")
-    assert.is_true(hl_count >= 2, "Should have insert highlights for at least 2 hunks")
+    assert.is_true(hl_count >= 2, "Should have change highlights for at least 2 hunks")
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
