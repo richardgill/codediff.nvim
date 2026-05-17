@@ -5,6 +5,7 @@ local accessors = require("codediff.ui.lifecycle.accessors")
 local session = require("codediff.ui.lifecycle.session")
 local state = require("codediff.ui.lifecycle.state")
 local welcome_window = require("codediff.ui.view.welcome_window")
+local compat = require("codediff.core.compat")
 
 -- Autocmd group for cleanup
 local augroup = vim.api.nvim_create_augroup("codediff_lifecycle", { clear = true })
@@ -66,18 +67,14 @@ local function cleanup_diff(tabpage)
   for _, client in ipairs(clients) do
     if client.server_capabilities.semanticTokensProvider then
       if original_virtual_uri then
-        pcall(function()
-          client:notify("textDocument/didClose", {
-            textDocument = { uri = original_virtual_uri },
-          })
-        end)
+        pcall(compat.lsp_notify, client, "textDocument/didClose", {
+          textDocument = { uri = original_virtual_uri },
+        })
       end
       if modified_virtual_uri then
-        pcall(function()
-          client:notify("textDocument/didClose", {
-            textDocument = { uri = modified_virtual_uri },
-          })
-        end)
+        pcall(compat.lsp_notify, client, "textDocument/didClose", {
+          textDocument = { uri = modified_virtual_uri },
+        })
       end
     end
   end
