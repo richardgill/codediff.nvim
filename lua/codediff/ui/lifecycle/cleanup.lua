@@ -212,6 +212,22 @@ function M.setup_autocmds()
       end
     end,
   })
+
+  -- Re-pin panel widths on terminal/tmux resize for every active diff session
+  -- (see issue #346). VimResized is editor-global, so one autocmd handles all
+  -- tabs; layout.arrange() is a no-op for tabs without a session.
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = augroup,
+    callback = function()
+      local ok_l, layout = pcall(require, "codediff.ui.layout")
+      if not ok_l then
+        return
+      end
+      for tabpage, _ in pairs(session.get_active_diffs()) do
+        pcall(layout.arrange, tabpage)
+      end
+    end,
+  })
 end
 
 -- Manual cleanup function (can be called explicitly)
