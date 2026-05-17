@@ -198,6 +198,7 @@ Setup entry point:
     },
     explorer = {
       position = "left",
+      hidden = false,
       width = 40,
       height = 15,
       indent_markers = true,
