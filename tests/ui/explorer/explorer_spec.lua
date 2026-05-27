@@ -18,6 +18,41 @@ local function setup_command()
   })
 end
 
+-- Open a fresh CodeDiff explorer for `focus_file` and return (tabpage, explorer).
+-- Earlier tests leave sessions and pending vim.schedule callbacks in the
+-- lifecycle singleton, so flush + cleanup first, then pick up the explorer
+-- created by THIS :CodeDiff (the one whose buffer carries the auto-open autocmd).
+local function open_explorer(temp_dir, focus_file)
+  local lifecycle = require("codediff.ui.lifecycle")
+  -- Let any pending async from a prior test settle, then drop stale sessions.
+  vim.wait(200)
+  lifecycle.cleanup_all()
+
+  vim.cmd("edit " .. temp_dir .. "/" .. focus_file)
+  vim.cmd("CodeDiff")
+
+  local tabpage, explorer
+  local ready = vim.wait(6000, function()
+    for _, tp in ipairs(vim.api.nvim_list_tabpages()) do
+      local e = lifecycle.get_explorer(tp)
+      if e and e.winid and vim.api.nvim_win_is_valid(e.winid)
+          and e.bufnr and vim.api.nvim_buf_is_valid(e.bufnr)
+          and e.current_file_path ~= nil then
+        -- Pick the explorer wired with the auto-open autocmd; leftover
+        -- explorers from prior tests (default config) lack it.
+        local autocmds = vim.api.nvim_get_autocmds({ event = "CursorMoved", buffer = e.bufnr })
+        if #autocmds > 0 then
+          tabpage = tp
+          explorer = e
+          return true
+        end
+      end
+    end
+    return false
+  end, 50)
+  return ready, tabpage, explorer
+end
+
 describe("Explorer Mode", function()
   local temp_dir
   local original_cwd
@@ -441,6 +476,101 @@ describe("Explorer Mode", function()
     vim.fn.delete(non_git_dir, "rf")
     
     assert.is_true(notified, "Should notify for non-git directory")
+  end)
+
+  -- Test: auto_open_on_cursor opens the file under cursor when navigating with j/k
+  it("Auto-opens diff under cursor when auto_open_on_cursor is enabled", function()
+    require("codediff").setup({
+      diff = { layout = "side-by-side" },
+      explorer = { auto_open_on_cursor = true, auto_open_debounce_ms = 20 },
+    })
+
+    local ready, tabpage, explorer = open_explorer(temp_dir, "file1.txt")
+    assert.is_true(ready, "Explorer should be ready with an initial selection")
+    -- Ensure the explorer's tab is current so cursor movement targets it
+    vim.api.nvim_set_current_tabpage(tabpage)
+
+    local initial_path = explorer.current_file_path
+    local initial_group = explorer.current_file_group
+
+    -- Find a file node on a different line than the current selection
+    local target_line, target_path, target_group
+    local line_count = vim.api.nvim_buf_line_count(explorer.bufnr)
+    for line = 1, line_count do
+      local node = explorer.tree:get_node(line)
+      if node and node.data then
+        local t = node.data.type
+        if t ~= "group" and t ~= "directory" then
+          if node.data.path ~= initial_path or node.data.group ~= initial_group then
+            target_line = line
+            target_path = node.data.path
+            target_group = node.data.group
+            break
+          end
+        end
+      end
+    end
+    assert.is_not_nil(target_line, "Should find a second file node to navigate to")
+
+    -- Move the cursor onto the target file's line, then fire CursorMoved.
+    -- nvim_win_set_cursor does not emit CursorMoved in headless tests, so we
+    -- trigger it explicitly to simulate j/k navigation.
+    vim.api.nvim_set_current_win(explorer.winid)
+    vim.api.nvim_win_set_cursor(explorer.winid, { target_line, 0 })
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = explorer.bufnr })
+
+    -- Wait for the debounced CursorMoved handler to fire on_file_select
+    local opened = vim.wait(2000, function()
+      return explorer.current_file_path == target_path
+        and explorer.current_file_group == target_group
+    end, 20)
+    assert.is_true(opened, "Cursor movement on a file node should auto-open its diff")
+  end)
+
+  it("Ignores cursor moves over group/directory nodes when auto_open_on_cursor is enabled", function()
+    require("codediff").setup({
+      diff = { layout = "side-by-side" },
+      explorer = {
+        auto_open_on_cursor = true,
+        auto_open_debounce_ms = 20,
+        view_mode = "tree", -- ensure directory nodes are present
+      },
+    })
+
+    -- Add a nested file so the tree has a directory node
+    vim.fn.mkdir(temp_dir .. "/nested", "p")
+    vim.fn.writefile({"deep"}, temp_dir .. "/nested/deep.txt")
+
+    local ready, tabpage, explorer = open_explorer(temp_dir, "file1.txt")
+    assert.is_true(ready, "Explorer should be ready")
+    -- Ensure the explorer's tab is current so cursor movement targets it
+    vim.api.nvim_set_current_tabpage(tabpage)
+
+    local initial_path = explorer.current_file_path
+    local initial_group = explorer.current_file_group
+
+    -- Find a group or directory line
+    local skip_line
+    local line_count = vim.api.nvim_buf_line_count(explorer.bufnr)
+    for line = 1, line_count do
+      local node = explorer.tree:get_node(line)
+      if node and node.data and (node.data.type == "group" or node.data.type == "directory") then
+        skip_line = line
+        break
+      end
+    end
+    assert.is_not_nil(skip_line, "Should find a group/directory node line")
+
+    vim.api.nvim_set_current_win(explorer.winid)
+    vim.api.nvim_win_set_cursor(explorer.winid, { skip_line, 0 })
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = explorer.bufnr })
+
+    -- Wait past the debounce window and verify selection did NOT change
+    vim.wait(150)
+    assert.equals(initial_path, explorer.current_file_path,
+      "Group/directory nodes should not trigger auto-open")
+    assert.equals(initial_group, explorer.current_file_group,
+      "Group/directory nodes should not change current group")
   end)
 
   -- Test 10: Commands.lua simplicity (no callbacks in commands)
