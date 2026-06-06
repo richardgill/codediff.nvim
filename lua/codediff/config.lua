@@ -44,6 +44,7 @@ M.defaults = {
     jump_to_first_change = true, -- Auto-scroll to first change when opening a diff: true = jump to first hunk, false = stay at same line
     highlight_priority = 100, -- Priority for line-level diff highlights (increase to override LSP highlights)
     compute_moves = false, -- Detect moved code blocks (opt-in, may increase diff computation time)
+    compact_context_lines = 3, -- Number of context lines around hunks in compact mode
   },
 
   -- Explorer panel configuration
@@ -104,6 +105,7 @@ M.defaults = {
       hunk_textobject = "ih", -- Textobject for hunk (vih to select, yih to yank, etc.)
       align_move = "gm", -- Temporarily align other pane to show paired moved code
       toggle_layout = "t", -- Toggle diff layout for the current codediff session
+      toggle_compact = "gc", -- Toggle compact mode (fold unchanged regions, show only hunks + context)
       show_help = "g?", -- Show floating window with available keymaps
     },
     explorer = {

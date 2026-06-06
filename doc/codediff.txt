@@ -195,6 +195,7 @@ Setup entry point:
       jump_to_first_change = true,
       highlight_priority = 100,
       compute_moves = false,
+      compact_context_lines = 3,
     },
     explorer = {
       position = "left",
@@ -238,6 +239,7 @@ Setup entry point:
         show_help = "g?",
         align_move = "gm",
         toggle_layout = "t",
+        toggle_compact = "gc",
       },
       explorer = {
         select = "<CR>",
