@@ -285,14 +285,13 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     -- For virtual buffers, resolve the real file on disk
     local target_file
     if is_virtual then
-      local original_path, modified_path = lifecycle.get_paths(tabpage)
-      local rel_path = side == "original" and original_path or modified_path
-      if not rel_path or rel_path == "" then
+      local original, modified = lifecycle.get_paths(tabpage)
+      local ref = side == "original" and original or modified
+      if not ref or ref.absolute == "" then
         vim.notify("Buffer has no associated file path", vim.log.levels.WARN)
         return
       end
-      local git_root = session.git_root
-      target_file = git_root .. "/" .. rel_path
+      target_file = ref.absolute
     else
       target_file = vim.api.nvim_buf_get_name(current_buf)
       if target_file == "" then
@@ -418,7 +417,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     end
 
     -- Get the file path relative to git root
-    local file_path = session.original_path or session.modified_path
+    local file_path = (session.original.relative ~= "" and session.original.relative) or session.modified.relative
     if not file_path or file_path == "" then
       vim.notify("No file path for staging", vim.log.levels.WARN)
       return
@@ -466,7 +465,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return
     end
 
-    local file_path = session.original_path or session.modified_path
+    local file_path = (session.original.relative ~= "" and session.original.relative) or session.modified.relative
     if not file_path or file_path == "" then
       vim.notify("No file path for unstaging", vim.log.levels.WARN)
       return
@@ -514,7 +513,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return
     end
 
-    local file_path = session.original_path or session.modified_path
+    local file_path = (session.original.relative ~= "" and session.original.relative) or session.modified.relative
     if not file_path or file_path == "" then
       vim.notify("No file path for discarding", vim.log.levels.WARN)
       return

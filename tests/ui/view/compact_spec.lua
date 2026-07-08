@@ -10,6 +10,7 @@ local view = require("codediff.ui.view")
 local lifecycle = require("codediff.ui.lifecycle")
 local diff = require("codediff.core.diff")
 local highlights = require("codediff.ui.highlights")
+local path = require("codediff.core.path")
 
 local function get_temp_path(name)
   local is_win = vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1
@@ -30,8 +31,8 @@ local function create_session(original, modified)
   view.create({
     mode = "standalone",
     git_root = nil,
-    original_path = left,
-    modified_path = right,
+    original = path.make_ref(left, nil),
+    modified = path.make_ref(right, nil),
     original_revision = nil,
     modified_revision = nil,
   }, "", function() ready = true end)

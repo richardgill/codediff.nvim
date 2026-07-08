@@ -2,6 +2,7 @@
 -- This tests buffer management during file switching in explorer mode
 
 local h = dofile('tests/helpers.lua')
+local path = require("codediff.core.path")
 
 -- Ensure plugin is loaded (needed for PlenaryBustedFile subprocess)
 h.ensure_plugin_loaded()
@@ -107,8 +108,8 @@ describe("Explorer Buffer Management", function()
     local config_changes = {
       mode = "standalone",
       git_root = repo.dir,
-      original_path = 'test.txt',
-      modified_path = repo.path('test.txt'),
+      original = path.make_ref('test.txt', repo.dir),
+      modified = path.make_ref(repo.path('test.txt'), repo.dir),
       original_revision = ":0",
       modified_revision = "WORKING",
     }
@@ -136,8 +137,8 @@ describe("Explorer Buffer Management", function()
     local config_staged = {
       mode = "standalone",
       git_root = repo.dir,
-      original_path = 'test.txt',
-      modified_path = 'test.txt',
+      original = path.make_ref('test.txt', repo.dir),
+      modified = path.make_ref('test.txt', repo.dir),
       original_revision = "HEAD",
       modified_revision = ":0",
     }

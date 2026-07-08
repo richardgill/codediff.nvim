@@ -8,6 +8,7 @@ local diff = require("codediff.core.diff")
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
 local inline = require("codediff.ui.inline")
+local path = require("codediff.core.path")
 
 local ns_inline = vim.api.nvim_create_namespace("codediff-inline")
 
@@ -37,8 +38,8 @@ local function create_explorer_placeholder(temp_dir)
   local session_config = {
     mode = "explorer",
     git_root = temp_dir,
-    original_path = "",
-    modified_path = "",
+    original = path.make_ref("", temp_dir),
+    modified = path.make_ref("", temp_dir),
     explorer_data = { status_result = status_result },
   }
   local result = view.create(session_config)
@@ -51,8 +52,8 @@ local function create_inline_diff_view(original_lines, modified_lines, left_path
   local session_config = {
     mode = "standalone",
     git_root = nil,
-    original_path = left_path,
-    modified_path = right_path,
+    original = path.make_ref(left_path, nil),
+    modified = path.make_ref(right_path, nil),
     original_revision = nil,
     modified_revision = nil,
   }
@@ -109,8 +110,7 @@ describe("Inline diff with explorer", function()
     assert.equal(1, #diff_wins, "Inline layout should have exactly 1 diff window (not 2)")
 
     -- Both original_win and modified_win should point to the same window
-    assert.equal(session.original_win, session.modified_win,
-      "In inline mode, original_win and modified_win should be the same window")
+    assert.equal(session.original_win, session.modified_win, "In inline mode, original_win and modified_win should be the same window")
 
     -- Result should contain buffers
     assert.is_not_nil(result, "create() should return a result")
@@ -158,8 +158,8 @@ describe("Inline diff with explorer", function()
     local update_config = {
       mode = "standalone",
       git_root = nil,
-      original_path = left_b,
-      modified_path = right_b,
+      original = path.make_ref(left_b, nil),
+      modified = path.make_ref(right_b, nil),
       original_revision = nil,
       modified_revision = nil,
     }
@@ -170,9 +170,11 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(300, function()
       local s = lifecycle.get_session(tabpage)
-      if not s then return false end
+      if not s then
+        return false
+      end
       -- Check that buffers have changed or diff result updated
-      return s.modified_bufnr ~= mod_buf_a or s.modified_path == right_b
+      return s.modified_bufnr ~= mod_buf_a or s.modified.absolute == right_b
     end, 20)
 
     -- Old buffer extmarks should be cleared
@@ -221,13 +223,13 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(200, function()
       local session = lifecycle.get_session(tabpage)
-      return session and session.modified_path == untracked_path
+      return session and session.modified.absolute == untracked_path
     end, 20)
 
     -- Verify: session updated to point at the file
     local session = lifecycle.get_session(tabpage)
     assert.is_not_nil(session, "Session should exist")
-    assert.equal(untracked_path, session.modified_path, "modified_path should be the untracked file")
+    assert.equal(untracked_path, session.modified.absolute, "modified path should be the untracked file")
 
     -- Verify: the buffer should contain the file content
     local mod_buf = session.modified_bufnr
@@ -243,8 +245,7 @@ describe("Inline diff with explorer", function()
     -- Verify: diff result should be empty
     assert.is_not_nil(session.stored_diff_result, "stored_diff_result should exist")
     if session.stored_diff_result.changes then
-      assert.equal(0, #session.stored_diff_result.changes,
-        "Untracked file should have no diff changes")
+      assert.equal(0, #session.stored_diff_result.changes, "Untracked file should have no diff changes")
     end
 
     -- Cleanup
@@ -269,14 +270,13 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(200, function()
       local s = lifecycle.get_session(tabpage)
-      return s and s.modified_path == untracked_path
+      return s and s.modified.absolute == untracked_path
     end, 20)
 
     -- Verify no extmarks after single file
     local session_single = lifecycle.get_session(tabpage)
     local single_buf = session_single.modified_bufnr
-    assert.equal(0, count_inline_extmarks(single_buf),
-      "Single file should have no inline extmarks")
+    assert.equal(0, count_inline_extmarks(single_buf), "Single file should have no inline extmarks")
 
     -- Now switch to a diff (simulates selecting a modified file in explorer)
     local orig_lines = { "hello", "world" }
@@ -289,8 +289,8 @@ describe("Inline diff with explorer", function()
     local update_config = {
       mode = "explorer",
       git_root = temp_dir,
-      original_path = orig_path,
-      modified_path = mod_path,
+      original = path.make_ref(orig_path, temp_dir),
+      modified = path.make_ref(mod_path, temp_dir),
       original_revision = nil,
       modified_revision = nil,
     }
@@ -301,8 +301,12 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(500, function()
       local s = lifecycle.get_session(tabpage)
-      if not s then return false end
-      if not vim.api.nvim_buf_is_valid(s.modified_bufnr) then return false end
+      if not s then
+        return false
+      end
+      if not vim.api.nvim_buf_is_valid(s.modified_bufnr) then
+        return false
+      end
       return count_inline_extmarks(s.modified_bufnr) > 0
     end, 20)
 
@@ -313,8 +317,7 @@ describe("Inline diff with explorer", function()
     assert.is_true(vim.api.nvim_buf_is_valid(diff_buf), "Diff buffer should be valid")
 
     local marks = count_inline_extmarks(diff_buf)
-    assert.is_true(marks > 0,
-      "Should have inline extmarks after switching back to diff (got " .. marks .. ")")
+    assert.is_true(marks > 0, "Should have inline extmarks after switching back to diff (got " .. marks .. ")")
 
     -- Cleanup
     vim.fn.delete(untracked_path)
@@ -339,7 +342,7 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(200, function()
       local s = lifecycle.get_session(tabpage)
-      return s and s.modified_path == file_path
+      return s and s.modified.absolute == file_path
     end, 20)
 
     local session_first = lifecycle.get_session(tabpage)
@@ -358,9 +361,11 @@ describe("Inline diff with explorer", function()
     end
 
     local session_after = lifecycle.get_session(tabpage)
-    assert.equal(bufnr_first, session_after.modified_bufnr,
-      "Repeated show_single_file should not change modified_bufnr (got "
-        .. tostring(session_after.modified_bufnr) .. ", expected " .. tostring(bufnr_first) .. ")")
+    assert.equal(
+      bufnr_first,
+      session_after.modified_bufnr,
+      "Repeated show_single_file should not change modified_bufnr (got " .. tostring(session_after.modified_bufnr) .. ", expected " .. tostring(bufnr_first) .. ")"
+    )
 
     vim.fn.delete(file_path)
   end)
@@ -407,7 +412,7 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(500, function()
       local s = lifecycle.get_session(tabpage)
-      return s and s.modified_revision == ":0" and s.modified_path == rel
+      return s and s.modified_revision == ":0" and s.modified.relative == rel
     end, 20)
 
     local session_first = lifecycle.get_session(tabpage)
@@ -427,9 +432,15 @@ describe("Inline diff with explorer", function()
     end
 
     local session_after = lifecycle.get_session(tabpage)
-    assert.equal(bufnr_first, session_after.modified_bufnr,
+    assert.equal(
+      bufnr_first,
+      session_after.modified_bufnr,
       "Staged virtual file: bufnr must stay stable across repeated show_single_file calls (got "
-        .. tostring(session_after.modified_bufnr) .. ", expected " .. tostring(bufnr_first) .. ")")
+        .. tostring(session_after.modified_bufnr)
+        .. ", expected "
+        .. tostring(bufnr_first)
+        .. ")"
+    )
 
     vim.fn.delete(repo, "rf")
   end)
