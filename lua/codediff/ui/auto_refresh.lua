@@ -289,7 +289,7 @@ local function do_result_diff_update(bufnr)
     return
   end
 
-  -- Render highlights on result buffer only (modified side = insertions shown as green)
+  -- Render highlights on result buffer only
   core.render_single_buffer(bufnr, lines_diff, "modified")
 end
 

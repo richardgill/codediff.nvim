@@ -100,10 +100,14 @@ function M.setup()
   local opts = config.options.highlights
 
   -- Line-level highlights
+  local diff_change_hl = vim.api.nvim_get_hl(0, { name = "DiffChange", link = false })
+  local diff_change_bg = effective_bg(diff_change_hl)
   local line_insert_color = resolve_color(opts.line_insert, 0x1d3042, base256_color(0, 1, 0))
+  local line_change_color = resolve_color(opts.line_change, diff_change_bg or 0x24384f, base256_color(0, 0, 2))
   local line_delete_color = resolve_color(opts.line_delete, 0x351d2b, base256_color(1, 0, 0))
 
   vim.api.nvim_set_hl(0, "CodeDiffLineInsert", line_insert_color)
+  vim.api.nvim_set_hl(0, "CodeDiffLineChange", line_change_color)
   vim.api.nvim_set_hl(0, "CodeDiffLineDelete", line_delete_color)
 
   -- Character-level highlights: use explicit values if provided, otherwise derive from line highlights
@@ -139,8 +143,7 @@ function M.setup()
   vim.api.nvim_set_hl(0, "CodeDiffCharDelete", char_delete_color)
 
   -- Moved code highlights (derived from DiffChange — the standard "changed" color)
-  local diff_change_hl = vim.api.nvim_get_hl(0, { name = "DiffChange", link = false })
-  local move_fallback = effective_bg(diff_change_hl) or 0x4f5258
+  local move_fallback = diff_change_bg or 0x4f5258
   local line_move_color = resolve_color(opts.line_move, move_fallback, base256_color(0, 0, 2))
   vim.api.nvim_set_hl(0, "CodeDiffLineMove", line_move_color)
 

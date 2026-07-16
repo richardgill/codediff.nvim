@@ -112,11 +112,15 @@ describe("Inline diff with history-like configurations", function()
 
     -- Should have extmarks for the changes (insert highlights, virtual lines for deletes)
     local has_insert_hl = false
+    local has_change_hl = false
     local has_virt_lines = false
     for _, mark in ipairs(marks) do
       local details = mark[4]
       if details.hl_group == "CodeDiffLineInsert" then
         has_insert_hl = true
+      end
+      if details.hl_group == "CodeDiffLineChange" then
+        has_change_hl = true
       end
       if details.virt_lines and #details.virt_lines > 0 then
         has_virt_lines = true
@@ -124,7 +128,8 @@ describe("Inline diff with history-like configurations", function()
     end
 
     -- We expect at least insert highlights for the changed/added lines
-    assert.is_true(has_insert_hl, "Should have CodeDiffLineInsert extmarks for changed lines")
+    assert.is_true(has_insert_hl, "Added lines should use CodeDiffLineInsert")
+    assert.is_true(has_change_hl, "Changed lines should use CodeDiffLineChange")
     -- The modification of "line 2" -> "line 2 changed" should produce virtual lines showing the old text
     assert.is_true(has_virt_lines, "Should have virtual lines for deleted/modified original text")
 
@@ -272,14 +277,18 @@ describe("Inline diff with history-like configurations", function()
     if mod_buf and vim.api.nvim_buf_is_valid(mod_buf) then
       local marks = vim.api.nvim_buf_get_extmarks(mod_buf, inline.ns_inline, 0, -1, { details = true })
       local has_insert_hl = false
+      local has_change_hl = false
       for _, mark in ipairs(marks) do
         local details = mark[4]
         if details.hl_group == "CodeDiffLineInsert" then
           has_insert_hl = true
-          break
+        end
+        if details.hl_group == "CodeDiffLineChange" then
+          has_change_hl = true
         end
       end
-      assert.is_true(has_insert_hl, "Updated view should have inline diff extmarks for new changes")
+      assert.is_true(has_insert_hl, "Updated added lines should use CodeDiffLineInsert")
+      assert.is_true(has_change_hl, "Updated changed lines should use CodeDiffLineChange")
     end
 
     vim.fn.delete(left_path)

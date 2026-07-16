@@ -175,6 +175,7 @@ Setup entry point:
   require("codediff").setup({
     highlights = {
       line_insert = "DiffAdd",
+      line_change = "DiffChange",
       line_delete = "DiffDelete",
       char_insert = nil,
       char_delete = nil,
@@ -294,6 +295,7 @@ HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
 
 CodeDiff defines highlight groups matching VSCode's diff colors:
 - CodeDiffLineInsert - light green background for inserted lines
+- CodeDiffLineChange - background for modified lines on the modified side
 - CodeDiffLineDelete - light red background for deleted lines
 - CodeDiffCharInsert - deep/dark green for inserted characters
 - CodeDiffCharDelete - deep/dark red for deleted characters
@@ -308,7 +310,7 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
 - CodeDiffHelpDesc - descriptions in keymap help (links to Normal)
 
 Default behavior:
-- Uses DiffAdd and DiffDelete for line-level highlights
+- Uses DiffAdd, DiffChange, and DiffDelete for line-level highlights
 - Added and untracked files use line_insert across the full file
 - Deleted files use line_delete across the full file
 - Set diff.highlight_added_deleted_files = false to disable full-file highlighting
@@ -320,12 +322,14 @@ Customization examples:
 >lua
   highlights = {
     line_insert = "#1d3042",
+    line_change = "#24384f",
     line_delete = "#351d2b",
     char_brightness = 1.5,
   }
 
   highlights = {
     line_insert = "DiffAdd",
+    line_change = "DiffChange",
     line_delete = "DiffDelete",
     char_insert = "#3fb950",
     char_delete = "#ff7b72",
