@@ -112,8 +112,7 @@ function M.create_file_nodes(files, git_root, group)
   return nodes
 end
 
--- Create tree nodes with directory hierarchy (tree mode)
-function M.create_tree_file_nodes(files, git_root, group)
+local function build_directory_tree(files)
   -- Build directory structure
   local dir_tree = {}
 
@@ -140,30 +139,72 @@ function M.create_tree_file_nodes(files, git_root, group)
     }
   end
 
-  -- Flatten single-child directory chains (e.g., src/ -> components/ -> ui/ becomes src/components/ui/)
-  local function flatten_tree(subtree)
-    for key, item in pairs(subtree) do
-      if item._is_dir then
-        flatten_tree(item._children)
-        -- Check if this dir has exactly one child and it's a directory
-        local children_keys = {}
-        for k in pairs(item._children) do
-          children_keys[#children_keys + 1] = k
-        end
-        if #children_keys == 1 and item._children[children_keys[1]]._is_dir then
-          local child_key = children_keys[1]
-          local child = item._children[child_key]
-          local merged_key = key .. "/" .. child_key
-          subtree[merged_key] = child
-          subtree[key] = nil
-        end
+  return dir_tree
+end
+
+-- A directory can flatten only when its sole child is another directory.
+local function get_single_directory_child(subtree)
+  local child_key
+  local child_count = 0
+  for key, child in pairs(subtree) do
+    child_count = child_count + 1
+    if child_count > 1 or not child._is_dir then
+      return nil
+    end
+    child_key = key
+  end
+  return child_key
+end
+
+-- Record flattening decisions from the union of every status group.
+local function mark_flattenable_paths(subtree, parent_path, flattenable_paths)
+  for key, item in pairs(subtree) do
+    if item._is_dir then
+      local full_path = parent_path ~= "" and (parent_path .. "/" .. key) or key
+      mark_flattenable_paths(item._children, full_path, flattenable_paths)
+      if get_single_directory_child(item._children) then
+        flattenable_paths[full_path] = true
       end
     end
   end
+end
 
+-- Shared paths keep the same directory boundaries when files move between groups.
+function M.get_flattenable_paths(files)
+  local flattenable_paths = {}
+  mark_flattenable_paths(build_directory_tree(files), "", flattenable_paths)
+  return flattenable_paths
+end
+
+-- Flatten single-child directory chains (e.g., src/ -> components/ -> ui/ becomes src/components/ui/)
+local function flatten_tree(subtree, parent_path, flattenable_paths)
+  -- Build a new table instead of adding/removing keys during pairs() traversal.
+  local flattened = {}
+  for key, item in pairs(subtree) do
+    if item._is_dir then
+      local full_path = parent_path ~= "" and (parent_path .. "/" .. key) or key
+      item._children = flatten_tree(item._children, full_path, flattenable_paths)
+      -- Check if this dir has exactly one child and it's a directory
+      local child_key = get_single_directory_child(item._children)
+      if child_key and flattenable_paths[full_path] then
+        flattened[key .. "/" .. child_key] = item._children[child_key]
+      else
+        flattened[key] = item
+      end
+    else
+      flattened[key] = item
+    end
+  end
+  return flattened
+end
+
+-- Create tree nodes with directory hierarchy (tree mode)
+function M.create_tree_file_nodes(files, git_root, group, flattenable_paths)
+  local dir_tree = build_directory_tree(files)
   local explorer_config = config.options.explorer or {}
   if explorer_config.flatten_dirs ~= false then
-    flatten_tree(dir_tree)
+    local flatten_paths = flattenable_paths or M.get_flattenable_paths(files)
+    dir_tree = flatten_tree(dir_tree, "", flatten_paths)
   end
 
   -- Convert to Tree.Node recursively

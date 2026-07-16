@@ -28,10 +28,19 @@ function M.create_tree_data(status_result, git_root, base_revision, is_dir_mode,
   local staged = nodes.filter_merge_artifacts(filter_files(status_result.staged))
   local conflicts = status_result.conflicts and nodes.filter_merge_artifacts(filter_files(status_result.conflicts)) or {}
 
+  -- Decide flattening from all files once, then apply the same boundaries to every group.
+  local flattenable_paths
+  if view_mode == "tree" and explorer_config.flatten_dirs ~= false then
+    local all_files = vim.list_extend({}, unstaged)
+    vim.list_extend(all_files, staged)
+    vim.list_extend(all_files, conflicts)
+    flattenable_paths = nodes.get_flattenable_paths(all_files)
+  end
+
   local create_nodes = (view_mode == "tree") and nodes.create_tree_file_nodes or nodes.create_file_nodes
-  local unstaged_nodes = create_nodes(unstaged, git_root, "unstaged")
-  local staged_nodes = create_nodes(staged, git_root, "staged")
-  local conflict_nodes = create_nodes(conflicts, git_root, "conflicts")
+  local unstaged_nodes = create_nodes(unstaged, git_root, "unstaged", flattenable_paths)
+  local staged_nodes = create_nodes(staged, git_root, "staged", flattenable_paths)
+  local conflict_nodes = create_nodes(conflicts, git_root, "conflicts", flattenable_paths)
 
   if is_dir_mode or base_revision then
     -- Dir or revision mode: single group showing all changes
