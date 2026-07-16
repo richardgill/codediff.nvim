@@ -64,7 +64,8 @@ function M.create_session(
   original_win,
   modified_win,
   lines_diff,
-  reapply_keymaps
+  reapply_keymaps,
+  exit_on_close
 )
   local state = require("codediff.ui.lifecycle.state")
   -- Save buffer states
@@ -91,6 +92,7 @@ function M.create_session(
 
     -- Lifecycle state
     layout = "side-by-side",
+    exit_on_close = exit_on_close == true,
     suspended = false,
     stored_diff_result = lines_diff,
     changedtick = {
