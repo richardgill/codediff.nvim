@@ -440,7 +440,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
 
     -- Step 2: Highlight added/modified lines on the real buffer
     if has_modified then
-      local hl_group = has_original and "CodeDiffLineInsert" or "CodeDiffLineInsert"
+      local hl_group = has_original and "CodeDiffLineChange" or "CodeDiffLineInsert"
 
       for line = mod_start, mod_end - 1 do
         if line > buf_line_count then
