@@ -86,7 +86,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
     -- Diff view behavior
     diff = {
       layout = "side-by-side",             -- Diff layout: "side-by-side" (two panes) or "inline" (single pane with virtual lines)
-      window_options = nil,                 -- Optional callback returning window-local options for diff panes
+      window_options = nil,               -- Optional callback returning window-local options for diff panes
       disable_inlay_hints = true,         -- Disable inlay hints in diff windows for cleaner view
       max_computation_time_ms = 5000,     -- Maximum time for diff computation (VSCode default)
       ignore_trim_whitespace = false,     -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
