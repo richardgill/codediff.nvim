@@ -4,6 +4,7 @@
 local layout = require("codediff.ui.layout")
 local lifecycle = require("codediff.ui.lifecycle")
 local config = require("codediff.config")
+local highlights = require("codediff.ui.highlights")
 local path = require("codediff.core.path")
 
 -- Tolerance for width assertions (Neovim may round or add separators)
@@ -14,6 +15,12 @@ local function assert_width_near(expected, actual, msg)
     math.abs(expected - actual) <= WIDTH_TOLERANCE,
     (msg or "") .. " expected ~" .. expected .. " got " .. actual
   )
+end
+
+local function assert_whole_file_highlight(bufnr, expected_group)
+  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
+  assert.are.equal(1, #marks, "Buffer should have one whole-file highlight")
+  assert.are.equal(expected_group, marks[1][4].hl_group)
 end
 
 -- Create a mock session in lifecycle so layout.arrange() can read it
@@ -930,10 +937,8 @@ describe("Layout Manager", function()
     assert.is_true(vim.api.nvim_win_is_valid(mod_win), "Modified window should be valid")
 
     -- Validate: no diff highlights on the modified buffer
-    local highlights = require("codediff.ui.highlights")
-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.modified_bufnr, highlights.ns_highlight, 0, -1, {})
+    assert_whole_file_highlight(session.modified_bufnr, "CodeDiffLineInsert")
     local filler_marks = vim.api.nvim_buf_get_extmarks(session.modified_bufnr, highlights.ns_filler, 0, -1, {})
-    assert.are.equal(0, #hl_marks, "No diff highlights should remain on modified buffer")
     assert.are.equal(0, #filler_marks, "No filler highlights should remain on modified buffer")
 
     -- Validate: layout — diff pane fills remainder
@@ -1003,9 +1008,7 @@ describe("Layout Manager", function()
     assert.is_true(vim.api.nvim_win_is_valid(orig_win), "Original window should be valid")
 
     -- Validate: no diff highlights on the original buffer
-    local highlights = require("codediff.ui.highlights")
-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.original_bufnr, highlights.ns_highlight, 0, -1, {})
-    assert.are.equal(0, #hl_marks, "No diff highlights should remain on original buffer")
+    assert_whole_file_highlight(session.original_bufnr, "CodeDiffLineDelete")
 
     -- Validate: layout
     local panel_w = vim.api.nvim_win_get_width(panel.winid)
@@ -1020,7 +1023,7 @@ describe("Layout Manager", function()
   -- =========================================================================
   -- Case 16: show_added_virtual_file — closes orig, single-pane for "A" status
   -- =========================================================================
-  it("Case 16: show_added_virtual_file — closes orig, single-pane, no highlights", function()
+  it("Case 16: show_added_virtual_file — closes orig, single-pane, insert highlight", function()
     local panel_width = 35
     config.options.explorer = { position = "left", width = panel_width }
 
@@ -1070,9 +1073,7 @@ describe("Layout Manager", function()
     assert.is_true(vim.api.nvim_win_is_valid(mod_win), "Modified window should be valid")
 
     -- Validate: no diff highlights on modified buffer
-    local highlights = require("codediff.ui.highlights")
-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.modified_bufnr, highlights.ns_highlight, 0, -1, {})
-    assert.are.equal(0, #hl_marks, "No diff highlights on modified buffer")
+    assert_whole_file_highlight(session.modified_bufnr, "CodeDiffLineInsert")
 
     -- Validate: layout
     local panel_w = vim.api.nvim_win_get_width(panel.winid)
@@ -1091,7 +1092,7 @@ describe("Layout Manager", function()
   -- =========================================================================
   -- Case 17: show_deleted_virtual_file — closes mod, single-pane for "D" in revision mode
   -- =========================================================================
-  it("Case 17: show_deleted_virtual_file — closes mod, single-pane, no highlights", function()
+  it("Case 17: show_deleted_virtual_file — closes mod, single-pane, delete highlight", function()
     local panel_width = 35
     config.options.explorer = { position = "left", width = panel_width }
 
@@ -1140,9 +1141,7 @@ describe("Layout Manager", function()
     assert.is_true(vim.api.nvim_win_is_valid(orig_win), "Original window should be valid")
 
     -- Validate: no diff highlights
-    local highlights = require("codediff.ui.highlights")
-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.original_bufnr, highlights.ns_highlight, 0, -1, {})
-    assert.are.equal(0, #hl_marks, "No diff highlights on original buffer")
+    assert_whole_file_highlight(session.original_bufnr, "CodeDiffLineDelete")
 
     -- Validate: layout
     local panel_w = vim.api.nvim_win_get_width(panel.winid)
