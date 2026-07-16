@@ -16,7 +16,7 @@ local layout = require("codediff.ui.layout")
 ---@param session_config SessionConfig
 ---@param original_win number
 ---@param modified_win number
-function M.setup_explorer(tabpage, session_config, original_win, modified_win)
+function M.setup_explorer(tabpage, session_config, original_win, modified_win, setup_keymaps_fn)
   if not (session_config.mode == "explorer" and session_config.explorer_data) then
     return
   end
@@ -37,6 +37,7 @@ function M.setup_explorer(tabpage, session_config, original_win, modified_win)
     explorer_module.create(status_result, session_config.git_root, tabpage, nil, session_config.original_revision, session_config.modified_revision, explorer_opts)
 
   lifecycle.set_explorer(tabpage, explorer_obj)
+  setup_keymaps_fn()
 
   local initial_focus = explorer_config.initial_focus or "explorer"
   if initial_focus == "explorer" and explorer_obj and explorer_obj.winid and vim.api.nvim_win_is_valid(explorer_obj.winid) then

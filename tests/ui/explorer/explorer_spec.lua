@@ -480,6 +480,42 @@ describe("Explorer Mode", function()
     assert.is_true(notified, "Should notify for non-git directory")
   end)
 
+  it("Opens the explorer file under the cursor in the previous tab", function()
+    require("codediff").setup({
+      diff = { layout = "side-by-side" },
+      explorer = { auto_open_on_cursor = true },
+      keymaps = { view = { open_in_prev_tab = "P" } },
+    })
+
+    local previous_tab = vim.api.nvim_get_current_tabpage()
+    local ready, tabpage, explorer = open_explorer(temp_dir, "file1.txt")
+    assert.is_true(ready, "Explorer should be ready with an initial selection")
+    vim.api.nvim_set_current_tabpage(tabpage)
+
+    local target_line, target_path
+    for line = 1, vim.api.nvim_buf_line_count(explorer.bufnr) do
+      local node = explorer.tree:get_node(line)
+      local data = node and node.data
+      if data and data.path and data.path ~= explorer.current_file_path then
+        target_line = line
+        target_path = data.path
+        break
+      end
+    end
+    assert.is_not_nil(target_line, "Should find a different file node")
+
+    vim.api.nvim_set_current_win(explorer.winid)
+    vim.api.nvim_win_set_cursor(explorer.winid, { target_line, 0 })
+    local callback = vim.api.nvim_buf_call(explorer.bufnr, function()
+      return vim.fn.maparg("P", "n", false, true).callback
+    end)
+    assert.is_function(callback, "open_in_prev_tab mapping should exist in explorer buffer")
+    callback()
+
+    assert.equals(previous_tab, vim.api.nvim_get_current_tabpage())
+    assert.equals(vim.fs.normalize(vim.fs.joinpath(temp_dir, target_path)), vim.fs.normalize(vim.api.nvim_buf_get_name(0)))
+  end)
+
   -- Test: auto_open_on_cursor opens the file under cursor after j/k
   it("Auto-opens diff under cursor when auto_open_on_cursor is enabled", function()
     require("codediff").setup({

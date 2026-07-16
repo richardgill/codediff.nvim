@@ -361,7 +361,9 @@ function M.create(session_config, filetype, on_ready)
   end
 
   -- Setup panels (explorer sidebar, history panel)
-  panel.setup_explorer(tabpage, session_config, original_win, modified_win)
+  panel.setup_explorer(tabpage, session_config, original_win, modified_win, function()
+    setup_all_keymaps(tabpage, original_info.bufnr, modified_info.bufnr, true)
+  end)
   panel.setup_history(tabpage, session_config, original_win, modified_win, original_info.bufnr, modified_info.bufnr, function(tp, ob, mb)
     setup_all_keymaps(tp, ob, mb, false)
   end)

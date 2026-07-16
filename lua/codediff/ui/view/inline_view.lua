@@ -150,7 +150,9 @@ function M.create(session_config, filetype, on_ready)
 
     mark_inline(tabpage)
     -- Setup panels via shared module
-    panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
+    panel.setup_explorer(tabpage, session_config, modified_win, modified_win, function()
+      setup_keymaps(tabpage, orig_scratch, mod_scratch)
+    end)
     panel.setup_history(tabpage, session_config, modified_win, modified_win, orig_scratch, mod_scratch, function(tp, ob, mb)
       setup_keymaps(tp, ob, mb)
     end)
@@ -309,7 +311,9 @@ function M.create(session_config, filetype, on_ready)
   end
 
   -- Setup panels for non-placeholder explorer/history mode
-  panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
+  panel.setup_explorer(tabpage, session_config, modified_win, modified_win, function()
+    setup_keymaps(tabpage, original_info.bufnr, modified_info.bufnr)
+  end)
   panel.setup_history(tabpage, session_config, modified_win, modified_win, original_info.bufnr, modified_info.bufnr, function(tp, ob, mb)
     setup_keymaps(tp, ob, mb)
   end)
