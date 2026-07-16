@@ -16,5 +16,8 @@ The `richard` branch carries these patches above `origin/main`, oldest first:
 3. [`2b2f488` — keep Neovim open when closing the last diff tab](https://github.com/esmuellert/codediff.nvim/pull/440)
 4. [`aa4964f` — hide the native tabline in CodeDiff views](https://github.com/esmuellert/codediff.nvim/pull/441)
 5. [`5d90f3f` — highlight added and deleted single-file views](https://github.com/esmuellert/codediff.nvim/pull/442)
+6. [`9e94576` — preserve explorer tree state across refreshes](https://github.com/esmuellert/codediff.nvim/pull/443)
+7. [`353297d` — distinguish modified lines from insertions](https://github.com/esmuellert/codediff.nvim/pull/324)
+8. [`c3acc61` — make filler text configurable](https://github.com/esmuellert/codediff.nvim/pull/444)
 
 Update this list whenever a patch is stacked, dropped, or replaced after an upstream merge.
