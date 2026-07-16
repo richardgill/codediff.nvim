@@ -20,10 +20,13 @@ describe("cycle_hunks_across_files (#161)", function()
     -- Two files, each with TWO hunks.
     repo.write_file("a.txt", { "a1", "a2", "a3", "a4", "a5", "a6", "a7" })
     repo.write_file("b.txt", { "b1", "b2", "b3", "b4", "b5", "b6", "b7" })
+    repo.write_file("d-deleted.txt", { "deleted" })
     repo.git("add .")
     repo.git("commit -m initial")
     repo.write_file("a.txt", { "a1 EDIT", "a2", "a3", "a4", "a5 EDIT", "a6", "a7" })
     repo.write_file("b.txt", { "b1 EDIT", "b2", "b3", "b4", "b5 EDIT", "b6", "b7" })
+    repo.write_file("c-untracked.txt", { "untracked" })
+    vim.fn.delete(repo.path("d-deleted.txt"))
 
     nav = require("codediff.ui.view.navigation")
     lifecycle = require("codediff.ui.lifecycle")
@@ -39,17 +42,20 @@ describe("cycle_hunks_across_files (#161)", function()
 
   -- Open `:CodeDiff` against the temp repo and wait until the diff for
   -- the focused file is fully loaded (with at least one hunk).
-  local function open_explorer(focus_file)
+  local function open_explorer(focus_file, expect_hunks)
     vim.cmd("edit " .. repo.dir .. "/" .. focus_file)
     require("codediff.commands").vscode_diff({ fargs = {} })
 
+    if expect_hunks == nil then
+      expect_hunks = true
+    end
     local ok = vim.wait(8000, function()
       for _, tp in ipairs(vim.api.nvim_list_tabpages()) do
         local s = lifecycle.get_session(tp)
         local e = lifecycle.get_explorer(tp)
-        if s and s.stored_diff_result and s.stored_diff_result.changes
-            and #s.stored_diff_result.changes > 0
-            and e and e.current_file_path then
+        local changes = s and s.stored_diff_result and s.stored_diff_result.changes
+        local expected_state = changes and ((expect_hunks and #changes > 0) or (not expect_hunks and #changes == 0))
+        if expected_state and e and e.current_file_path == focus_file then
           return true
         end
       end
@@ -64,7 +70,10 @@ describe("cycle_hunks_across_files (#161)", function()
   end
 
   -- Wait for the displayed file to switch AND its diff to fully re-render.
-  local function wait_for_file_switch(tabpage, from_file)
+  local function wait_for_file_switch(tabpage, from_file, expect_hunks)
+    if expect_hunks == nil then
+      expect_hunks = true
+    end
     local switched = vim.wait(8000, function()
       local e = lifecycle.get_explorer(tabpage)
       return e and e.current_file_path and e.current_file_path ~= from_file
@@ -73,10 +82,12 @@ describe("cycle_hunks_across_files (#161)", function()
     return vim.wait(8000, function()
       local s = lifecycle.get_session(tabpage)
       local e = lifecycle.get_explorer(tabpage)
-      return s and s.modified_path and e and e.current_file_path
-        and s.modified_path:find(e.current_file_path, 1, true) ~= nil
-        and s.stored_diff_result and s.stored_diff_result.changes
-        and #s.stored_diff_result.changes > 0
+      local session_path = s and s.modified_path ~= "" and s.modified_path or s and s.original_path
+      local changes = s and s.stored_diff_result and s.stored_diff_result.changes
+      local expected_state = changes and ((expect_hunks and #changes > 0) or (not expect_hunks and #changes == 0))
+      return session_path and e and e.current_file_path
+        and session_path:find(e.current_file_path, 1, true) ~= nil
+        and expected_state
     end, 20)
   end
 
@@ -105,6 +116,53 @@ describe("cycle_hunks_across_files (#161)", function()
 
     assert.equal(starting_file, explorer.current_file_path,
       "with cross-file off, ]c at the last hunk must NOT change file")
+  end)
+
+  it("OFF: hunk navigation does not leave a file with no hunks", function()
+    config.options.diff.cycle_hunks_across_files = false
+
+    local _, session, explorer = open_explorer("c-untracked.txt", false)
+    assert.is_not_nil(session)
+    assert.is_not_nil(explorer)
+    assert.equal(0, #session.stored_diff_result.changes)
+    local starting_file = explorer.current_file_path
+
+    assert.is_false(nav.next_hunk())
+    assert.equal(starting_file, explorer.current_file_path)
+    assert.is_false(nav.prev_hunk())
+    assert.equal(starting_file, explorer.current_file_path)
+    assert.is_nil(session.pending_cursor_landing)
+  end)
+
+  it("ON: ]c cycles forward from an untracked file with no hunks", function()
+    config.options.diff.cycle_hunks_across_files = true
+
+    local tabpage, session, explorer = open_explorer("c-untracked.txt", false)
+    assert.is_not_nil(session)
+    assert.is_not_nil(explorer)
+    assert.equal(0, #session.stored_diff_result.changes)
+
+    assert.is_true(nav.next_hunk())
+    assert.is_true(wait_for_file_switch(tabpage, "c-untracked.txt"))
+    assert.equal("a.txt", explorer.current_file_path)
+    assert.is_nil(lifecycle.get_session(tabpage).pending_cursor_landing)
+  end)
+
+  it("ON: [c cycles through untracked and deleted files with no hunks", function()
+    config.options.diff.cycle_hunks_across_files = true
+
+    local tabpage, session, explorer = open_explorer("c-untracked.txt", false)
+    assert.is_not_nil(session)
+    assert.is_not_nil(explorer)
+
+    assert.is_true(nav.prev_hunk())
+    assert.is_true(wait_for_file_switch(tabpage, "c-untracked.txt", false))
+    assert.equal("d-deleted.txt", explorer.current_file_path)
+
+    assert.is_true(nav.prev_hunk())
+    assert.is_true(wait_for_file_switch(tabpage, "d-deleted.txt"))
+    assert.equal("b.txt", explorer.current_file_path)
+    assert.is_nil(lifecycle.get_session(tabpage).pending_cursor_landing)
   end)
 
   it("ON: ]c on the last hunk hops to the FIRST hunk of the next file", function()
