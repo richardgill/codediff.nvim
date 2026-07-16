@@ -36,6 +36,23 @@ function M.get_active_diffs()
   return active_diffs
 end
 
+-- CodeDiff's extra tab exposes the active buffer path in Neovim's tabline, so hide it only while that tab is active
+-- Neovim has no tab-local equivalent, so the global setting is restored on tab leave or cleanup
+function M.hide_tabline(tabpage)
+  if vim.api.nvim_get_current_tabpage() ~= tabpage or not active_diffs[tabpage] then
+    return
+  end
+  vim.o.showtabline = 0
+end
+
+function M.restore_tabline(tabpage)
+  local active_session = active_diffs[tabpage]
+  if vim.api.nvim_get_current_tabpage() ~= tabpage or not active_session then
+    return
+  end
+  vim.o.showtabline = active_session.original_showtabline
+end
+
 -- Check if a revision represents a virtual buffer
 local function is_virtual_revision(revision)
   return revision ~= nil and revision ~= "WORKING"
@@ -72,6 +89,8 @@ function M.create_session(
   -- Save buffer states
   local original_state = state.save_buffer_state(original_bufnr)
   local modified_state = state.save_buffer_state(modified_bufnr)
+  local current_session = active_diffs[vim.api.nvim_get_current_tabpage()]
+  local original_showtabline = current_session and current_session.original_showtabline or vim.o.showtabline
 
   -- Create complete session in one step
   active_diffs[tabpage] = {
@@ -114,8 +133,10 @@ function M.create_session(
     result_win = nil,
     conflict_files = {}, -- Tracks files opened in conflict mode for unsaved warning
     reapply_keymaps = reapply_keymaps,
+    original_showtabline = original_showtabline,
   }
 
+  M.hide_tabline(tabpage)
   welcome_window.capture_session_profiles(active_diffs[tabpage])
 
   -- Mark windows with restore flag
@@ -172,6 +193,7 @@ function M.create_session(
       end
       local win = vim.api.nvim_get_current_win()
       if win == sess.original_win or win == sess.modified_win then
+        M.hide_tabline(tabpage)
         sync_window_ui(sess, win)
         -- Re-apply critical window options that might get reset by ftplugins/autocmds
         vim.wo[win].wrap = false
@@ -184,7 +206,9 @@ function M.create_session(
     group = tab_augroup,
     callback = function()
       local current_tab = vim.api.nvim_get_current_tabpage()
-      if current_tab == tabpage then
+      local sess = active_diffs[tabpage]
+      if current_tab == tabpage and sess then
+        M.restore_tabline(tabpage)
         accessors.clear_tab_keymaps(tabpage)
         state.suspend_diff(tabpage)
       end
@@ -194,9 +218,10 @@ function M.create_session(
   vim.api.nvim_create_autocmd("TabEnter", {
     group = tab_augroup,
     callback = function()
+      M.hide_tabline(tabpage)
       vim.schedule(function()
-        local current_tab = vim.api.nvim_get_current_tabpage()
-        if current_tab == tabpage and active_diffs[tabpage] then
+        local current_tabpage = vim.api.nvim_get_current_tabpage()
+        if current_tabpage == tabpage and active_diffs[tabpage] then
           local sess = active_diffs[tabpage]
           if sess.reapply_keymaps then
             pcall(sess.reapply_keymaps)
