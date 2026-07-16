@@ -99,6 +99,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       cycle_next_file = true,             -- Wrap around when navigating files (]f/[f): false to stop at first/last
       cycle_hunks_across_files = false,   -- ]c/[c at file boundary hops to first/last hunk of next/prev file (explorer/history)
       jump_to_first_change = true,        -- Auto-scroll to first change when opening a diff: false to stay at same line
+      highlight_added_deleted_files = true, -- Tint full contents of added, untracked, and deleted files
       highlight_priority = 100,           -- Priority for line-level diff highlights (increase to override LSP highlights)
       compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
       compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
@@ -638,6 +639,8 @@ The plugin defines highlight groups matching VSCode's diff colors:
   - **Light themes** (`background = "light"`): Brightness multiplied by `0.92` (8% darker)
 - This auto-detection works out-of-box for most colorschemes
 - You can override with explicit `char_brightness` value if needed
+- Added and untracked files use `line_insert`; deleted files use `line_delete` across the full file
+- Set `diff.highlight_added_deleted_files = false` to disable full-file highlighting
 
 **Customization examples:**
 
