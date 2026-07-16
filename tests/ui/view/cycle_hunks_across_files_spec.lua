@@ -40,22 +40,24 @@ describe("cycle_hunks_across_files (#161)", function()
     end
   end)
 
+  local function has_expected_hunk_count(session, expected_count)
+    local changes = session and session.stored_diff_result and session.stored_diff_result.changes
+    if not changes then return false end
+    if expected_count ~= nil then return #changes == expected_count end
+    return #changes > 0
+  end
+
   -- Open `:CodeDiff` against the temp repo and wait until the diff for
-  -- the focused file is fully loaded (with at least one hunk).
-  local function open_explorer(focus_file, expect_hunks)
+  -- the focused file is fully loaded with the expected hunk count.
+  local function open_explorer(focus_file, expected_hunk_count)
     vim.cmd("edit " .. repo.dir .. "/" .. focus_file)
     require("codediff.commands").vscode_diff({ fargs = {} })
 
-    if expect_hunks == nil then
-      expect_hunks = true
-    end
     local ok = vim.wait(8000, function()
       for _, tp in ipairs(vim.api.nvim_list_tabpages()) do
         local s = lifecycle.get_session(tp)
         local e = lifecycle.get_explorer(tp)
-        local changes = s and s.stored_diff_result and s.stored_diff_result.changes
-        local expected_state = changes and ((expect_hunks and #changes > 0) or (not expect_hunks and #changes == 0))
-        if expected_state and e and e.current_file_path == focus_file then
+        if has_expected_hunk_count(s, expected_hunk_count) and e and e.current_file_path == focus_file then
           return true
         end
       end
@@ -70,10 +72,7 @@ describe("cycle_hunks_across_files (#161)", function()
   end
 
   -- Wait for the displayed file to switch AND its diff to fully re-render.
-  local function wait_for_file_switch(tabpage, from_file, expect_hunks)
-    if expect_hunks == nil then
-      expect_hunks = true
-    end
+  local function wait_for_file_switch(tabpage, from_file, expected_hunk_count)
     local switched = vim.wait(8000, function()
       local e = lifecycle.get_explorer(tabpage)
       return e and e.current_file_path and e.current_file_path ~= from_file
@@ -83,11 +82,9 @@ describe("cycle_hunks_across_files (#161)", function()
       local s = lifecycle.get_session(tabpage)
       local e = lifecycle.get_explorer(tabpage)
       local session_path = s and s.modified_path ~= "" and s.modified_path or s and s.original_path
-      local changes = s and s.stored_diff_result and s.stored_diff_result.changes
-      local expected_state = changes and ((expect_hunks and #changes > 0) or (not expect_hunks and #changes == 0))
       return session_path and e and e.current_file_path
         and session_path:find(e.current_file_path, 1, true) ~= nil
-        and expected_state
+        and has_expected_hunk_count(s, expected_hunk_count)
     end, 20)
   end
 
@@ -121,7 +118,7 @@ describe("cycle_hunks_across_files (#161)", function()
   it("OFF: hunk navigation does not leave a file with no hunks", function()
     config.options.diff.cycle_hunks_across_files = false
 
-    local _, session, explorer = open_explorer("c-untracked.txt", false)
+    local _, session, explorer = open_explorer("c-untracked.txt", 0)
     assert.is_not_nil(session)
     assert.is_not_nil(explorer)
     assert.equal(0, #session.stored_diff_result.changes)
@@ -137,7 +134,7 @@ describe("cycle_hunks_across_files (#161)", function()
   it("ON: ]c cycles forward from an untracked file with no hunks", function()
     config.options.diff.cycle_hunks_across_files = true
 
-    local tabpage, session, explorer = open_explorer("c-untracked.txt", false)
+    local tabpage, session, explorer = open_explorer("c-untracked.txt", 0)
     assert.is_not_nil(session)
     assert.is_not_nil(explorer)
     assert.equal(0, #session.stored_diff_result.changes)
@@ -151,12 +148,12 @@ describe("cycle_hunks_across_files (#161)", function()
   it("ON: [c cycles through untracked and deleted files with no hunks", function()
     config.options.diff.cycle_hunks_across_files = true
 
-    local tabpage, session, explorer = open_explorer("c-untracked.txt", false)
+    local tabpage, session, explorer = open_explorer("c-untracked.txt", 0)
     assert.is_not_nil(session)
     assert.is_not_nil(explorer)
 
     assert.is_true(nav.prev_hunk())
-    assert.is_true(wait_for_file_switch(tabpage, "c-untracked.txt", false))
+    assert.is_true(wait_for_file_switch(tabpage, "c-untracked.txt", 0))
     assert.equal("d-deleted.txt", explorer.current_file_path)
 
     assert.is_true(nav.prev_hunk())
