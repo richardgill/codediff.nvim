@@ -155,7 +155,8 @@ function M.create(session_config, filetype, on_ready)
         end
         local is_explorer = lifecycle.get_mode(tabpage) == "explorer"
         setup_all_keymaps(tabpage, ob, mb, is_explorer)
-      end
+      end,
+      session_config.exit_on_close
     )
   else
     -- Normal mode: Full rendering
@@ -233,7 +234,8 @@ function M.create(session_config, filetype, on_ready)
                   setup_all_keymaps(tabpage, ob, mb, false)
                   local conflict = require("codediff.ui.conflict")
                   conflict.setup_keymaps(tabpage)
-                end
+                end,
+                session_config.exit_on_close
               )
 
               -- Setup result window and keymaps
@@ -288,7 +290,8 @@ function M.create(session_config, filetype, on_ready)
               end
               local is_explorer = lifecycle.get_mode(tabpage) == "explorer"
               setup_all_keymaps(tabpage, ob, mb, is_explorer)
-            end
+            end,
+            session_config.exit_on_close
           )
           -- Enable auto-refresh for real file buffers only
           setup_auto_refresh(original_info.bufnr, modified_info.bufnr, original_is_virtual, modified_is_virtual)

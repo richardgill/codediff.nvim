@@ -145,7 +145,8 @@ function M.create(session_config, filetype, on_ready)
         if mb then
           setup_keymaps(tabpage, orig_scratch, mb)
         end
-      end
+      end,
+      session_config.exit_on_close
     )
 
     mark_inline(tabpage)
@@ -244,7 +245,8 @@ function M.create(session_config, filetype, on_ready)
           if mb then
             setup_keymaps(tabpage, original_info.bufnr, mb)
           end
-        end
+        end,
+        session_config.exit_on_close
       )
 
       mark_inline(tabpage)
