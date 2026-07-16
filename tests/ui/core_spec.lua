@@ -13,6 +13,18 @@ local function assert_whole_file_highlight(bufnr, expected_group)
   return marks[1][4]
 end
 
+local function has_highlight(bufnr, hl_group)
+  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
+
+  for _, mark in ipairs(marks) do
+    if mark[4].hl_group == hl_group then
+      return true
+    end
+  end
+
+  return false
+end
+
 describe("Render Core", function()
   before_each(function()
     config.options.diff.highlight_added_deleted_files = true
@@ -34,8 +46,8 @@ describe("Render Core", function()
     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
 
     -- Verify added line has highlight
-    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, {})
-    assert.is_true(#right_marks > 0, "Added line should have highlight extmark")
+    assert.is_true(has_highlight(right_buf, "CodeDiffLineInsert"), "Added line should use CodeDiffLineInsert")
+    assert.is_false(has_highlight(right_buf, "CodeDiffLineChange"), "Added line should not use CodeDiffLineChange")
 
     vim.api.nvim_buf_delete(left_buf, {force = true})
     vim.api.nvim_buf_delete(right_buf, {force = true})
@@ -78,11 +90,9 @@ describe("Render Core", function()
     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
 
     -- Both sides should have highlights for modified line
-    local left_marks = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_highlight, 0, -1, {})
-    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, {})
-    
-    assert.is_true(#left_marks > 0, "Left buffer should have highlight for modified line")
-    assert.is_true(#right_marks > 0, "Right buffer should have highlight for modified line")
+    assert.is_true(has_highlight(left_buf, "CodeDiffLineDelete"), "Left buffer should have delete highlight for modified line")
+    assert.is_true(has_highlight(right_buf, "CodeDiffLineChange"), "Right buffer should have change highlight for modified line")
+    assert.is_false(has_highlight(right_buf, "CodeDiffLineInsert"), "Modified line should not use insert highlight on the right")
 
     vim.api.nvim_buf_delete(left_buf, {force = true})
     vim.api.nvim_buf_delete(right_buf, {force = true})
@@ -427,8 +437,8 @@ describe("Render Core", function()
     core.render_single_buffer(buf, lines_diff, "modified")
 
     -- Verify added line has highlight
-    local marks = vim.api.nvim_buf_get_extmarks(buf, highlights.ns_highlight, 0, -1, {})
-    assert.is_true(#marks > 0, "Modified side should have highlight extmarks")
+    assert.is_true(has_highlight(buf, "CodeDiffLineInsert"), "Added line should use CodeDiffLineInsert")
+    assert.is_false(has_highlight(buf, "CodeDiffLineChange"), "Added line should not use CodeDiffLineChange")
 
     vim.api.nvim_buf_delete(buf, {force = true})
   end)
@@ -560,5 +570,19 @@ describe("Render Core", function()
     local marks = vim.api.nvim_buf_get_extmarks(buf, highlights.ns_highlight, 0, -1, {})
     assert.equal(0, #marks)
     vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("render_single_buffer uses change highlights for modified lines", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local original = {"line 1", "old content"}
+    local modified = {"line 1", "new content"}
+
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
+    core.render_single_buffer(buf, diff.compute_diff(original, modified), "modified")
+
+    assert.is_true(has_highlight(buf, "CodeDiffLineChange"), "Modified line should use CodeDiffLineChange")
+    assert.is_false(has_highlight(buf, "CodeDiffLineInsert"), "Modified line should not use CodeDiffLineInsert")
+
+    vim.api.nvim_buf_delete(buf, {force = true})
   end)
 end)

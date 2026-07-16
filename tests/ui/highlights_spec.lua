@@ -8,6 +8,7 @@ local highlights = require("codediff.ui.highlights")
 local function reset_codediff()
   -- Wipe any cached CodeDiff highlights so each test starts clean
   pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineInsert", {})
+  pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineChange", {})
   pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineDelete", {})
   require("codediff").setup({})
 end
@@ -18,12 +19,15 @@ describe("highlights.lua color derivation", function()
   it("reads bg directly for colorschemes that use bg-based diff highlights", function()
     -- Mimic the default convention: DiffAdd uses bg + (optional) fg, no reverse
     vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x123456 })
+    vim.api.nvim_set_hl(0, "DiffChange", { bg = 0xabcdef })
     vim.api.nvim_set_hl(0, "DiffDelete", { bg = 0x654321 })
     highlights.setup()
 
     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
+    local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
     assert.are.equal(0x123456, insert.bg, "Insert bg should come from DiffAdd.bg")
+    assert.are.equal(0xabcdef, change.bg, "Change bg should come from DiffChange.bg")
     assert.are.equal(0x654321, delete.bg, "Delete bg should come from DiffDelete.bg")
   end)
 
@@ -31,15 +35,27 @@ describe("highlights.lua color derivation", function()
     -- Mimic sorbet's pattern: fg holds the green/red color and reverse=true
     -- means Neovim renders it as a background at draw time.
     vim.api.nvim_set_hl(0, "DiffAdd", { fg = 0x00af5f, bg = 0x000000, reverse = true })
+    vim.api.nvim_set_hl(0, "DiffChange", { fg = 0x005faf, bg = 0x000000, reverse = true })
     vim.api.nvim_set_hl(0, "DiffDelete", { fg = 0xd70000, bg = 0x000000, reverse = true })
     highlights.setup()
 
     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
+    local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
     assert.are.equal(0x00af5f, insert.bg,
       "Insert bg should come from DiffAdd.fg when reverse=true")
+    assert.are.equal(0x005faf, change.bg,
+      "Change bg should come from DiffChange.fg when reverse=true")
     assert.are.equal(0xd70000, delete.bg,
       "Delete bg should come from DiffDelete.fg when reverse=true")
+  end)
+
+  it("honors configured line_change colors", function()
+    require("codediff").setup({ highlights = { line_change = "#13579b" } })
+    highlights.setup()
+
+    local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
+    assert.are.equal(0x13579b, change.bg)
   end)
 
   it("honors cterm.reverse independently of gui reverse", function()
