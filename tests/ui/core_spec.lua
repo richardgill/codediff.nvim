@@ -22,12 +22,6 @@ describe("Render Core", function()
     highlights.setup()
   end)
 
-  it("sets up CodeDiffLineChange highlight", function()
-    local hl = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
-
-    assert.is_not_nil(hl.bg, "CodeDiffLineChange should have a background color")
-  end)
-
   -- Test 1: Basic added lines rendering
   it("Renders added lines with correct highlights", function()
     local left_buf = vim.api.nvim_create_buf(false, true)

@@ -24,10 +24,7 @@ local function has_lines(line_range)
 end
 
 local function get_modified_line_highlight(mapping)
-  if has_lines(mapping.original) and has_lines(mapping.modified) then
-    return "CodeDiffLineChange"
-  end
-  return "CodeDiffLineInsert"
+  return has_lines(mapping.original) and "CodeDiffLineChange" or "CodeDiffLineInsert"
 end
 
 -- Check if a column position is past the visible line content
@@ -420,11 +417,9 @@ function M.render_single_buffer(bufnr, diff, side)
       goto continue
     end
 
-    local line_hl = side == "original" and "CodeDiffLineDelete" or get_modified_line_highlight(mapping)
-    local is_empty = not has_lines(range)
-
     -- Apply line highlights
-    if not is_empty then
+    if has_lines(range) then
+      local line_hl = side == "original" and "CodeDiffLineDelete" or get_modified_line_highlight(mapping)
       apply_line_highlights(bufnr, range, line_hl)
     end
 
