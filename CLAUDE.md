@@ -6,3 +6,14 @@ mkdir -p .claude/skills/nvim-e2e-workflow .claude/skills/codediff-developer
 ln -sf ../../.github/skills/nvim-e2e-workflow/SKILL.md .claude/skills/nvim-e2e-workflow/SKILL.md
 ln -sf ../../.github/agents/codediff-developer.agent.md .claude/skills/codediff-developer/SKILL.md
 ```
+
+## Richard patch stack
+
+The `richard` branch carries these patches above `origin/main`, oldest first:
+
+1. [`5cea7a6` — explorer `gf` opens in the previous tab](https://github.com/esmuellert/codediff.nvim/pull/321)
+2. [`ee9443a` — include zero-hunk files in cross-file cycling](https://github.com/esmuellert/codediff.nvim/pull/438)
+3. [`2b2f488` — keep Neovim open when closing the last diff tab](https://github.com/esmuellert/codediff.nvim/pull/440)
+4. [`aa4964f` — hide the native tabline in CodeDiff views](https://github.com/esmuellert/codediff.nvim/pull/441)
+
+Update this list whenever a patch is stacked, dropped, or replaced after an upstream merge.
