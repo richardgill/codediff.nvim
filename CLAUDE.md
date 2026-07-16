@@ -19,5 +19,6 @@ The `richard` branch carries these patches above `origin/main`, oldest first:
 6. [`9e94576` — preserve explorer tree state across refreshes](https://github.com/esmuellert/codediff.nvim/pull/443)
 7. [`353297d` — distinguish modified lines from insertions](https://github.com/esmuellert/codediff.nvim/pull/324)
 8. [`c3acc61` — make filler text configurable](https://github.com/esmuellert/codediff.nvim/pull/444)
+9. [`a082372` — add per-pane window options callback](https://github.com/esmuellert/codediff.nvim/pull/445)
 
 Update this list whenever a patch is stacked, dropped, or replaced after an upstream merge.
