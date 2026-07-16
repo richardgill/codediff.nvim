@@ -216,8 +216,8 @@ function M.create_session(
     callback = function()
       M.hide_tabline(tabpage)
       vim.schedule(function()
-        local scheduled_tab = vim.api.nvim_get_current_tabpage()
-        if scheduled_tab == tabpage and active_diffs[tabpage] then
+        local current_tabpage = vim.api.nvim_get_current_tabpage()
+        if current_tabpage == tabpage and active_diffs[tabpage] then
           local sess = active_diffs[tabpage]
           if sess.reapply_keymaps then
             pcall(sess.reapply_keymaps)
