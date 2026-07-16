@@ -144,67 +144,76 @@ function M.setup_auto_refresh(explorer, tabpage)
   return cleanup
 end
 
+-- Include the status group because the same path can exist in staged and unstaged trees.
+-- For example: directory:unstaged:src/a and directory:staged:src/a are separate folds.
+local function get_directory_state_key(group, path)
+  return "directory:" .. group .. ":" .. path
+end
+
+-- Only groups and directories are foldable, so file nodes intentionally have no key.
+-- Example group key: group:unstaged; example directory key: directory:unstaged:src/a.
+local function get_state_key(data)
+  if data.type == "group" then
+    return "group:" .. data.name
+  end
+  if data.type == "directory" then
+    return get_directory_state_key(data.group, data.dir_path)
+  end
+end
+
+-- Walk hidden descendants too so collapsing a parent does not discard their fold state.
+local function visit_node(tree, node, callback)
+  callback(node)
+  for _, child_id in ipairs(node:get_child_ids()) do
+    local child = tree:get_node(child_id)
+    if child then
+      visit_node(tree, child, callback)
+    end
+  end
+end
+
 -- Collect collapsed state from tree (groups and directories that user manually collapsed)
 local function collect_collapsed_state(tree)
   local collapsed = {}
-
-  local function collect_from_node(node)
-    if not node.data then
-      return
-    end
-    local node_type = node.data.type
-    if node_type == "group" or node_type == "directory" then
-      -- Use path for directories, name for groups as unique key
-      local key = node.data.path or node.data.name
-      if key and not node:is_expanded() then
+  for _, node in ipairs(tree:get_nodes()) do
+    visit_node(tree, node, function(current)
+      local key = get_state_key(current.data)
+      if key and not current:is_expanded() then
+        -- Saving only collapsed nodes lets new nodes retain the normal expanded default.
         collapsed[key] = true
       end
-      -- Recurse into children
-      if node:has_children() then
-        for _, child_id in ipairs(node:get_child_ids()) do
-          local child = tree:get_node(child_id)
-          if child then
-            collect_from_node(child)
-          end
-        end
-      end
-    end
+    end)
   end
-
-  local root_nodes = tree:get_nodes()
-  for _, node in ipairs(root_nodes) do
-    collect_from_node(node)
-  end
-
   return collapsed
 end
 
--- Restore collapsed state after tree rebuild
-local function restore_collapsed_state(tree, collapsed, root_nodes)
-  local function restore_node(node)
-    if not node.data then
-      return
-    end
-    local node_type = node.data.type
-    if node_type == "group" or node_type == "directory" then
-      local key = node.data.path or node.data.name
-      if key and collapsed[key] then
-        node:collapse()
-      end
-      -- Recurse into children
-      if node:has_children() then
-        for _, child_id in ipairs(node:get_child_ids()) do
-          local child = tree:get_node(child_id)
-          if child then
-            restore_node(child)
-          end
-        end
-      end
-    end
+local function was_collapsed(data, collapsed)
+  if data.type ~= "directory" then
+    -- Root status groups have a stable identity and only need an exact match.
+    local key = get_state_key(data)
+    return key and collapsed[key] or false
   end
 
-  for _, node in ipairs(root_nodes) do
-    restore_node(node)
+  -- A flattened src/components/ui node represents src, src/components, and src/components/ui.
+  local path = ""
+  for part in data.dir_path:gmatch("[^/]+") do
+    path = path == "" and part or path .. "/" .. part
+    -- Preserve a collapse made before directories were flattened or unflattened.
+    if collapsed[get_directory_state_key(data.group, path)] then
+      return true
+    end
+  end
+  return false
+end
+
+-- Restore collapsed state after tree rebuild
+local function restore_collapsed_state(tree, collapsed)
+  for _, node in ipairs(tree:get_nodes()) do
+    visit_node(tree, node, function(current)
+      if was_collapsed(current.data, collapsed) then
+        current:collapse()
+      end
+    end)
   end
 end
 
@@ -243,7 +252,7 @@ local function rebuild_tree(explorer, status_result, collapsed_state)
   end
 
   -- Restore user's collapsed state (must be after expand_all_dirs)
-  restore_collapsed_state(explorer.tree, collapsed_state, root_nodes)
+  restore_collapsed_state(explorer.tree, collapsed_state)
 
   explorer.tree:render()
 end
@@ -266,15 +275,15 @@ function M.refresh(explorer)
   local current_node = explorer.tree:get_node()
   local current_path = current_node and current_node.data and current_node.data.path
 
-  -- Collect collapsed state before async operation
-  local collapsed_state = collect_collapsed_state(explorer.tree)
-
   local function process_result(err, status_result)
     vim.schedule(function()
       if err then
         vim.notify("Failed to refresh: " .. err, vim.log.levels.ERROR)
         return
       end
+
+      -- Capture now so a folder collapsed while the async Git request ran stays collapsed.
+      local collapsed_state = collect_collapsed_state(explorer.tree)
 
       -- Rebuild tree nodes (honors group visibility) and re-render.
       rebuild_tree(explorer, status_result, collapsed_state)
