@@ -5,6 +5,7 @@ local accessors = require("codediff.ui.lifecycle.accessors")
 local session = require("codediff.ui.lifecycle.session")
 local state = require("codediff.ui.lifecycle.state")
 local welcome_window = require("codediff.ui.view.welcome_window")
+local window_options = require("codediff.ui.view.window_options")
 local compat = require("codediff.core.compat")
 
 -- Autocmd group for cleanup
@@ -91,6 +92,8 @@ local function cleanup_diff(tabpage)
       pcall(vim.api.nvim_buf_delete, diff.modified_bufnr, { force = true })
     end
   end
+
+  window_options.restore_session(diff)
 
   -- Clear window variables if windows still exist
   if diff.original_win and vim.api.nvim_win_is_valid(diff.original_win) then

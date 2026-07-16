@@ -3,6 +3,7 @@
 local M = {}
 
 local highlights = require("codediff.ui.highlights")
+local window_options = require("codediff.ui.view.window_options")
 
 -- Save buffer state before modifications
 local function save_buffer_state(bufnr)
@@ -258,6 +259,8 @@ local function resume_diff(tabpage)
   if diff.result_bufnr and vim.api.nvim_buf_is_valid(diff.result_bufnr) and diff.result_base_lines then
     auto_refresh.enable_for_result(diff.result_bufnr)
   end
+
+  window_options.apply_session(diff)
 
   -- Mark as active
   diff.suspended = false

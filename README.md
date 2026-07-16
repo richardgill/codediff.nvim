@@ -86,6 +86,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
     -- Diff view behavior
     diff = {
       layout = "side-by-side",             -- Diff layout: "side-by-side" (two panes) or "inline" (single pane with virtual lines)
+      window_options = nil,                 -- Optional callback returning window-local options for diff panes
       disable_inlay_hints = true,         -- Disable inlay hints in diff windows for cleaner view
       max_computation_time_ms = 5000,     -- Maximum time for diff computation (VSCode default)
       ignore_trim_whitespace = false,     -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
@@ -219,6 +220,33 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
   },
 }
 ```
+
+### Diff Pane Window Options
+
+Use `diff.window_options` to return native window-local options for each real diff pane:
+
+```lua
+require("codediff").setup({
+  diff = {
+    window_options = function(ctx)
+      if ctx.role == "result" then
+        return { signcolumn = "yes:1" }
+      end
+      return { signcolumn = "no" }
+    end,
+  },
+})
+```
+
+The setting accepts a callback only, not a static options table. The callback receives:
+
+- `ctx.win`, `ctx.buf`, and `ctx.tabpage`: Neovim window, buffer, and tabpage IDs.
+- `ctx.role`: `"original"`, `"modified"`, `"result"`, or `"inline"`.
+- `ctx.view`: `"side-by-side"`, `"inline"`, or `"conflict"`.
+
+It runs only for panes displaying diff content. Explorer, history, welcome, placeholder, and non-CodeDiff windows are excluded. It is re-evaluated after pane creation, file selection, role or layout changes, conflict-result creation, and lifecycle events that may reset window options. Because it can run repeatedly, keep it idempotent and free of side effects. Return a table of window-local options, or `nil`/an empty table for no overrides. Options omitted by a later invocation are restored, and overrides are restored if CodeDiff releases a surviving window.
+
+The callback is a power-user escape hatch. Overriding CodeDiff-managed options such as `wrap`, `scrollbind`, or `winbar` can break alignment, synchronized scrolling, or conflict UI. Different `signcolumn` widths across side-by-side panes can also produce unequal text viewports. Invalid callback results and invalid options are reported and skipped. In particular, `signcolumn = "no"` hides every sign in that pane, including diagnostics, gitsigns, DAP signs, and CodeDiff's own move and conflict signs.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 

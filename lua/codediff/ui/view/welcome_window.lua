@@ -1,6 +1,7 @@
 local M = {}
 
 local welcome = require("codediff.ui.welcome")
+local window_options = require("codediff.ui.view.window_options")
 
 local option_names = {
   "number",
@@ -44,6 +45,9 @@ local function get_session_for_window(winid)
     end
     if sess.modified_win == winid then
       return sess, "modified"
+    end
+    if sess.result_win == winid then
+      return sess, "result"
     end
   end
   return nil, nil
@@ -97,9 +101,12 @@ function M.sync(winid)
 
   local bufnr = vim.api.nvim_win_get_buf(winid)
   if welcome.is_welcome_buffer(bufnr) then
+    window_options.restore(winid)
     M.apply(winid)
   else
     M.apply_normal(winid)
+    local sess = get_session_for_window(winid)
+    window_options.apply_window(sess, winid)
   end
 end
 

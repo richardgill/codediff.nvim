@@ -15,5 +15,6 @@ codediff-quickstart	codediff.txt	/*codediff-quickstart*
 codediff-see-also	codediff.txt	/*codediff-see-also*
 codediff-toggle-layout	codediff.txt	/*codediff-toggle-layout*
 codediff-usage	codediff.txt	/*codediff-usage*
+codediff-window-options	codediff.txt	/*codediff-window-options*
 codediff.nvim	codediff.txt	/*codediff.nvim*
 codediff.txt	codediff.txt	/*codediff.txt*

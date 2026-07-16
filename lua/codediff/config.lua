@@ -30,6 +30,7 @@ M.defaults = {
   -- Diff view behavior
   diff = {
     layout = "side-by-side", -- Diff layout: "side-by-side" or "inline"
+    window_options = nil,
     disable_inlay_hints = true, -- Disable inlay hints in diff windows for cleaner view
     max_computation_time_ms = 5000, -- Maximum time for diff computation (5 seconds, VSCode default)
     ignore_trim_whitespace = false, -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
@@ -167,6 +168,11 @@ M.defaults = {
 M.options = vim.deepcopy(M.defaults)
 
 function M.setup(opts)
+  local window_options = opts and opts.diff and opts.diff.window_options
+  if window_options ~= nil and type(window_options) ~= "function" then
+    error("codediff: diff.window_options must be a function")
+  end
+
   M.options = vim.tbl_deep_extend("force", M.options, opts or {})
 end
 
