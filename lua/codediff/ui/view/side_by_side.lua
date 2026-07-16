@@ -20,6 +20,7 @@ local view_keymaps = require("codediff.ui.view.keymaps")
 local conflict_window = require("codediff.ui.view.conflict_window")
 local panel = require("codediff.ui.view.panel")
 local welcome_window = require("codediff.ui.view.welcome_window")
+local window_options = require("codediff.ui.view.window_options")
 
 local is_virtual_revision = helpers.is_virtual_revision
 local prepare_buffer = helpers.prepare_buffer
@@ -294,6 +295,7 @@ function M.create(session_config, filetype, on_ready)
             end,
             session_config.exit_on_close
           )
+          window_options.apply_session(lifecycle.get_session(tabpage))
           -- Enable auto-refresh for real file buffers only
           setup_auto_refresh(original_info.bufnr, modified_info.bufnr, original_is_virtual, modified_is_virtual)
 
@@ -546,6 +548,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
         lifecycle.update_revisions(tabpage, session_config.original_revision, session_config.modified_revision)
         lifecycle.update_diff_result(tabpage, lines_diff)
         lifecycle.update_changedtick(tabpage, vim.api.nvim_buf_get_changedtick(original_info.bufnr), vim.api.nvim_buf_get_changedtick(modified_info.bufnr))
+        window_options.apply_session(session)
         setup_auto_refresh(original_info.bufnr, modified_info.bufnr, original_is_virtual, modified_is_virtual)
 
         local is_explorer_mode = session.mode == "explorer"
@@ -780,6 +783,7 @@ local function show_single_file(tabpage, opts)
   end
 
   layout.arrange(tabpage)
+  window_options.apply_session(session)
   if keep_win and vim.api.nvim_win_is_valid(keep_win) then
     welcome_window.sync_later(keep_win)
   end

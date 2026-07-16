@@ -150,6 +150,50 @@ the alignment rows blank:
 Non-empty patterns use the CodeDiffFiller highlight group. Inline deleted
 lines and move annotations are not filler rows and are unaffected.
 
+                                              *codediff-window-options*
+Diff pane window options~
+
+Use `diff.window_options` to return native window-local options for each real
+pane displaying diff content:
+>lua
+  require("codediff").setup({
+    diff = {
+      window_options = function(ctx)
+        if ctx.role == "result" then
+          return { signcolumn = "yes:1" }
+        end
+        return { signcolumn = "no" }
+      end,
+    },
+  })
+<
+
+The setting accepts a callback only, not a static options table. It receives:
+
+  ctx.win       Neovim window ID
+  ctx.buf       Neovim buffer ID
+  ctx.tabpage   Neovim tabpage ID
+  ctx.role      "original", "modified", "result", or "inline"
+  ctx.view      "side-by-side", "inline", or "conflict"
+
+The callback runs only for real diff panes. Explorer, history, welcome,
+placeholder, and non-CodeDiff windows are excluded. It is re-evaluated after
+pane creation, file selection, role or layout changes, conflict-result
+creation, and lifecycle events that may reset window options. It may therefore
+run repeatedly and must be idempotent and free of side effects.
+
+Return a table of window-local options, or nil/an empty table for no overrides.
+Options omitted by a later invocation are restored. Overrides are also
+restored if CodeDiff releases a surviving window. Invalid callback results and
+invalid options are reported and skipped.
+
+This is a power-user escape hatch. Overriding CodeDiff-managed options such as
+`wrap`, `scrollbind`, or `winbar` can break alignment, synchronized scrolling,
+or conflict UI. Different `signcolumn` widths across side-by-side panes can
+also produce unequal text viewports. `signcolumn = "no"` hides every sign in
+that pane, including diagnostics, gitsigns, DAP signs, and CodeDiff move and
+conflict signs.
+
                                                       *codediff-moved-code*
 Moved code detection~
 
@@ -208,6 +252,7 @@ Setup entry point:
     diff = {
       layout = "side-by-side",
       filler_text = "╱",
+      window_options = nil,
       disable_inlay_hints = true,
       max_computation_time_ms = 5000,
       hide_merge_artifacts = false,

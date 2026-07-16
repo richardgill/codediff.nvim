@@ -11,6 +11,7 @@ local inline = require("codediff.ui.inline")
 local semantic = require("codediff.ui.semantic_tokens")
 local layout = require("codediff.ui.layout")
 local welcome_window = require("codediff.ui.view.welcome_window")
+local window_options = require("codediff.ui.view.window_options")
 
 local helpers = require("codediff.ui.view.helpers")
 local panel = require("codediff.ui.view.panel")
@@ -262,6 +263,7 @@ function M.create(session_config, filetype, on_ready)
       )
 
       mark_inline(tabpage)
+      window_options.apply_session(lifecycle.get_session(tabpage))
 
       auto_refresh.enable(original_info.bufnr)
       auto_refresh.enable(modified_info.bufnr)
@@ -431,6 +433,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
 
       setup_keymaps(tabpage, orig_buf, mod_buf)
       layout.arrange(tabpage)
+      window_options.apply_session(session)
 
       if saved_current_win and vim.api.nvim_win_is_valid(saved_current_win) then
         vim.api.nvim_set_current_win(saved_current_win)
@@ -608,6 +611,7 @@ function M.show_single_file(tabpage, file_path, opts)
   local view_keymaps = require("codediff.ui.view.keymaps")
   view_keymaps.setup_all_keymaps(tabpage, orig_bufnr, mod_bufnr, session.mode == "explorer")
   layout.arrange(tabpage)
+  window_options.apply_session(session)
   welcome_window.sync_later(mod_win)
 end
 

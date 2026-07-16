@@ -5,6 +5,7 @@ local lifecycle = require("codediff.ui.lifecycle")
 local auto_refresh = require("codediff.ui.auto_refresh")
 local config = require("codediff.config")
 local layout = require("codediff.ui.layout")
+local window_options = require("codediff.ui.view.window_options")
 
 --- Create result window at the bottom (default layout)
 --- Layout: [incoming | current] on top, [result] at bottom
@@ -162,6 +163,7 @@ function M.setup_conflict_result_window(tabpage, session_config, original_win, m
   local session = lifecycle.get_session(tabpage)
   if session then
     conflict.refresh_all_conflict_signs(session)
+    window_options.apply_session(session)
   end
 
   -- Return focus to modified window
