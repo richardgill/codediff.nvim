@@ -130,6 +130,26 @@ Set the layout in your config:
   })
 <
 
+                                                      *codediff-filler-text*
+Filler appearance~
+
+Alignment rows keep corresponding content at the same vertical position in
+side-by-side and conflict views. By default, these rows use a repeated
+slash pattern. Set a different text pattern or use an empty string to keep
+the alignment rows blank:
+>lua
+  require("codediff").setup({
+    diff = { filler_text = "· " },
+  })
+
+  require("codediff").setup({
+    diff = { filler_text = "" },
+  })
+<
+
+Non-empty patterns use the CodeDiffFiller highlight group. Inline deleted
+lines and move annotations are not filler rows and are unaffected.
+
                                                       *codediff-moved-code*
 Moved code detection~
 
@@ -187,6 +207,7 @@ Setup entry point:
     },
     diff = {
       layout = "side-by-side",
+      filler_text = "╱",
       disable_inlay_hints = true,
       max_computation_time_ms = 5000,
       hide_merge_artifacts = false,
@@ -299,7 +320,7 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
 - CodeDiffLineDelete - light red background for deleted lines
 - CodeDiffCharInsert - deep/dark green for inserted characters
 - CodeDiffCharDelete - deep/dark red for deleted characters
-- CodeDiffFiller - gray foreground for filler line slashes (///)
+- CodeDiffFiller - gray foreground for non-empty filler line patterns
 - CodeDiffLineMove - background for moved lines (derived from DiffChange)
 - CodeDiffCharMove - character-level highlight for moved text
 - CodeDiffMoveFrom - sign/annotation color for move source
