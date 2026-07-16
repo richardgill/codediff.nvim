@@ -440,6 +440,7 @@ The history panel shows a list of commits. Each commit can be expanded to show i
 - `--reverse` or `-r`: Show commits in chronological order (oldest first) instead of reverse chronological. Useful for following development story from beginning to end, or reviewing PR changes in the order they were made.
 - `--base` or `-b`: Compare each commit against a fixed revision instead of its parent. Accepts any git revision (`HEAD`, branch name, commit hash) or `WORKING` for the current working tree.
 - `--inline` / `--side-by-side`: Override the diff layout for this invocation. These flags work with all `:CodeDiff` subcommands.
+- `--exit-on-close`: Exit Neovim when the CodeDiff session closes. Intended for external diff and merge tool processes.
 
 **Visual selection:** When called with a visual range (`:'<,'>CodeDiff history`), only commits that modified the selected lines are shown. This uses `git log -L` under the hood and is useful for tracing the evolution of a specific function or block in a large file.
 
@@ -452,7 +453,7 @@ Use CodeDiff as your git merge tool for resolving conflicts:
 
 ```bash
 git config --global merge.tool codediff
-git config --global mergetool.codediff.cmd 'nvim "$MERGED" -c "CodeDiff merge \"$MERGED\""'
+git config --global mergetool.codediff.cmd 'nvim "$MERGED" -c "CodeDiff --exit-on-close merge \"$MERGED\""'
 ```
 
 ### Git Diff Tool
@@ -461,7 +462,7 @@ Use CodeDiff as your git diff tool for viewing changes:
 
 ```bash
 git config --global diff.tool codediff
-git config --global difftool.codediff.cmd 'nvim "$LOCAL" "$REMOTE" +"CodeDiff file $LOCAL $REMOTE"'
+git config --global difftool.codediff.cmd 'nvim "$LOCAL" "$REMOTE" +"CodeDiff --exit-on-close file $LOCAL $REMOTE"'
 ```
 
 Then use `git difftool` to view diffs:
