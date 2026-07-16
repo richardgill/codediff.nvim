@@ -479,7 +479,7 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
   for _, change in ipairs(conflict_left_changes) do
     local range = change.modified
     if range and has_lines(range) then
-      apply_line_highlights(left_bufnr, range, get_modified_line_highlight(change))
+      apply_line_highlights(left_bufnr, range, "CodeDiffLineInsert")
     end
     if change.inner_changes then
       for _, inner in ipairs(change.inner_changes) do
@@ -494,7 +494,7 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
   for _, change in ipairs(conflict_right_changes) do
     local range = change.modified
     if range and has_lines(range) then
-      apply_line_highlights(right_bufnr, range, get_modified_line_highlight(change))
+      apply_line_highlights(right_bufnr, range, "CodeDiffLineInsert")
     end
     if change.inner_changes then
       for _, inner in ipairs(change.inner_changes) do

@@ -39,7 +39,6 @@ local function get_inline_extmarks(bufnr)
   local has_virt_lines = false
   local has_insert_hl = false
   local has_change_hl = false
-  local has_char_insert_hl = false
 
   for _, mark in ipairs(extmarks) do
     local details = mark[4]
@@ -52,9 +51,6 @@ local function get_inline_extmarks(bufnr)
     if details.hl_group == "CodeDiffLineChange" then
       has_change_hl = true
     end
-    if details.hl_group == "CodeDiffCharInsert" then
-      has_char_insert_hl = true
-    end
   end
 
   return {
@@ -62,7 +58,6 @@ local function get_inline_extmarks(bufnr)
     has_virt_lines = has_virt_lines,
     has_insert_hl = has_insert_hl,
     has_change_hl = has_change_hl,
-    has_char_insert_hl = has_char_insert_hl,
     extmarks = extmarks,
   }
 end
@@ -346,10 +341,7 @@ describe("Inline standalone view", function()
     assert.is_truthy(session.stored_diff_result, "Diff should compute")
 
     local info = get_inline_extmarks(result.modified_buf)
-    assert.is_true(
-      info.has_virt_lines or info.has_insert_hl or info.has_change_hl or info.has_char_insert_hl,
-      "Should have some decoration for changed line"
-    )
+    assert.is_true(info.total > 0, "Should have some decoration for changed line")
 
     vim.fn.delete(left_path)
     vim.fn.delete(right_path)

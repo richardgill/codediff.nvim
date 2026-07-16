@@ -15,13 +15,6 @@ local virt_lines_overflow = vim.fn.has("nvim-0.11") == 1 and "scroll" or nil
 -- Cache for merged highlight groups (syntax fg + diff bg)
 local merged_hl_cache = {}
 
-local function get_modified_line_highlight(has_original)
-  if has_original then
-    return "CodeDiffLineChange"
-  end
-  return "CodeDiffLineInsert"
-end
-
 -- ============================================================================
 -- Syntax highlighting for virt_lines via treesitter
 -- ============================================================================
@@ -447,7 +440,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
 
     -- Step 2: Highlight added/modified lines on the real buffer
     if has_modified then
-      local hl_group = get_modified_line_highlight(has_original)
+      local hl_group = has_original and "CodeDiffLineChange" or "CodeDiffLineInsert"
 
       for line = mod_start, mod_end - 1 do
         if line > buf_line_count then
