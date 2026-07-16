@@ -281,8 +281,8 @@ describe("Hunk operations (side-by-side)", function()
     assert.equals(9, changes[1].modified.start_line, "Remaining hunk should be at line 9")
 
     -- Highlights should exist for the remaining hunk
-    local line_hls = count_line_highlights(mod_buf, ns_highlight, "LineInsert")
-    assert.is_true(line_hls >= 1, "LineInsert highlights should exist for remaining hunk, got " .. line_hls)
+    local line_hls = count_line_highlights(mod_buf, ns_highlight, "LineChange")
+    assert.is_true(line_hls >= 1, "LineChange highlights should exist for remaining hunk, got " .. line_hls)
   end)
 
   -- --------------------------------------------------------------------------
@@ -694,8 +694,8 @@ describe("Explorer hunk/staging actions", function()
     session = lifecycle.get_session(tabpage)
     _, mod_buf = lifecycle.get_buffers(tabpage)
     local ns = highlights.ns_highlight
-    local line_hls = count_line_highlights(mod_buf, ns, "LineInsert")
-    assert.is_true(line_hls >= 1, "After unstage_all, highlights should be restored, got " .. line_hls)
+    local line_hls = count_line_highlights(mod_buf, ns, "LineChange")
+    assert.is_true(line_hls >= 1, "After unstage_all, change highlights should be restored, got " .. line_hls)
 
     -- Verify git state
     local staged_output = vim.fn.system("git -C " .. vim.fn.shellescape(repo.dir) .. " diff --cached --name-only")

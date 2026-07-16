@@ -19,6 +19,14 @@ local function is_empty_range(range)
   return range.start_line == range.end_line and range.start_col == range.end_col
 end
 
+local function has_lines(line_range)
+  return line_range.end_line > line_range.start_line
+end
+
+local function get_modified_line_highlight(mapping)
+  return has_lines(mapping.original) and "CodeDiffLineChange" or "CodeDiffLineInsert"
+end
+
 -- Check if a column position is past the visible line content
 local function is_past_line_content(line_number, column, lines)
   if line_number < 1 or line_number > #lines then
@@ -325,15 +333,15 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
   local last_mod_line = 1
 
   for _, mapping in ipairs(lines_diff.changes) do
-    local orig_is_empty = (mapping.original.end_line <= mapping.original.start_line)
-    local mod_is_empty = (mapping.modified.end_line <= mapping.modified.start_line)
+    local orig_has_lines = has_lines(mapping.original)
+    local mod_has_lines = has_lines(mapping.modified)
 
-    if not orig_is_empty then
+    if orig_has_lines then
       apply_line_highlights(left_bufnr, mapping.original, "CodeDiffLineDelete")
     end
 
-    if not mod_is_empty then
-      apply_line_highlights(right_bufnr, mapping.modified, "CodeDiffLineInsert")
+    if mod_has_lines then
+      apply_line_highlights(right_bufnr, mapping.modified, get_modified_line_highlight(mapping))
     end
 
     if mapping.inner_changes then
@@ -435,14 +443,7 @@ function M.render_single_buffer(bufnr, diff, side)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
   -- Determine highlight groups based on side
-  local line_hl, char_hl
-  if side == "original" then
-    line_hl = "CodeDiffLineDelete"
-    char_hl = "CodeDiffCharDelete"
-  else
-    line_hl = "CodeDiffLineInsert"
-    char_hl = "CodeDiffCharInsert"
-  end
+  local char_hl = side == "original" and "CodeDiffCharDelete" or "CodeDiffCharInsert"
 
   for _, mapping in ipairs(diff.changes) do
     -- Get the range for our side
@@ -451,10 +452,9 @@ function M.render_single_buffer(bufnr, diff, side)
       goto continue
     end
 
-    local is_empty = (range.end_line <= range.start_line)
-
     -- Apply line highlights
-    if not is_empty then
+    if has_lines(range) then
+      local line_hl = side == "original" and "CodeDiffLineDelete" or get_modified_line_highlight(mapping)
       apply_line_highlights(bufnr, range, line_hl)
     end
 
@@ -508,7 +508,7 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
   -- This matches VSCode's behavior of only highlighting conflicting changes
   for _, change in ipairs(conflict_left_changes) do
     local range = change.modified
-    if range and range.end_line > range.start_line then
+    if range and has_lines(range) then
       apply_line_highlights(left_bufnr, range, "CodeDiffLineInsert")
     end
     if change.inner_changes then
@@ -523,7 +523,7 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
 
   for _, change in ipairs(conflict_right_changes) do
     local range = change.modified
-    if range and range.end_line > range.start_line then
+    if range and has_lines(range) then
       apply_line_highlights(right_bufnr, range, "CodeDiffLineInsert")
     end
     if change.inner_changes then
