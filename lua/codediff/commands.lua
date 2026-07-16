@@ -85,6 +85,7 @@ local function handle_git_diff(revision, revision2, global_opts)
                   original_revision = commit_hash,
                   modified_revision = commit_hash2,
                   layout = global_opts.layout,
+                  exit_on_close = global_opts.exit_on_close,
                 }
                 view.create(session_config, filetype)
               end)
@@ -102,6 +103,7 @@ local function handle_git_diff(revision, revision2, global_opts)
               original_revision = commit_hash,
               modified_revision = "WORKING",
               layout = global_opts.layout,
+              exit_on_close = global_opts.exit_on_close,
             }
             view.create(session_config, filetype)
           end)
@@ -130,6 +132,7 @@ local function handle_file_diff(file_a, file_b, global_opts)
     original_revision = nil,
     modified_revision = nil,
     layout = global_opts.layout,
+    exit_on_close = global_opts.exit_on_close,
   }
   view.create(session_config, filetype)
 
@@ -192,6 +195,7 @@ local function handle_dir_diff(dir1, dir2, global_opts)
     original_revision = nil,
     modified_revision = nil,
     layout = global_opts.layout,
+    exit_on_close = global_opts.exit_on_close,
     explorer_data = {
       status_result = status_result,
     },
@@ -270,6 +274,7 @@ local function handle_history(range, file_path, flags, line_range, global_opts)
           original_revision = nil,
           modified_revision = nil,
           layout = global_opts.layout,
+          exit_on_close = global_opts.exit_on_close,
           history_data = {
             commits = commits,
             range = range,
@@ -353,6 +358,7 @@ local function handle_explorer(revision, revision2, global_opts)
           original_revision = original_rev,
           modified_revision = modified_rev,
           layout = global_opts.layout,
+          exit_on_close = global_opts.exit_on_close,
           explorer_data = {
             status_result = status_result,
             focus_file = focus_file, -- Focus on current file if changed
@@ -517,7 +523,8 @@ local function handle_git_diff_merge_base(base_rev, target_rev, global_opts)
   end)
 end
 
-function M.vscode_merge(opts)
+function M.vscode_merge(opts, global_opts)
+  global_opts = global_opts or {}
   local args = opts.fargs
   if #args == 0 then
     vim.notify("Usage: :CodeDiff merge <filename>", vim.log.levels.ERROR)
@@ -582,6 +589,7 @@ function M.vscode_merge(opts)
         original_revision = original_rev,
         modified_revision = modified_rev,
         conflict = true,
+        exit_on_close = global_opts.exit_on_close,
       }
 
       view.create(session_config, filetype, function()
@@ -607,16 +615,7 @@ function M.vscode_diff(opts)
   -- Check if current tab is a diff view and toggle (close) it if so
   local current_tab = vim.api.nvim_get_current_tabpage()
   if lifecycle.get_session(current_tab) then
-    -- Check for unsaved conflict files before closing
-    if not lifecycle.confirm_close_with_unsaved(current_tab) then
-      return -- User cancelled
-    end
-    if #vim.api.nvim_list_tabpages() == 1 then
-      lifecycle.cleanup_for_quit(current_tab)
-      vim.cmd("qall")
-    else
-      vim.cmd("tabclose")
-    end
+    lifecycle.close(current_tab)
     return
   end
 
@@ -628,6 +627,8 @@ function M.vscode_diff(opts)
       global_opts.layout = "inline"
     elseif arg == "--side-by-side" then
       global_opts.layout = "side-by-side"
+    elseif arg == "--exit-on-close" then
+      global_opts.exit_on_close = true
     else
       table.insert(args, arg)
     end
@@ -657,7 +658,7 @@ function M.vscode_diff(opts)
       vim.notify("Usage: :CodeDiff merge <filename>", vim.log.levels.ERROR)
       return
     end
-    M.vscode_merge({ fargs = { args[2] } })
+    M.vscode_merge({ fargs = { args[2] } }, global_opts)
   elseif subcommand == "file" then
     if #args == 2 then
       -- Check for triple-dot syntax: :CodeDiff file main...
