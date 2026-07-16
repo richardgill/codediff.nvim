@@ -123,6 +123,7 @@ function M.toggle(tabpage)
     compact.enable(tabpage)
   end
 
+  lifecycle.hide_tabline(tabpage)
   return true
 end
 
