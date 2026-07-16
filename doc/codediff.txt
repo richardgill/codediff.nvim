@@ -193,6 +193,7 @@ Setup entry point:
       conflict_result_height = 30,
       conflict_result_width_ratio = { 1, 1, 1 },
       jump_to_first_change = true,
+      highlight_added_deleted_files = true,
       highlight_priority = 100,
       compute_moves = false,
       compact_context_lines = 3,
@@ -308,6 +309,9 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
 
 Default behavior:
 - Uses DiffAdd and DiffDelete for line-level highlights
+- Added and untracked files use line_insert across the full file
+- Deleted files use line_delete across the full file
+- Set diff.highlight_added_deleted_files = false to disable full-file highlighting
 - Character-level highlights auto-adjusted based on vim.o.background:
   - Dark themes: brightness multiplied by 1.4
   - Light themes: brightness multiplied by 0.92

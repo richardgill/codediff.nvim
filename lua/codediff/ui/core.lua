@@ -381,6 +381,41 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
 end
 
 -- ============================================================================
+-- Whole File Rendering
+-- ============================================================================
+
+--- Render a one-sided file with highlighting across all logical lines.
+---@param bufnr number
+---@param side "original"|"modified"
+function M.render_whole_file(bufnr, side)
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
+
+  if not config.options.diff.highlight_added_deleted_files then
+    return
+  end
+
+  local highlight_groups = {
+    original = "CodeDiffLineDelete",
+    modified = "CodeDiffLineInsert",
+  }
+  local hl_group = highlight_groups[side]
+  if not hl_group then
+    error("Invalid whole-file diff side: " .. tostring(side))
+  end
+
+  vim.api.nvim_buf_set_extmark(bufnr, ns_highlight, 0, 0, {
+    end_row = vim.api.nvim_buf_line_count(bufnr),
+    end_col = 0,
+    hl_group = hl_group,
+    hl_eol = true,
+    priority = config.options.diff.highlight_priority,
+    right_gravity = false,
+    end_right_gravity = true,
+  })
+end
+
+-- ============================================================================
 -- Single Buffer Rendering (for merge view)
 -- ============================================================================
 
