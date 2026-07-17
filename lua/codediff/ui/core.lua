@@ -5,6 +5,7 @@ local config = require("codediff.config")
 local highlights = require("codediff.ui.highlights")
 local filler_renderer = require("codediff.ui.filler")
 local compat = require("codediff.core.compat")
+local gutter_signs = require("codediff.ui.gutter_signs")
 
 -- Namespace references
 local ns_highlight = highlights.ns_highlight
@@ -265,6 +266,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_highlight, 0, -1)
   vim.api.nvim_buf_clear_namespace(left_bufnr, ns_filler, 0, -1)
   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_filler, 0, -1)
+  gutter_signs.set_changed_ranges(left_bufnr, right_bufnr, lines_diff.changes)
 
   local total_left_fillers = 0
   local total_right_fillers = 0
@@ -372,6 +374,7 @@ function M.render_single_buffer(bufnr, diff, side)
   -- Clear existing highlights
   vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
   vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
+  gutter_signs.clear_buffer(bufnr)
 
   -- Get buffer lines for character highlight calculations
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -437,6 +440,8 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_highlight, 0, -1)
   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_filler, 0, -1)
   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_conflict, 0, -1)
+  gutter_signs.clear_buffer(left_bufnr)
+  gutter_signs.clear_buffer(right_bufnr)
 
   -- Get buffer lines for character highlight calculations
   local left_lines = vim.api.nvim_buf_get_lines(left_bufnr, 0, -1, false)
