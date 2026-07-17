@@ -9,6 +9,10 @@ local function reset_codediff()
   -- Wipe any cached CodeDiff highlights so each test starts clean
   pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineInsert", {})
   pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineDelete", {})
+  vim.cmd("highlight clear CodeDiffGutterInsert")
+  vim.cmd("highlight clear CodeDiffGutterDelete")
+  vim.cmd("highlight clear CodeDiffGutterInsertNumber")
+  vim.cmd("highlight clear CodeDiffGutterDeleteNumber")
   require("codediff").setup({})
 end
 
@@ -36,10 +40,8 @@ describe("highlights.lua color derivation", function()
 
     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
-    assert.are.equal(0x00af5f, insert.bg,
-      "Insert bg should come from DiffAdd.fg when reverse=true")
-    assert.are.equal(0xd70000, delete.bg,
-      "Delete bg should come from DiffDelete.fg when reverse=true")
+    assert.are.equal(0x00af5f, insert.bg, "Insert bg should come from DiffAdd.fg when reverse=true")
+    assert.are.equal(0xd70000, delete.bg, "Delete bg should come from DiffDelete.fg when reverse=true")
   end)
 
   it("honors cterm.reverse independently of gui reverse", function()
@@ -57,6 +59,28 @@ describe("highlights.lua color derivation", function()
     assert.are.equal(35, insert.ctermbg, "Cterm bg should come from ctermfg under cterm.reverse")
   end)
 
+  it("defines stable gutter highlight defaults", function()
+    highlights.setup()
+
+    assert.equals("CodeDiffLineInsert", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsert", link = true }).link)
+    assert.equals("CodeDiffLineDelete", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterDelete", link = true }).link)
+    assert.equals("CodeDiffCharInsert", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsertNumber", link = true }).link)
+    assert.equals("CodeDiffCharDelete", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterDeleteNumber", link = true }).link)
+  end)
+
+  it("preserves colorscheme gutter highlight overrides", function()
+    vim.api.nvim_set_hl(0, "CodeDiffGutterInsert", { fg = 0x123456, bg = 0x654321 })
+    vim.api.nvim_set_hl(0, "CodeDiffGutterInsertNumber", { bg = 0xabcdef })
+
+    highlights.setup()
+
+    local sign = vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsert", link = false })
+    local number = vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsertNumber", link = false })
+    assert.equals(0x123456, sign.fg)
+    assert.equals(0x654321, sign.bg)
+    assert.equals(0xabcdef, number.bg)
+  end)
+
   it("re-derives on :colorscheme change", function()
     -- First setup: bg-based DiffAdd
     vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x111111 })
@@ -69,7 +93,6 @@ describe("highlights.lua color derivation", function()
     vim.cmd("doautocmd ColorScheme")
 
     local after = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false }).bg
-    assert.are.equal(0x222222, after,
-      "ColorScheme autocmd should re-derive Insert bg from new DiffAdd")
+    assert.are.equal(0x222222, after, "ColorScheme autocmd should re-derive Insert bg from new DiffAdd")
   end)
 end)

@@ -138,6 +138,11 @@ function M.setup()
   vim.api.nvim_set_hl(0, "CodeDiffCharInsert", char_insert_color)
   vim.api.nvim_set_hl(0, "CodeDiffCharDelete", char_delete_color)
 
+  vim.api.nvim_set_hl(0, "CodeDiffGutterInsert", { link = "CodeDiffLineInsert", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffGutterDelete", { link = "CodeDiffLineDelete", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffGutterInsertNumber", { link = "CodeDiffCharInsert", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffGutterDeleteNumber", { link = "CodeDiffCharDelete", default = true })
+
   -- Moved code highlights (derived from DiffChange — the standard "changed" color)
   local diff_change_hl = vim.api.nvim_get_hl(0, { name = "DiffChange", link = false })
   local move_fallback = effective_bg(diff_change_hl) or 0x4f5258

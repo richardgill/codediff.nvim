@@ -100,6 +100,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       cycle_hunks_across_files = false,   -- ]c/[c at file boundary hops to first/last hunk of next/prev file (explorer/history)
       jump_to_first_change = true,        -- Auto-scroll to first change when opening a diff: false to stay at same line
       highlight_priority = 100,           -- Priority for line-level diff highlights (increase to override LSP highlights)
+      gutter_signs = false,                -- Native +/- signs; see Native gutter signs below
       compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
       compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
       compact_sync_folds = true,          -- Sync fold open/close across panes (mirrors Vim diff mode behavior)
@@ -221,6 +222,39 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 ```
 
 The C library will be downloaded automatically on first use. No `build` step needed!
+
+### Native gutter signs
+
+```lua
+-- Disabled by default; existing move annotations remain.
+gutter_signs = false
+
+-- Enabled defaults.
+gutter_signs = {
+  insert_text = " +",
+  delete_text = " -",
+  highlight_numbers = true,
+  changed_priority = 100,
+  unchanged_priority = nil,
+}
+
+-- Hide signs below priority 99 on unchanged lines.
+gutter_signs = {
+  changed_priority = 100,
+  unchanged_priority = 7,
+}
+```
+
+Set this under `diff`. `insert_text` and `delete_text` must each occupy one or two display cells, as measured by `strdisplaywidth()`, because Neovim limits native sign text to two display cells. The leading space in the defaults is part of the sign highlight.
+
+CodeDiff uses persistent native Neovim signs and does not modify `signcolumn` or `statuscolumn`. This example keeps a sign column and places signs after line numbers:
+
+```lua
+vim.opt.signcolumn = "yes"
+vim.opt.statuscolumn = "%C%=%l %s"
+```
+
+`signcolumn = "yes:2"` allows a second sign on each line. Changed signs use priority 100 by default. An unchanged blocker at priority 99 can hide lower-priority Gitsigns, remote signs, diagnostics, or other signs across unchanged lines while the changed signs still win. Signs are buffer-local and therefore appear in every window showing a CodeDiff buffer until the diff view is suspended or closed. Native gutter signs require Neovim 0.9 or newer.
 
 ### Managing Library Installation
 
@@ -610,6 +644,12 @@ The plugin defines highlight groups matching VSCode's diff colors:
 - `CodeDiffFiller` - Gray foreground for filler line slashes (`╱╱╱`)
 - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
 - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
+- `CodeDiffGutterInsert` - Insert sign; defaults to `CodeDiffLineInsert`
+- `CodeDiffGutterDelete` - Delete sign; defaults to `CodeDiffLineDelete`
+- `CodeDiffGutterInsertNumber` - Insert line number; defaults to `CodeDiffCharInsert`
+- `CodeDiffGutterDeleteNumber` - Delete line number; defaults to `CodeDiffCharDelete`
+
+To customize gutter colors, define these four highlight groups in your colorscheme configuration.
 
 <details open>
 <summary><b>📸 Visual Examples</b> (click to collapse)</summary>

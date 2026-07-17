@@ -700,12 +700,16 @@ local function show_single_file(tabpage, opts)
     return
   end
 
+  local gutter_signs = require("codediff.ui.gutter_signs")
+  local old_orig_buf, old_mod_buf = lifecycle.get_buffers(tabpage)
+  gutter_signs.clear_buffer(old_orig_buf)
+  gutter_signs.clear_buffer(old_mod_buf)
+
   lifecycle.update_layout(tabpage, "side-by-side")
   local orig_win, mod_win = lifecycle.get_windows(tabpage)
   local highlights = require("codediff.ui.highlights")
 
   -- Clear highlights from current session buffers
-  local old_orig_buf, old_mod_buf = lifecycle.get_buffers(tabpage)
   if old_orig_buf and vim.api.nvim_buf_is_valid(old_orig_buf) then
     vim.api.nvim_buf_clear_namespace(old_orig_buf, highlights.ns_highlight, 0, -1)
     vim.api.nvim_buf_clear_namespace(old_orig_buf, highlights.ns_filler, 0, -1)
@@ -764,6 +768,11 @@ local function show_single_file(tabpage, opts)
     lifecycle.update_paths(tabpage, opts.original_path or "", opts.modified_path or "")
     lifecycle.update_revisions(tabpage, opts.original_revision, opts.modified_revision)
     lifecycle.update_diff_result(tabpage, { changes = {}, moves = {} })
+
+    local path = opts.keep == "original" and opts.original_path or opts.modified_path
+    if path and path ~= "" then
+      gutter_signs.set_whole_file(opts.load_bufnr, opts.keep)
+    end
 
     local view_keymaps = require("codediff.ui.view.keymaps")
     view_keymaps.setup_all_keymaps(tabpage, orig_bufnr, mod_bufnr, session.mode == "explorer")
