@@ -279,6 +279,7 @@ Setup entry point:
       jump_to_first_change = true,
       highlight_added_deleted_files = true,
       highlight_priority = 100,
+      gutter_signs = false,
       compute_moves = false,
       compact_context_lines = 3,
       compact_sync_folds = true,
@@ -374,6 +375,51 @@ Setup entry point:
 <
 
 ==============================================================================
+NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
+
+Native gutter signs are disabled by default and require Neovim 0.9+. They are
+buffer-local, so they appear in every window showing a CodeDiff buffer until
+the diff view is suspended or closed.
+
+>lua
+  -- Disabled by default; existing move annotations remain.
+  gutter_signs = false
+
+  -- Enabled defaults.
+  gutter_signs = {
+    insert_text = "＋",
+    delete_text = "－",
+    highlight_numbers = true,
+    changed_priority = 100,
+    unchanged_priority = nil,
+  }
+
+  -- Hide other Neovim signs with lower priorities.
+  gutter_signs = {
+    changed_priority = 100,
+    unchanged_priority = 7,
+  }
+<
+
+Place `gutter_signs` under `diff`. `insert_text` and `delete_text` must each
+occupy one or two display cells, as measured by strdisplaywidth(), because
+Neovim limits native sign text to two display cells. The fullwidth defaults
+each occupy two display cells.
+
+CodeDiff does not modify signcolumn or statuscolumn. This example keeps a sign
+column and places signs after line numbers:
+
+>lua
+  vim.opt.signcolumn = "yes"
+  vim.opt.statuscolumn = "%C%=%l %s"
+<
+
+`signcolumn = "yes:2"` allows a second sign on each line. Changed signs use
+priority 100 by default. An unchanged blocker at priority 99 can hide
+lower-priority Gitsigns, remote signs, diagnostics, debugger signs, and other
+signs across unchanged lines while changed signs still win.
+
+==============================================================================
 HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
 
 CodeDiff defines highlight groups matching VSCode's diff colors:
@@ -390,6 +436,14 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
 - CodeDiffHelpKey - key bindings in keymap help (links to Special)
 - CodeDiffHelpSep - separators in keymap help (links to NonText)
 - CodeDiffHelpDesc - descriptions in keymap help (links to Normal)
+
+To customize gutter colors, define these four highlight groups in your
+colorscheme configuration:
+
+- CodeDiffGutterInsert - insert sign (defaults to CodeDiffLineInsert)
+- CodeDiffGutterDelete - delete sign (defaults to CodeDiffLineDelete)
+- CodeDiffGutterInsertNumber - insert line number (defaults to CodeDiffCharInsert)
+- CodeDiffGutterDeleteNumber - delete line number (defaults to CodeDiffCharDelete)
 
 Default behavior:
 - Uses DiffAdd and DiffDelete for line-level highlights
