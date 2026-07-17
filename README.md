@@ -231,8 +231,8 @@ gutter_signs = false
 
 -- Enabled defaults.
 gutter_signs = {
-  insert_text = " +",
-  delete_text = " -",
+  insert_text = "＋",
+  delete_text = "－",
   highlight_numbers = true,
   changed_priority = 100,
   unchanged_priority = nil,
@@ -245,7 +245,7 @@ gutter_signs = {
 }
 ```
 
-Set this under `diff`. `insert_text` and `delete_text` must each occupy one or two display cells, as measured by `strdisplaywidth()`, because Neovim limits native sign text to two display cells. The leading space in the defaults is part of the sign highlight.
+Set this under `diff`. `insert_text` and `delete_text` must each occupy one or two display cells, as measured by `strdisplaywidth()`, because Neovim limits native sign text to two display cells. The fullwidth defaults each occupy two display cells.
 
 CodeDiff uses persistent native Neovim signs and does not modify `signcolumn` or `statuscolumn`. This example keeps a sign column and places signs after line numbers:
 

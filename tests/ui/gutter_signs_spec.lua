@@ -106,7 +106,7 @@ describe("Native gutter signs", function()
     local original = get_signs(session.original_bufnr)[1]
     assert.same({
       row = 1,
-      raw_text = " -",
+      raw_text = "－",
       priority = 100,
       hl = "CodeDiffGutterDelete",
       number_hl = "CodeDiffGutterDeleteNumber",
@@ -119,7 +119,7 @@ describe("Native gutter signs", function()
     })
 
     local modified = get_signs(session.modified_bufnr)[1]
-    assert.equals(" +", modified.raw_text)
+    assert.equals("＋", modified.raw_text)
     assert.equals("CodeDiffGutterInsert", modified.hl)
     assert.equals("CodeDiffGutterInsertNumber", modified.number_hl)
   end)
@@ -151,12 +151,12 @@ describe("Native gutter signs", function()
     config.options.diff.gutter_signs = { changed_priority = 100, unchanged_priority = 99 }
     gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
 
-    local blocker = get_signs(session.original_bufnr)[1]
+    local blocker = find_sign(session.original_bufnr, "")
     assert.equals("", blocker.text)
     assert.equals(99, blocker.priority)
     assert.equals(0, blocker.row)
     assert.equals(2, blocker.end_row)
-    assert.equals(100, find_sign(session.original_bufnr, "-").priority)
+    assert.equals(100, find_sign(session.original_bufnr, "－").priority)
   end)
 
   it("keeps external signs and window options untouched", function()
@@ -198,7 +198,7 @@ describe("Native gutter signs", function()
     gutter_signs.set_whole_file(session.modified_bufnr, "modified")
 
     local sign = get_signs(session.modified_bufnr)[1]
-    assert.equals("+", sign.text)
+    assert.equals("＋", sign.text)
     assert.equals("CodeDiffGutterInsert", sign.hl)
     assert.equals("CodeDiffGutterInsertNumber", sign.number_hl)
     assert.equals(3, sign.end_row)
@@ -235,7 +235,7 @@ describe("Native gutter signs", function()
     assert.same({}, get_signs(session.modified_bufnr))
     state.resume_diff(tabpage)
 
-    assert.equals("+", get_signs(session.modified_bufnr)[1].text)
+    assert.equals("＋", get_signs(session.modified_bufnr)[1].text)
     lifecycle.cleanup(tabpage)
   end)
 

@@ -6,8 +6,8 @@ local namespace = vim.api.nvim_create_namespace("codediff-gutter-signs")
 local supports_native_signs = vim.fn.has("nvim-0.9") == 1
 local default_move_priority = 250
 local default_options = {
-  insert_text = " +",
-  delete_text = " -",
+  insert_text = "＋",
+  delete_text = "－",
   highlight_numbers = true,
   changed_priority = 100,
 }
