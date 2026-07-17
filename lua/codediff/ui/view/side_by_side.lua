@@ -703,11 +703,15 @@ local function show_single_file(tabpage, opts)
     return
   end
 
+  local gutter_signs = require("codediff.ui.gutter_signs")
+  local old_orig_buf, old_mod_buf = lifecycle.get_buffers(tabpage)
+  gutter_signs.clear_buffer(old_orig_buf)
+  gutter_signs.clear_buffer(old_mod_buf)
+
   lifecycle.update_layout(tabpage, "side-by-side")
   local orig_win, mod_win = lifecycle.get_windows(tabpage)
 
   -- Clear highlights from current session buffers
-  local old_orig_buf, old_mod_buf = lifecycle.get_buffers(tabpage)
   if old_orig_buf then
     auto_refresh.disable(old_orig_buf)
     lifecycle.clear_highlights(old_orig_buf)
@@ -769,6 +773,11 @@ local function show_single_file(tabpage, opts)
     session.single_side = opts.highlight ~= false and opts.keep or nil
     if session.single_side then
       core.render_whole_file(opts.load_bufnr, session.single_side)
+    end
+
+    local path = opts.keep == "original" and opts.original_path or opts.modified_path
+    if path and path ~= "" then
+      gutter_signs.set_whole_file(opts.load_bufnr, opts.keep)
     end
 
     local view_keymaps = require("codediff.ui.view.keymaps")
