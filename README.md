@@ -241,7 +241,7 @@ gutter_signs = {
 -- Hide other Neovim signs with lower priorities.
 gutter_signs = {
   changed_priority = 100,
-  unchanged_priority = 99,
+  unchanged_priority = 7,
 }
 ```
 
