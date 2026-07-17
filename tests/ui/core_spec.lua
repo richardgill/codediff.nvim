@@ -142,6 +142,24 @@ describe("Render Core", function()
     vim.api.nvim_buf_delete(right_buf, {force = true})
   end)
 
+  it("keeps added lines after blank lines out of paired character highlights", function()
+    local left_buf = vim.api.nvim_create_buf(false, true)
+    local right_buf = vim.api.nvim_create_buf(false, true)
+    local original = { "before", "AAAA", "BBBB", "CCCC", "DDDD", "after" }
+    local modified = { "before", "", "xxxx", "", "yyyy", "", "zzzz", "wwww", "after" }
+
+    vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, original)
+    vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, modified)
+    core.render_diff(left_buf, right_buf, original, modified, diff.compute_diff(original, modified))
+
+    local marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, { details = true })
+    assert.is_true(has_highlight(marks, "CodeDiffLineInsertText", 7))
+    assert.is_false(has_highlight(marks, "CodeDiffCharInsert", 7))
+
+    vim.api.nvim_buf_delete(left_buf, { force = true })
+    vim.api.nvim_buf_delete(right_buf, { force = true })
+  end)
+
   -- Test 6: Empty diff (no changes)
   it("Handles empty diff with no changes gracefully", function()
     local left_buf = vim.api.nvim_create_buf(false, true)

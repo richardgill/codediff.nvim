@@ -28,7 +28,7 @@ local function split_range(range, lines)
     start_col = math.max(0, math.min(start_col, #text))
     end_col = math.max(0, math.min(end_col, #text))
 
-    if end_col > start_col then
+    if end_col > start_col or #text == 0 then
       table.insert(segments, {
         line = line,
         start_col = start_col,
@@ -70,11 +70,15 @@ function M.to_line_segments(range, counterpart, lines, counterpart_lines)
   local segments = split_range(range, lines)
   local matched = find_matched_segments(segments, split_range(counterpart, counterpart_lines))
 
+  local rendered = {}
   for index, segment in ipairs(segments) do
-    segment.line_text = segment.full_line and not matched[index]
-    segment.full_line = nil
+    if segment.end_col > segment.start_col then
+      segment.line_text = segment.full_line and not matched[index]
+      segment.full_line = nil
+      table.insert(rendered, segment)
+    end
   end
-  return segments
+  return rendered
 end
 
 return M
