@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+
+import argparse
+import configparser
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LOCK_PATH = ROOT / "stack.lock"
+BUILD_REF = "refs/fork-stack/build"
+UPDATE_DIR = ROOT.parent / "fork-stack-update"
+STATE_PATH = Path(
+    subprocess.run(
+        ["git", "rev-parse", "--git-path", "fork-stack-state.json"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+)
+if not STATE_PATH.is_absolute():
+    STATE_PATH = ROOT / STATE_PATH
+
+DETERMINISTIC_ENV = {
+    "GIT_COMMITTER_NAME": "CodeDiff fork builder",
+    "GIT_COMMITTER_EMAIL": "fork-builder@codediff.invalid",
+    "LC_ALL": "C",
+    "TZ": "UTC",
+}
+
+
+def git(args, cwd=ROOT, check=True, capture_output=False):
+    env = os.environ | DETERMINISTIC_ENV
+    return subprocess.run(
+        ["git", "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", *args],
+        cwd=cwd,
+        check=check,
+        capture_output=capture_output,
+        env=env,
+        text=True,
+    )
+
+
+def git_output(args, cwd=ROOT):
+    return git(args, cwd=cwd, capture_output=True).stdout.strip()
+
+
+def load_stack():
+    config = configparser.ConfigParser()
+    config.optionxform = str
+    with LOCK_PATH.open() as lock_file:
+        config.read_file(lock_file)
+    names = config["stack"]["patches"].split()
+    patches = [ROOT / config[f'patch "{name}"']["file"] for name in names]
+    return config, names, patches
+
+
+def replace_stack_values(values):
+    lines = LOCK_PATH.read_text().splitlines()
+    in_stack = False
+    replaced = set()
+    output = []
+    for line in lines:
+        if line.startswith("["):
+            in_stack = line == "[stack]"
+        match = re.match(r"^(\s*)([^=]+?)(\s*=).*$", line)
+        key = match.group(2).strip() if match and in_stack else None
+        if key in values:
+            line = f"{match.group(1)}{key}{match.group(3)} {values[key]}"
+            replaced.add(key)
+        output.append(line)
+    missing = set(values) - replaced
+    if missing:
+        raise RuntimeError(f"Missing stack.lock keys: {', '.join(sorted(missing))}")
+    LOCK_PATH.write_text("\n".join(output) + "\n")
+
+
+def apply_patches(worktree, patches, three_way):
+    mode = "--3way" if three_way else "--no-3way"
+    return git(
+        ["am", mode, "--committer-date-is-author-date", *map(str, patches)],
+        cwd=worktree,
+        check=False,
+    )
+
+
+def add_detached_worktree(path, commit):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.rmdir()
+    git(["worktree", "add", "--detach", str(path), commit])
+
+
+def remove_worktree(path):
+    git(["worktree", "remove", "--force", str(path)], check=False)
+    if path.exists():
+        shutil.rmtree(path)
+
+
+def run_checks(worktree, command):
+    if command:
+        subprocess.run(shlex.split(command), cwd=worktree, check=True)
+
+
+def rebuild(run_tests=True, verify=True):
+    config, _, patches = load_stack()
+    stack = config["stack"]
+    path = Path(tempfile.mkdtemp(prefix="codediff-fork-build-"))
+    path.rmdir()
+    try:
+        add_detached_worktree(path, stack["upstream"])
+        result = apply_patches(path, patches, three_way=False)
+        if result.returncode:
+            raise RuntimeError("Strict patch application failed")
+        run_checks(path, stack.get("testCommand") if run_tests else None)
+        head = git_output(["rev-parse", "HEAD"], cwd=path)
+        tree = git_output(["rev-parse", "HEAD^{tree}"], cwd=path)
+        if verify and head != stack["expectedHead"]:
+            raise RuntimeError(f"Expected HEAD {stack['expectedHead']}, built {head}")
+        if verify and tree != stack["expectedTree"]:
+            raise RuntimeError(f"Expected tree {stack['expectedTree']}, built {tree}")
+        git(["update-ref", BUILD_REF, head])
+        print(f"HEAD {head}")
+        print(f"tree {tree}")
+        return head, tree
+    finally:
+        remove_worktree(path)
+
+
+def save_state(base):
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(base + "\n")
+
+
+def load_state():
+    if not STATE_PATH.exists():
+        raise RuntimeError("No restack is in progress")
+    return STATE_PATH.read_text().strip()
+
+
+def restack(base):
+    if STATE_PATH.exists() or UPDATE_DIR.exists():
+        raise RuntimeError("A restack already exists; continue, finish, or abort it")
+    base = git_output(["rev-parse", f"{base}^{{commit}}"])
+    _, _, patches = load_stack()
+    add_detached_worktree(UPDATE_DIR, base)
+    save_state(base)
+    result = apply_patches(UPDATE_DIR, patches, three_way=True)
+    if result.returncode:
+        print(f"Resolve conflicts in {UPDATE_DIR}, git add the files, then run: scripts/fork-stack continue")
+        return
+    print("Restack applied cleanly; run: scripts/fork-stack finish")
+
+
+def continue_restack():
+    load_state()
+    result = git(
+        ["am", "--3way", "--committer-date-is-author-date", "--continue"],
+        cwd=UPDATE_DIR,
+        check=False,
+    )
+    if result.returncode:
+        print(f"Resolve conflicts in {UPDATE_DIR}, git add the files, then rerun: scripts/fork-stack continue")
+        return
+    print("Restack complete; run: scripts/fork-stack finish")
+
+
+def write_patch(path, commit, cwd):
+    result = git(
+        ["format-patch", "--no-signature", "--no-numbered", "--no-thread", "--no-base", "-1", "--stdout", commit],
+        cwd=cwd,
+        capture_output=True,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(result.stdout)
+
+
+def export_patches(base, names, patches):
+    commits = git_output(["rev-list", "--reverse", f"{base}..HEAD"], cwd=UPDATE_DIR).splitlines()
+    if len(commits) != len(patches):
+        raise RuntimeError(f"Expected {len(patches)} patches, found {len(commits)} commits")
+    for name, path, commit in zip(names, patches, commits, strict=True):
+        write_patch(path, commit, UPDATE_DIR)
+        print(f"Updated {name} from {commit}")
+
+
+def am_in_progress():
+    return git(
+        ["am", "--show-current-patch"],
+        cwd=UPDATE_DIR,
+        check=False,
+        capture_output=True,
+    ).returncode == 0
+
+
+def finish_restack():
+    base = load_state()
+    if am_in_progress():
+        raise RuntimeError("The current conflict must be continued before finishing")
+    _, names, patches = load_stack()
+    export_patches(base, names, patches)
+    replace_stack_values({"upstream": base})
+    head, tree = rebuild(run_tests=False, verify=False)
+    replace_stack_values({"expectedHead": head, "expectedTree": tree})
+    rebuild(run_tests=True, verify=True)
+    remove_worktree(UPDATE_DIR)
+    STATE_PATH.unlink()
+    print("Restack recorded in patches and stack.lock")
+
+
+def abort_restack():
+    load_state()
+    if am_in_progress():
+        git(["am", "--abort"], cwd=UPDATE_DIR)
+    remove_worktree(UPDATE_DIR)
+    STATE_PATH.unlink(missing_ok=True)
+    print("Restack aborted")
+
+
+def remote_head(remote, branch):
+    ref = f"refs/heads/{branch}"
+    result = git(["ls-remote", "--heads", remote, ref], check=False, capture_output=True)
+    return result.stdout.split()[0] if result.returncode == 0 and result.stdout.strip() else ""
+
+
+def ensure_snapshot_tag(tag, head):
+    tag_ref = f"refs/tags/{tag}"
+    if git(["show-ref", "--verify", "--quiet", tag_ref], check=False).returncode:
+        git(["tag", "-a", tag, head, "-m", f"CodeDiff fork {tag}"])
+        return
+    target = git_output(["rev-list", "-n", "1", tag_ref])
+    if target != head:
+        raise RuntimeError(f"Immutable tag {tag} points to {target}, not {head}")
+
+
+def release_notes(config, names, head):
+    stack = config["stack"]
+    lines = [
+        f"Generated from upstream `{stack['upstream']}`.",
+        "",
+        "```lua",
+        f'{{ "{stack["repository"]}", commit = "{head}" }}',
+        "```",
+        "",
+        "Included downstream patches:",
+    ]
+    for name in names:
+        patch = config[f'patch "{name}"']
+        pull_request = patch.get("pullRequest")
+        if pull_request:
+            lines.append(f"- [{name}]({pull_request}) (`{patch['originCommit']}`)")
+    return "\n".join(lines) + "\n"
+
+
+def publish(tag, remote_override):
+    if not re.fullmatch(r"snapshot-\d{8}\.\d+", tag):
+        raise RuntimeError("Tag must match snapshot-YYYYMMDD.N")
+    if shutil.which("gh") is None:
+        raise RuntimeError("gh is required to publish a GitHub release")
+    config, names, _ = load_stack()
+    stack = config["stack"]
+    remote = remote_override or stack["publishRemote"]
+    branch = stack["publishBranch"]
+    head, _ = rebuild(run_tests=True, verify=True)
+    ensure_snapshot_tag(tag, head)
+    expected = remote_head(remote, branch)
+    lease = f"--force-with-lease=refs/heads/{branch}:{expected}"
+    git(
+        [
+            "push",
+            "--atomic",
+            lease,
+            remote,
+            f"{BUILD_REF}:refs/heads/{branch}",
+            f"refs/tags/{tag}:refs/tags/{tag}",
+        ]
+    )
+    existing = subprocess.run(
+        ["gh", "release", "view", tag, "--repo", stack["repository"]],
+        capture_output=True,
+    )
+    if existing.returncode:
+        subprocess.run(
+            [
+                "gh",
+                "release",
+                "create",
+                tag,
+                "--repo",
+                stack["repository"],
+                "--verify-tag",
+                "--title",
+                tag,
+                "--notes",
+                release_notes(config, names, head),
+            ],
+            check=True,
+        )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+    rebuild_parser = commands.add_parser("rebuild")
+    rebuild_parser.add_argument("--skip-tests", action="store_true")
+    restack_parser = commands.add_parser("restack")
+    restack_parser.add_argument("upstream")
+    commands.add_parser("continue")
+    commands.add_parser("finish")
+    commands.add_parser("abort")
+    publish_parser = commands.add_parser("publish")
+    publish_parser.add_argument("tag")
+    publish_parser.add_argument("--remote")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    if args.command == "rebuild":
+        rebuild(run_tests=not args.skip_tests)
+    elif args.command == "restack":
+        restack(args.upstream)
+    elif args.command == "continue":
+        continue_restack()
+    elif args.command == "finish":
+        finish_restack()
+    elif args.command == "abort":
+        abort_restack()
+    elif args.command == "publish":
+        publish(args.tag, args.remote)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        raise SystemExit(1)

@@ -1,0 +1,40 @@
+name: Verify fork stack
+
+on:
+  push:
+    branches:
+      - fork-stack
+    paths:
+      - stack.lock
+      - patches/**
+      - scripts/fork-stack
+      - .github/workflows/fork-stack.yml
+  pull_request:
+    branches:
+      - fork-stack
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream history
+        run: git fetch https://github.com/esmuellert/codediff.nvim.git main
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+
+      - name: Setup Neovim
+        uses: ./.github/actions/setup-neovim
+        with:
+          arch: x64
+
+      - name: Rebuild and test fork
+        run: scripts/fork-stack rebuild

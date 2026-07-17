@@ -1,0 +1,25 @@
+From a29db0804bafb51bb6d7b514f4ba0dfd5aab7d5d Mon Sep 17 00:00:00 2001
+From: CodeDiff fork builder <fork-builder@codediff.invalid>
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+Subject: [PATCH] docs: identify downstream fork
+
+---
+ README.md | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/README.md b/README.md
+index e71d6b8..6b98081 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,11 @@
+ # codediff.nvim
+ 
++> [!NOTE]
++> This is a generated downstream build containing pending improvements to
++> [upstream codediff.nvim](https://github.com/esmuellert/codediff.nvim). Use an
++> immutable SHA from [Releases](https://github.com/richardgill/codediff.nvim/releases)
++> for reproducible installs. The [build manifest](https://github.com/richardgill/codediff.nvim/tree/fork-stack) records its exact inputs.
++
+ [![Downloads](https://img.shields.io/github/downloads/esmuellert/vscode-diff.nvim/total?label=⬇%20downloads&color=blue)](https://github.com/esmuellert/vscode-diff.nvim/releases)
+ 
+ A Neovim plugin that provides VSCode-style diff rendering with two-tier highlighting, supporting both side-by-side and inline (unified) layouts.

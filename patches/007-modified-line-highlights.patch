@@ -1,0 +1,653 @@
+From b01a5edd0e942303de02c17fd13566eace3595d7 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Thu, 16 Jul 2026 20:48:31 +0100
+Subject: [PATCH] fix: distinguish modified lines from insertions
+
+---
+ README.md                                  | 10 ++++--
+ doc/codediff.txt                           |  6 +++-
+ lua/codediff/config.lua                    |  1 +
+ lua/codediff/ui/auto_refresh.lua           |  2 +-
+ lua/codediff/ui/core.lua                   | 36 +++++++++----------
+ lua/codediff/ui/highlights.lua             |  7 ++--
+ lua/codediff/ui/inline.lua                 |  2 +-
+ tests/ui/core_spec.lua                     | 42 +++++++++++++++++-----
+ tests/ui/explorer/hunk_operations_spec.lua |  8 ++---
+ tests/ui/highlights_spec.lua               | 16 +++++++++
+ tests/ui/inline_spec.lua                   | 37 +++++++++----------
+ tests/ui/view/inline_history_spec.lua      | 15 ++++++--
+ tests/ui/view/inline_standalone_spec.lua   | 14 +++++---
+ 13 files changed, 133 insertions(+), 63 deletions(-)
+
+diff --git a/README.md b/README.md
+index fee4fac..6534aa8 100644
+--- a/README.md
++++ b/README.md
+@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+ }
+ ```
+ 
+-> **Note:** The plugin automatically adapts to your colorscheme's background (dark/light). It uses `DiffAdd` and `DiffDelete` for line-level diffs, and auto-adjusts brightness for character-level highlights (1.4x brighter for dark themes, 0.92x darker for light themes). See [Highlight Groups](#highlight-groups) for customization.
++> **Note:** The plugin automatically adapts to your colorscheme's background (dark/light). It uses `DiffAdd`, `DiffChange`, and `DiffDelete` for line-level diffs, and auto-adjusts brightness for character-level highlights (1.4x brighter for dark themes, 0.92x darker for light themes). See [Highlight Groups](#highlight-groups) for customization.
+ 
+ **With custom configuration:**
+ ```lua
+@@ -63,6 +63,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+     highlights = {
+       -- Line-level: accepts highlight group names or hex colors (e.g., "#2ea043")
+       line_insert = "DiffAdd",      -- Line-level insertions
++      line_change = "DiffChange",   -- Line-level modifications on the modified side
+       line_delete = "DiffDelete",   -- Line-level deletions
+ 
+       -- Character-level: accepts highlight group names or hex colors
+@@ -482,6 +483,7 @@ git difftool -y                   # Skip confirmation prompts
+ require("codediff").setup({
+   highlights = {
+     line_insert = "DiffAdd",
++    line_change = "DiffChange",
+     line_delete = "DiffDelete",
+     char_brightness = 1.4,
+   },
+@@ -606,6 +608,7 @@ The plugin handles syntax highlighting differently based on buffer type:
+ The plugin defines highlight groups matching VSCode's diff colors:
+ 
+ - `CodeDiffLineInsert` - Light green background for inserted lines
++- `CodeDiffLineChange` - Background for modified lines on the modified side
+ - `CodeDiffLineDelete` - Light red background for deleted lines
+ - `CodeDiffCharInsert` - Deep/dark green for inserted characters
+ - `CodeDiffCharDelete` - Deep/dark red for deleted characters
+@@ -633,7 +636,7 @@ The plugin defines highlight groups matching VSCode's diff colors:
+ </details>
+ 
+ **Default behavior:**
+-- Uses your colorscheme's `DiffAdd` and `DiffDelete` for line-level highlights
++- Uses your colorscheme's `DiffAdd`, `DiffChange`, and `DiffDelete` for line-level highlights
+ - Character-level highlights are auto-adjusted based on `vim.o.background`:
+   - **Dark themes** (`background = "dark"`): Brightness multiplied by `1.4` (40% brighter)
+   - **Light themes** (`background = "light"`): Brightness multiplied by `0.92` (8% darker)
+@@ -648,6 +651,7 @@ The plugin defines highlight groups matching VSCode's diff colors:
+ -- Use hex colors directly
+ highlights = {
+   line_insert = "#1d3042",
++  line_change = "#24384f",
+   line_delete = "#351d2b",
+   char_brightness = 1.5,  -- Override auto-detection with explicit value
+ }
+@@ -655,6 +659,7 @@ highlights = {
+ -- Override character colors explicitly
+ highlights = {
+   line_insert = "DiffAdd",
++  line_change = "DiffChange",
+   line_delete = "DiffDelete",
+   char_insert = "#3fb950",
+   char_delete = "#ff7b72",
+@@ -663,6 +668,7 @@ highlights = {
+ -- Mix highlight groups and hex colors
+ highlights = {
+   line_insert = "String",
++  line_change = "DiffChange",
+   char_delete = "#ff0000",
+ }
+ ```
+diff --git a/doc/codediff.txt b/doc/codediff.txt
+index 23a76da..1e15903 100644
+--- a/doc/codediff.txt
++++ b/doc/codediff.txt
+@@ -175,6 +175,7 @@ Setup entry point:
+   require("codediff").setup({
+     highlights = {
+       line_insert = "DiffAdd",
++      line_change = "DiffChange",
+       line_delete = "DiffDelete",
+       char_insert = nil,
+       char_delete = nil,
+@@ -294,6 +295,7 @@ HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
+ 
+ CodeDiff defines highlight groups matching VSCode's diff colors:
+ - CodeDiffLineInsert - light green background for inserted lines
++- CodeDiffLineChange - background for modified lines on the modified side
+ - CodeDiffLineDelete - light red background for deleted lines
+ - CodeDiffCharInsert - deep/dark green for inserted characters
+ - CodeDiffCharDelete - deep/dark red for deleted characters
+@@ -308,7 +310,7 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
+ - CodeDiffHelpDesc - descriptions in keymap help (links to Normal)
+ 
+ Default behavior:
+-- Uses DiffAdd and DiffDelete for line-level highlights
++- Uses DiffAdd, DiffChange, and DiffDelete for line-level highlights
+ - Added and untracked files use line_insert across the full file
+ - Deleted files use line_delete across the full file
+ - Set diff.highlight_added_deleted_files = false to disable full-file highlighting
+@@ -320,12 +322,14 @@ Customization examples:
+ >lua
+   highlights = {
+     line_insert = "#1d3042",
++    line_change = "#24384f",
+     line_delete = "#351d2b",
+     char_brightness = 1.5,
+   }
+ 
+   highlights = {
+     line_insert = "DiffAdd",
++    line_change = "DiffChange",
+     line_delete = "DiffDelete",
+     char_insert = "#3fb950",
+     char_delete = "#ff7b72",
+diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
+index 1eec55c..81273bf 100644
+--- a/lua/codediff/config.lua
++++ b/lua/codediff/config.lua
+@@ -6,6 +6,7 @@ M.defaults = {
+   highlights = {
+     -- Line-level highlights: accepts highlight group names (e.g., "DiffAdd") or color values (e.g., "#2ea043")
+     line_insert = "DiffAdd", -- Line-level insertions (base color)
++    line_change = "DiffChange", -- Line-level modifications (base color)
+     line_delete = "DiffDelete", -- Line-level deletions (base color)
+ 
+     -- Character-level highlights: accepts highlight group names or color values
+diff --git a/lua/codediff/ui/auto_refresh.lua b/lua/codediff/ui/auto_refresh.lua
+index 744237a..38deda3 100644
+--- a/lua/codediff/ui/auto_refresh.lua
++++ b/lua/codediff/ui/auto_refresh.lua
+@@ -289,7 +289,7 @@ local function do_result_diff_update(bufnr)
+     return
+   end
+ 
+-  -- Render highlights on result buffer only (modified side = insertions shown as green)
++  -- Render highlights on result buffer only
+   core.render_single_buffer(bufnr, lines_diff, "modified")
+ end
+ 
+diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
+index 82baedb..441b554 100644
+--- a/lua/codediff/ui/core.lua
++++ b/lua/codediff/ui/core.lua
+@@ -19,6 +19,14 @@ local function is_empty_range(range)
+   return range.start_line == range.end_line and range.start_col == range.end_col
+ end
+ 
++local function has_lines(line_range)
++  return line_range.end_line > line_range.start_line
++end
++
++local function get_modified_line_highlight(mapping)
++  return has_lines(mapping.original) and "CodeDiffLineChange" or "CodeDiffLineInsert"
++end
++
+ -- Check if a column position is past the visible line content
+ local function is_past_line_content(line_number, column, lines)
+   if line_number < 1 or line_number > #lines then
+@@ -325,15 +333,15 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+   local last_mod_line = 1
+ 
+   for _, mapping in ipairs(lines_diff.changes) do
+-    local orig_is_empty = (mapping.original.end_line <= mapping.original.start_line)
+-    local mod_is_empty = (mapping.modified.end_line <= mapping.modified.start_line)
++    local orig_has_lines = has_lines(mapping.original)
++    local mod_has_lines = has_lines(mapping.modified)
+ 
+-    if not orig_is_empty then
++    if orig_has_lines then
+       apply_line_highlights(left_bufnr, mapping.original, "CodeDiffLineDelete")
+     end
+ 
+-    if not mod_is_empty then
+-      apply_line_highlights(right_bufnr, mapping.modified, "CodeDiffLineInsert")
++    if mod_has_lines then
++      apply_line_highlights(right_bufnr, mapping.modified, get_modified_line_highlight(mapping))
+     end
+ 
+     if mapping.inner_changes then
+@@ -435,14 +443,7 @@ function M.render_single_buffer(bufnr, diff, side)
+   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+ 
+   -- Determine highlight groups based on side
+-  local line_hl, char_hl
+-  if side == "original" then
+-    line_hl = "CodeDiffLineDelete"
+-    char_hl = "CodeDiffCharDelete"
+-  else
+-    line_hl = "CodeDiffLineInsert"
+-    char_hl = "CodeDiffCharInsert"
+-  end
++  local char_hl = side == "original" and "CodeDiffCharDelete" or "CodeDiffCharInsert"
+ 
+   for _, mapping in ipairs(diff.changes) do
+     -- Get the range for our side
+@@ -451,10 +452,9 @@ function M.render_single_buffer(bufnr, diff, side)
+       goto continue
+     end
+ 
+-    local is_empty = (range.end_line <= range.start_line)
+-
+     -- Apply line highlights
+-    if not is_empty then
++    if has_lines(range) then
++      local line_hl = side == "original" and "CodeDiffLineDelete" or get_modified_line_highlight(mapping)
+       apply_line_highlights(bufnr, range, line_hl)
+     end
+ 
+@@ -508,7 +508,7 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+   -- This matches VSCode's behavior of only highlighting conflicting changes
+   for _, change in ipairs(conflict_left_changes) do
+     local range = change.modified
+-    if range and range.end_line > range.start_line then
++    if range and has_lines(range) then
+       apply_line_highlights(left_bufnr, range, "CodeDiffLineInsert")
+     end
+     if change.inner_changes then
+@@ -523,7 +523,7 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+ 
+   for _, change in ipairs(conflict_right_changes) do
+     local range = change.modified
+-    if range and range.end_line > range.start_line then
++    if range and has_lines(range) then
+       apply_line_highlights(right_bufnr, range, "CodeDiffLineInsert")
+     end
+     if change.inner_changes then
+diff --git a/lua/codediff/ui/highlights.lua b/lua/codediff/ui/highlights.lua
+index c947269..42e66ac 100644
+--- a/lua/codediff/ui/highlights.lua
++++ b/lua/codediff/ui/highlights.lua
+@@ -100,10 +100,14 @@ function M.setup()
+   local opts = config.options.highlights
+ 
+   -- Line-level highlights
++  local diff_change_hl = vim.api.nvim_get_hl(0, { name = "DiffChange", link = false })
++  local diff_change_bg = effective_bg(diff_change_hl)
+   local line_insert_color = resolve_color(opts.line_insert, 0x1d3042, base256_color(0, 1, 0))
++  local line_change_color = resolve_color(opts.line_change, diff_change_bg or 0x24384f, base256_color(0, 0, 2))
+   local line_delete_color = resolve_color(opts.line_delete, 0x351d2b, base256_color(1, 0, 0))
+ 
+   vim.api.nvim_set_hl(0, "CodeDiffLineInsert", line_insert_color)
++  vim.api.nvim_set_hl(0, "CodeDiffLineChange", line_change_color)
+   vim.api.nvim_set_hl(0, "CodeDiffLineDelete", line_delete_color)
+ 
+   -- Character-level highlights: use explicit values if provided, otherwise derive from line highlights
+@@ -139,8 +143,7 @@ function M.setup()
+   vim.api.nvim_set_hl(0, "CodeDiffCharDelete", char_delete_color)
+ 
+   -- Moved code highlights (derived from DiffChange — the standard "changed" color)
+-  local diff_change_hl = vim.api.nvim_get_hl(0, { name = "DiffChange", link = false })
+-  local move_fallback = effective_bg(diff_change_hl) or 0x4f5258
++  local move_fallback = diff_change_bg or 0x4f5258
+   local line_move_color = resolve_color(opts.line_move, move_fallback, base256_color(0, 0, 2))
+   vim.api.nvim_set_hl(0, "CodeDiffLineMove", line_move_color)
+ 
+diff --git a/lua/codediff/ui/inline.lua b/lua/codediff/ui/inline.lua
+index c91b95e..3d06c16 100644
+--- a/lua/codediff/ui/inline.lua
++++ b/lua/codediff/ui/inline.lua
+@@ -440,7 +440,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
+ 
+     -- Step 2: Highlight added/modified lines on the real buffer
+     if has_modified then
+-      local hl_group = has_original and "CodeDiffLineInsert" or "CodeDiffLineInsert"
++      local hl_group = has_original and "CodeDiffLineChange" or "CodeDiffLineInsert"
+ 
+       for line = mod_start, mod_end - 1 do
+         if line > buf_line_count then
+diff --git a/tests/ui/core_spec.lua b/tests/ui/core_spec.lua
+index 30f2d43..d9b4284 100644
+--- a/tests/ui/core_spec.lua
++++ b/tests/ui/core_spec.lua
+@@ -13,6 +13,18 @@ local function assert_whole_file_highlight(bufnr, expected_group)
+   return marks[1][4]
+ end
+ 
++local function has_highlight(bufnr, hl_group)
++  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
++
++  for _, mark in ipairs(marks) do
++    if mark[4].hl_group == hl_group then
++      return true
++    end
++  end
++
++  return false
++end
++
+ describe("Render Core", function()
+   before_each(function()
+     config.options.diff.highlight_added_deleted_files = true
+@@ -34,8 +46,8 @@ describe("Render Core", function()
+     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
+ 
+     -- Verify added line has highlight
+-    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, {})
+-    assert.is_true(#right_marks > 0, "Added line should have highlight extmark")
++    assert.is_true(has_highlight(right_buf, "CodeDiffLineInsert"), "Added line should use CodeDiffLineInsert")
++    assert.is_false(has_highlight(right_buf, "CodeDiffLineChange"), "Added line should not use CodeDiffLineChange")
+ 
+     vim.api.nvim_buf_delete(left_buf, {force = true})
+     vim.api.nvim_buf_delete(right_buf, {force = true})
+@@ -78,11 +90,9 @@ describe("Render Core", function()
+     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
+ 
+     -- Both sides should have highlights for modified line
+-    local left_marks = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_highlight, 0, -1, {})
+-    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, {})
+-    
+-    assert.is_true(#left_marks > 0, "Left buffer should have highlight for modified line")
+-    assert.is_true(#right_marks > 0, "Right buffer should have highlight for modified line")
++    assert.is_true(has_highlight(left_buf, "CodeDiffLineDelete"), "Left buffer should have delete highlight for modified line")
++    assert.is_true(has_highlight(right_buf, "CodeDiffLineChange"), "Right buffer should have change highlight for modified line")
++    assert.is_false(has_highlight(right_buf, "CodeDiffLineInsert"), "Modified line should not use insert highlight on the right")
+ 
+     vim.api.nvim_buf_delete(left_buf, {force = true})
+     vim.api.nvim_buf_delete(right_buf, {force = true})
+@@ -427,8 +437,8 @@ describe("Render Core", function()
+     core.render_single_buffer(buf, lines_diff, "modified")
+ 
+     -- Verify added line has highlight
+-    local marks = vim.api.nvim_buf_get_extmarks(buf, highlights.ns_highlight, 0, -1, {})
+-    assert.is_true(#marks > 0, "Modified side should have highlight extmarks")
++    assert.is_true(has_highlight(buf, "CodeDiffLineInsert"), "Added line should use CodeDiffLineInsert")
++    assert.is_false(has_highlight(buf, "CodeDiffLineChange"), "Added line should not use CodeDiffLineChange")
+ 
+     vim.api.nvim_buf_delete(buf, {force = true})
+   end)
+@@ -561,4 +571,18 @@ describe("Render Core", function()
+     assert.equal(0, #marks)
+     vim.api.nvim_buf_delete(buf, { force = true })
+   end)
++
++  it("render_single_buffer uses change highlights for modified lines", function()
++    local buf = vim.api.nvim_create_buf(false, true)
++    local original = {"line 1", "old content"}
++    local modified = {"line 1", "new content"}
++
++    vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
++    core.render_single_buffer(buf, diff.compute_diff(original, modified), "modified")
++
++    assert.is_true(has_highlight(buf, "CodeDiffLineChange"), "Modified line should use CodeDiffLineChange")
++    assert.is_false(has_highlight(buf, "CodeDiffLineInsert"), "Modified line should not use CodeDiffLineInsert")
++
++    vim.api.nvim_buf_delete(buf, {force = true})
++  end)
+ end)
+diff --git a/tests/ui/explorer/hunk_operations_spec.lua b/tests/ui/explorer/hunk_operations_spec.lua
+index d98496d..c6d1ef8 100644
+--- a/tests/ui/explorer/hunk_operations_spec.lua
++++ b/tests/ui/explorer/hunk_operations_spec.lua
+@@ -281,8 +281,8 @@ describe("Hunk operations (side-by-side)", function()
+     assert.equals(9, changes[1].modified.start_line, "Remaining hunk should be at line 9")
+ 
+     -- Highlights should exist for the remaining hunk
+-    local line_hls = count_line_highlights(mod_buf, ns_highlight, "LineInsert")
+-    assert.is_true(line_hls >= 1, "LineInsert highlights should exist for remaining hunk, got " .. line_hls)
++    local line_hls = count_line_highlights(mod_buf, ns_highlight, "LineChange")
++    assert.is_true(line_hls >= 1, "LineChange highlights should exist for remaining hunk, got " .. line_hls)
+   end)
+ 
+   -- --------------------------------------------------------------------------
+@@ -694,8 +694,8 @@ describe("Explorer hunk/staging actions", function()
+     session = lifecycle.get_session(tabpage)
+     _, mod_buf = lifecycle.get_buffers(tabpage)
+     local ns = highlights.ns_highlight
+-    local line_hls = count_line_highlights(mod_buf, ns, "LineInsert")
+-    assert.is_true(line_hls >= 1, "After unstage_all, highlights should be restored, got " .. line_hls)
++    local line_hls = count_line_highlights(mod_buf, ns, "LineChange")
++    assert.is_true(line_hls >= 1, "After unstage_all, change highlights should be restored, got " .. line_hls)
+ 
+     -- Verify git state
+     local staged_output = vim.fn.system("git -C " .. vim.fn.shellescape(repo.dir) .. " diff --cached --name-only")
+diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
+index a7a5693..5eb43ba 100644
+--- a/tests/ui/highlights_spec.lua
++++ b/tests/ui/highlights_spec.lua
+@@ -8,6 +8,7 @@ local highlights = require("codediff.ui.highlights")
+ local function reset_codediff()
+   -- Wipe any cached CodeDiff highlights so each test starts clean
+   pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineInsert", {})
++  pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineChange", {})
+   pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineDelete", {})
+   require("codediff").setup({})
+ end
+@@ -18,12 +19,15 @@ describe("highlights.lua color derivation", function()
+   it("reads bg directly for colorschemes that use bg-based diff highlights", function()
+     -- Mimic the default convention: DiffAdd uses bg + (optional) fg, no reverse
+     vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x123456 })
++    vim.api.nvim_set_hl(0, "DiffChange", { bg = 0xabcdef })
+     vim.api.nvim_set_hl(0, "DiffDelete", { bg = 0x654321 })
+     highlights.setup()
+ 
+     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
++    local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
+     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
+     assert.are.equal(0x123456, insert.bg, "Insert bg should come from DiffAdd.bg")
++    assert.are.equal(0xabcdef, change.bg, "Change bg should come from DiffChange.bg")
+     assert.are.equal(0x654321, delete.bg, "Delete bg should come from DiffDelete.bg")
+   end)
+ 
+@@ -31,17 +35,29 @@ describe("highlights.lua color derivation", function()
+     -- Mimic sorbet's pattern: fg holds the green/red color and reverse=true
+     -- means Neovim renders it as a background at draw time.
+     vim.api.nvim_set_hl(0, "DiffAdd", { fg = 0x00af5f, bg = 0x000000, reverse = true })
++    vim.api.nvim_set_hl(0, "DiffChange", { fg = 0x005faf, bg = 0x000000, reverse = true })
+     vim.api.nvim_set_hl(0, "DiffDelete", { fg = 0xd70000, bg = 0x000000, reverse = true })
+     highlights.setup()
+ 
+     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
++    local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
+     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
+     assert.are.equal(0x00af5f, insert.bg,
+       "Insert bg should come from DiffAdd.fg when reverse=true")
++    assert.are.equal(0x005faf, change.bg,
++      "Change bg should come from DiffChange.fg when reverse=true")
+     assert.are.equal(0xd70000, delete.bg,
+       "Delete bg should come from DiffDelete.fg when reverse=true")
+   end)
+ 
++  it("honors configured line_change colors", function()
++    require("codediff").setup({ highlights = { line_change = "#13579b" } })
++    highlights.setup()
++
++    local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
++    assert.are.equal(0x13579b, change.bg)
++  end)
++
+   it("honors cterm.reverse independently of gui reverse", function()
+     -- Some colorschemes set the reverse flag only on the cterm side.
+     vim.api.nvim_set_hl(0, "DiffAdd", {
+diff --git a/tests/ui/inline_spec.lua b/tests/ui/inline_spec.lua
+index 35cfce0..ccf8617 100644
+--- a/tests/ui/inline_spec.lua
++++ b/tests/ui/inline_spec.lua
+@@ -5,6 +5,18 @@ local inline = require("codediff.ui.inline")
+ local highlights = require("codediff.ui.highlights")
+ local diff = require("codediff.core.diff")
+ 
++local function has_highlight(bufnr, hl_group)
++  local marks = vim.api.nvim_buf_get_extmarks(bufnr, inline.ns_inline, 0, -1, { details = true })
++
++  for _, mark in ipairs(marks) do
++    if mark[4].hl_group == hl_group then
++      return true
++    end
++  end
++
++  return false
++end
++
+ describe("Inline Diff Rendering", function()
+   before_each(function()
+     highlights.setup()
+@@ -23,16 +35,8 @@ describe("Inline Diff Rendering", function()
+     inline.render_inline_diff(buf, lines_diff, original, modified)
+ 
+     -- Added line should have highlight extmark
+-    local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
+-    local has_insert_hl = false
+-    for _, mark in ipairs(marks) do
+-      local details = mark[4]
+-      if details.hl_group == "CodeDiffLineInsert" then
+-        has_insert_hl = true
+-        break
+-      end
+-    end
+-    assert.is_true(has_insert_hl, "Added line should have CodeDiffLineInsert highlight")
++    assert.is_true(has_highlight(buf, "CodeDiffLineInsert"), "Added line should have CodeDiffLineInsert highlight")
++    assert.is_false(has_highlight(buf, "CodeDiffLineChange"), "Added line should not have CodeDiffLineChange highlight")
+ 
+     vim.api.nvim_buf_delete(buf, { force = true })
+   end)
+@@ -68,7 +72,7 @@ describe("Inline Diff Rendering", function()
+   end)
+ 
+   -- Test 3: Modified lines get both virtual lines and highlights
+-  it("renders modified lines with both delete virt_lines and insert highlights", function()
++  it("renders modified lines with both delete virt_lines and change highlights", function()
+     local buf = vim.api.nvim_create_buf(false, true)
+ 
+     local original = { "line 1", "old content", "line 3" }
+@@ -82,20 +86,17 @@ describe("Inline Diff Rendering", function()
+     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
+ 
+     local has_virt_lines = false
+-    local has_insert_hl = false
+ 
+     for _, mark in ipairs(marks) do
+       local details = mark[4]
+       if details.virt_lines and #details.virt_lines > 0 then
+         has_virt_lines = true
+       end
+-      if details.hl_group == "CodeDiffLineInsert" then
+-        has_insert_hl = true
+-      end
+     end
+ 
+     assert.is_true(has_virt_lines, "Modified line should have virtual line showing original")
+-    assert.is_true(has_insert_hl, "Modified line should have insert highlight")
++    assert.is_true(has_highlight(buf, "CodeDiffLineChange"), "Modified line should have change highlight")
++    assert.is_false(has_highlight(buf, "CodeDiffLineInsert"), "Modified line should not have insert highlight")
+ 
+     vim.api.nvim_buf_delete(buf, { force = true })
+   end)
+@@ -192,13 +193,13 @@ describe("Inline Diff Rendering", function()
+       if details.virt_lines then
+         virt_line_count = virt_line_count + 1
+       end
+-      if details.hl_group == "CodeDiffLineInsert" then
++      if details.hl_group == "CodeDiffLineChange" then
+         hl_count = hl_count + 1
+       end
+     end
+ 
+     assert.is_true(virt_line_count >= 2, "Should have virtual lines for at least 2 hunks")
+-    assert.is_true(hl_count >= 2, "Should have insert highlights for at least 2 hunks")
++    assert.is_true(hl_count >= 2, "Should have change highlights for at least 2 hunks")
+ 
+     vim.api.nvim_buf_delete(buf, { force = true })
+   end)
+diff --git a/tests/ui/view/inline_history_spec.lua b/tests/ui/view/inline_history_spec.lua
+index d67ccd5..b080391 100644
+--- a/tests/ui/view/inline_history_spec.lua
++++ b/tests/ui/view/inline_history_spec.lua
+@@ -112,19 +112,24 @@ describe("Inline diff with history-like configurations", function()
+ 
+     -- Should have extmarks for the changes (insert highlights, virtual lines for deletes)
+     local has_insert_hl = false
++    local has_change_hl = false
+     local has_virt_lines = false
+     for _, mark in ipairs(marks) do
+       local details = mark[4]
+       if details.hl_group == "CodeDiffLineInsert" then
+         has_insert_hl = true
+       end
++      if details.hl_group == "CodeDiffLineChange" then
++        has_change_hl = true
++      end
+       if details.virt_lines and #details.virt_lines > 0 then
+         has_virt_lines = true
+       end
+     end
+ 
+     -- We expect at least insert highlights for the changed/added lines
+-    assert.is_true(has_insert_hl, "Should have CodeDiffLineInsert extmarks for changed lines")
++    assert.is_true(has_insert_hl, "Added lines should use CodeDiffLineInsert")
++    assert.is_true(has_change_hl, "Changed lines should use CodeDiffLineChange")
+     -- The modification of "line 2" -> "line 2 changed" should produce virtual lines showing the old text
+     assert.is_true(has_virt_lines, "Should have virtual lines for deleted/modified original text")
+ 
+@@ -272,14 +277,18 @@ describe("Inline diff with history-like configurations", function()
+     if mod_buf and vim.api.nvim_buf_is_valid(mod_buf) then
+       local marks = vim.api.nvim_buf_get_extmarks(mod_buf, inline.ns_inline, 0, -1, { details = true })
+       local has_insert_hl = false
++      local has_change_hl = false
+       for _, mark in ipairs(marks) do
+         local details = mark[4]
+         if details.hl_group == "CodeDiffLineInsert" then
+           has_insert_hl = true
+-          break
++        end
++        if details.hl_group == "CodeDiffLineChange" then
++          has_change_hl = true
+         end
+       end
+-      assert.is_true(has_insert_hl, "Updated view should have inline diff extmarks for new changes")
++      assert.is_true(has_insert_hl, "Updated added lines should use CodeDiffLineInsert")
++      assert.is_true(has_change_hl, "Updated changed lines should use CodeDiffLineChange")
+     end
+ 
+     vim.fn.delete(left_path)
+diff --git a/tests/ui/view/inline_standalone_spec.lua b/tests/ui/view/inline_standalone_spec.lua
+index 7ee0630..6aa2152 100644
+--- a/tests/ui/view/inline_standalone_spec.lua
++++ b/tests/ui/view/inline_standalone_spec.lua
+@@ -38,21 +38,26 @@ local function get_inline_extmarks(bufnr)
+   local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_inline, 0, -1, { details = true })
+   local has_virt_lines = false
+   local has_insert_hl = false
++  local has_change_hl = false
+ 
+   for _, mark in ipairs(extmarks) do
+     local details = mark[4]
+     if details.virt_lines and #details.virt_lines > 0 then
+       has_virt_lines = true
+     end
+-    if details.hl_group and (details.hl_group == "CodeDiffLineInsert" or details.hl_group == "CodeDiffCharInsert") then
++    if details.hl_group == "CodeDiffLineInsert" then
+       has_insert_hl = true
+     end
++    if details.hl_group == "CodeDiffLineChange" then
++      has_change_hl = true
++    end
+   end
+ 
+   return {
+     total = #extmarks,
+     has_virt_lines = has_virt_lines,
+     has_insert_hl = has_insert_hl,
++    has_change_hl = has_change_hl,
+     extmarks = extmarks,
+   }
+ end
+@@ -144,7 +149,8 @@ describe("Inline standalone view", function()
+ 
+     local info = get_inline_extmarks(result.modified_buf)
+     assert.is_true(info.has_virt_lines, "Should have virt_lines for deleted original line")
+-    assert.is_true(info.has_insert_hl, "Should have insert highlight for new modified line")
++    assert.is_true(info.has_change_hl, "Should have change highlight for new modified line")
++    assert.is_false(info.has_insert_hl, "Modified line should not use insert highlight")
+ 
+     vim.fn.delete(left_path)
+     vim.fn.delete(right_path)
+@@ -335,7 +341,7 @@ describe("Inline standalone view", function()
+     assert.is_truthy(session.stored_diff_result, "Diff should compute")
+ 
+     local info = get_inline_extmarks(result.modified_buf)
+-    assert.is_true(info.has_virt_lines or info.has_insert_hl, "Should have some decoration for changed line")
++    assert.is_true(info.total > 0, "Should have some decoration for changed line")
+ 
+     vim.fn.delete(left_path)
+     vim.fn.delete(right_path)
+@@ -422,7 +428,7 @@ describe("Inline standalone view", function()
+ 
+     local info = get_inline_extmarks(result.modified_buf)
+     assert.is_true(info.has_virt_lines, "Should have virt_lines for changed lines")
+-    assert.is_true(info.has_insert_hl, "Should have insert highlights for changed lines")
++    assert.is_true(info.has_change_hl, "Should have change highlights for changed lines")
+ 
+     vim.fn.delete(left_path)
+     vim.fn.delete(right_path)

@@ -1,0 +1,207 @@
+From ba2cca4089ec1ccc6fe7a4e6c748cdfa60c7a330 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Thu, 16 Jul 2026 09:55:38 +0100
+Subject: [PATCH] fix: allow gf from the explorer pane
+
+---
+ lua/codediff/ui/view/inline_view.lua  |  8 ++++--
+ lua/codediff/ui/view/keymaps.lua      | 40 ++++++++++++++++++++++-----
+ lua/codediff/ui/view/panel.lua        |  3 +-
+ lua/codediff/ui/view/side_by_side.lua |  4 ++-
+ tests/ui/explorer/explorer_spec.lua   | 36 ++++++++++++++++++++++++
+ 5 files changed, 80 insertions(+), 11 deletions(-)
+
+diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
+index 5d397a3..8a9ac0e 100644
+--- a/lua/codediff/ui/view/inline_view.lua
++++ b/lua/codediff/ui/view/inline_view.lua
+@@ -150,7 +150,9 @@ function M.create(session_config, filetype, on_ready)
+ 
+     mark_inline(tabpage)
+     -- Setup panels via shared module
+-    panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
++    panel.setup_explorer(tabpage, session_config, modified_win, modified_win, function()
++      setup_keymaps(tabpage, orig_scratch, mod_scratch)
++    end)
+     panel.setup_history(tabpage, session_config, modified_win, modified_win, orig_scratch, mod_scratch, function(tp, ob, mb)
+       setup_keymaps(tp, ob, mb)
+     end)
+@@ -309,7 +311,9 @@ function M.create(session_config, filetype, on_ready)
+   end
+ 
+   -- Setup panels for non-placeholder explorer/history mode
+-  panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
++  panel.setup_explorer(tabpage, session_config, modified_win, modified_win, function()
++    setup_keymaps(tabpage, original_info.bufnr, modified_info.bufnr)
++  end)
+   panel.setup_history(tabpage, session_config, modified_win, modified_win, original_info.bufnr, modified_info.bufnr, function(tp, ob, mb)
+     setup_keymaps(tp, ob, mb)
+   end)
+diff --git a/lua/codediff/ui/view/keymaps.lua b/lua/codediff/ui/view/keymaps.lua
+index d70aeda..fe2e46f 100644
+--- a/lua/codediff/ui/view/keymaps.lua
++++ b/lua/codediff/ui/view/keymaps.lua
+@@ -8,6 +8,22 @@ local navigation = require("codediff.ui.view.navigation")
+ local render = require("codediff.ui.view.render")
+ local compact = require("codediff.ui.view.compact")
+ 
++local function get_explorer_target_file(explorer, session)
++  local node = explorer.tree and explorer.tree:get_node()
++  local data = node and node.data
++
++  if not data or data.type == "group" or data.type == "directory" or not data.path or data.path == "" then
++    return nil
++  end
++
++  local git_root = data.git_root or explorer.git_root or session.git_root
++  if not git_root or git_root == "" then
++    return nil
++  end
++
++  return vim.fs.joinpath(git_root, data.path)
++end
++
+ -- Centralized keymap setup for all diff view keymaps
+ -- This function sets up ALL keymaps in one place for better maintainability
+ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explorer_mode)
+@@ -275,16 +291,24 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+       side = "modified"
+     end
+ 
+-    -- Only operate on diff buffers; ignore explorer/history/result silently
+-    if not side then
++    local explorer = lifecycle.get_explorer(tabpage)
++    local is_explorer_buf = explorer and explorer.bufnr and current_buf == explorer.bufnr
++
++    -- Only operate on diff and explorer buffers; ignore history/result silently
++    if not side and not is_explorer_buf then
+       return
+     end
+ 
+     local is_virtual = (side == "original" and lifecycle.is_original_virtual(tabpage)) or (side == "modified" and lifecycle.is_modified_virtual(tabpage))
+ 
+-    -- For virtual buffers, resolve the real file on disk
++    -- Resolve target file path
+     local target_file
+-    if is_virtual then
++    if is_explorer_buf then
++      target_file = get_explorer_target_file(explorer, session)
++      if not target_file then
++        return
++      end
++    elseif is_virtual then
+       local original_path, modified_path = lifecycle.get_paths(tabpage)
+       local rel_path = side == "original" and original_path or modified_path
+       if not rel_path or rel_path == "" then
+@@ -301,7 +325,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+       end
+     end
+ 
+-    local cursor = vim.api.nvim_win_get_cursor(0)
++    local cursor = side and vim.api.nvim_win_get_cursor(0) or nil
+     local current_tab = vim.api.nvim_get_current_tabpage()
+     local tabs = vim.api.nvim_list_tabpages()
+ 
+@@ -333,7 +357,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+     end
+ 
+     local ok, err
+-    if is_virtual then
++    if is_virtual or is_explorer_buf then
+       ok, err = pcall(vim.cmd, "edit " .. vim.fn.fnameescape(target_file))
+     else
+       ok, err = pcall(vim.api.nvim_win_set_buf, target_win, current_buf)
+@@ -343,7 +367,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+       return
+     end
+ 
+-    pcall(vim.api.nvim_win_set_cursor, target_win, cursor)
++    if cursor then
++      pcall(vim.api.nvim_win_set_cursor, target_win, cursor)
++    end
+ 
+     -- Optionally close codediff after navigating to file
+     if config.options.keymaps.view.close_on_open_in_prev_tab then
+diff --git a/lua/codediff/ui/view/panel.lua b/lua/codediff/ui/view/panel.lua
+index cb872d2..3f44edd 100644
+--- a/lua/codediff/ui/view/panel.lua
++++ b/lua/codediff/ui/view/panel.lua
+@@ -16,7 +16,7 @@ local layout = require("codediff.ui.layout")
+ ---@param session_config SessionConfig
+ ---@param original_win number
+ ---@param modified_win number
+-function M.setup_explorer(tabpage, session_config, original_win, modified_win)
++function M.setup_explorer(tabpage, session_config, original_win, modified_win, setup_keymaps_fn)
+   if not (session_config.mode == "explorer" and session_config.explorer_data) then
+     return
+   end
+@@ -37,6 +37,7 @@ function M.setup_explorer(tabpage, session_config, original_win, modified_win)
+     explorer_module.create(status_result, session_config.git_root, tabpage, nil, session_config.original_revision, session_config.modified_revision, explorer_opts)
+ 
+   lifecycle.set_explorer(tabpage, explorer_obj)
++  setup_keymaps_fn()
+ 
+   local initial_focus = explorer_config.initial_focus or "explorer"
+   if initial_focus == "explorer" and explorer_obj and explorer_obj.winid and vim.api.nvim_win_is_valid(explorer_obj.winid) then
+diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
+index b981adc..9515899 100644
+--- a/lua/codediff/ui/view/side_by_side.lua
++++ b/lua/codediff/ui/view/side_by_side.lua
+@@ -361,7 +361,9 @@ function M.create(session_config, filetype, on_ready)
+   end
+ 
+   -- Setup panels (explorer sidebar, history panel)
+-  panel.setup_explorer(tabpage, session_config, original_win, modified_win)
++  panel.setup_explorer(tabpage, session_config, original_win, modified_win, function()
++    setup_all_keymaps(tabpage, original_info.bufnr, modified_info.bufnr, true)
++  end)
+   panel.setup_history(tabpage, session_config, original_win, modified_win, original_info.bufnr, modified_info.bufnr, function(tp, ob, mb)
+     setup_all_keymaps(tp, ob, mb, false)
+   end)
+diff --git a/tests/ui/explorer/explorer_spec.lua b/tests/ui/explorer/explorer_spec.lua
+index b3bb765..09e2e40 100644
+--- a/tests/ui/explorer/explorer_spec.lua
++++ b/tests/ui/explorer/explorer_spec.lua
+@@ -480,6 +480,42 @@ describe("Explorer Mode", function()
+     assert.is_true(notified, "Should notify for non-git directory")
+   end)
+ 
++  it("Opens the explorer file under the cursor in the previous tab", function()
++    require("codediff").setup({
++      diff = { layout = "side-by-side" },
++      explorer = { auto_open_on_cursor = true },
++      keymaps = { view = { open_in_prev_tab = "P" } },
++    })
++
++    local previous_tab = vim.api.nvim_get_current_tabpage()
++    local ready, tabpage, explorer = open_explorer(temp_dir, "file1.txt")
++    assert.is_true(ready, "Explorer should be ready with an initial selection")
++    vim.api.nvim_set_current_tabpage(tabpage)
++
++    local target_line, target_path
++    for line = 1, vim.api.nvim_buf_line_count(explorer.bufnr) do
++      local node = explorer.tree:get_node(line)
++      local data = node and node.data
++      if data and data.path and data.path ~= explorer.current_file_path then
++        target_line = line
++        target_path = data.path
++        break
++      end
++    end
++    assert.is_not_nil(target_line, "Should find a different file node")
++
++    vim.api.nvim_set_current_win(explorer.winid)
++    vim.api.nvim_win_set_cursor(explorer.winid, { target_line, 0 })
++    local callback = vim.api.nvim_buf_call(explorer.bufnr, function()
++      return vim.fn.maparg("P", "n", false, true).callback
++    end)
++    assert.is_function(callback, "open_in_prev_tab mapping should exist in explorer buffer")
++    callback()
++
++    assert.equals(previous_tab, vim.api.nvim_get_current_tabpage())
++    assert.equals(vim.fs.normalize(vim.fs.joinpath(temp_dir, target_path)), vim.fs.normalize(vim.api.nvim_buf_get_name(0)))
++  end)
++
+   -- Test: auto_open_on_cursor opens the file under cursor after j/k
+   it("Auto-opens diff under cursor when auto_open_on_cursor is enabled", function()
+     require("codediff").setup({

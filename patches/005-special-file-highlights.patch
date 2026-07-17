@@ -1,0 +1,618 @@
+From 212ff13fef476716e3d06ff994451598a44db3e7 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Thu, 16 Jul 2026 20:05:38 +0100
+Subject: [PATCH] feat: highlight added and deleted single-file views
+
+---
+ README.md                              |  3 ++
+ doc/codediff.txt                       |  4 ++
+ lua/codediff/config.lua                |  1 +
+ lua/codediff/ui/core.lua               | 35 +++++++++++++
+ lua/codediff/ui/lifecycle/session.lua  |  2 +
+ lua/codediff/ui/lifecycle/state.lua    |  8 +++
+ lua/codediff/ui/view/inline_view.lua   | 36 +++++++-------
+ lua/codediff/ui/view/side_by_side.lua  | 22 ++++++---
+ tests/ui/core_spec.lua                 | 68 ++++++++++++++++++++++++++
+ tests/ui/layout_spec.lua               | 27 +++++-----
+ tests/ui/lifecycle/lifecycle_spec.lua  |  1 +
+ tests/ui/view/inline_explorer_spec.lua | 48 +++++++++++++++++-
+ 12 files changed, 213 insertions(+), 42 deletions(-)
+
+diff --git a/README.md b/README.md
+index 20c581f..fee4fac 100644
+--- a/README.md
++++ b/README.md
+@@ -99,6 +99,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+       cycle_next_file = true,             -- Wrap around when navigating files (]f/[f): false to stop at first/last
+       cycle_hunks_across_files = false,   -- ]c/[c at file boundary hops to first/last hunk of next/prev file (explorer/history)
+       jump_to_first_change = true,        -- Auto-scroll to first change when opening a diff: false to stay at same line
++      highlight_added_deleted_files = true, -- Tint full contents of added, untracked, and deleted files
+       highlight_priority = 100,           -- Priority for line-level diff highlights (increase to override LSP highlights)
+       compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
+       compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
+@@ -638,6 +639,8 @@ The plugin defines highlight groups matching VSCode's diff colors:
+   - **Light themes** (`background = "light"`): Brightness multiplied by `0.92` (8% darker)
+ - This auto-detection works out-of-box for most colorschemes
+ - You can override with explicit `char_brightness` value if needed
++- Added and untracked files use `line_insert`; deleted files use `line_delete` across the full file
++- Set `diff.highlight_added_deleted_files = false` to disable full-file highlighting
+ 
+ **Customization examples:**
+ 
+diff --git a/doc/codediff.txt b/doc/codediff.txt
+index 6fb9a0d..23a76da 100644
+--- a/doc/codediff.txt
++++ b/doc/codediff.txt
+@@ -193,6 +193,7 @@ Setup entry point:
+       conflict_result_height = 30,
+       conflict_result_width_ratio = { 1, 1, 1 },
+       jump_to_first_change = true,
++      highlight_added_deleted_files = true,
+       highlight_priority = 100,
+       compute_moves = false,
+       compact_context_lines = 3,
+@@ -308,6 +309,9 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
+ 
+ Default behavior:
+ - Uses DiffAdd and DiffDelete for line-level highlights
++- Added and untracked files use line_insert across the full file
++- Deleted files use line_delete across the full file
++- Set diff.highlight_added_deleted_files = false to disable full-file highlighting
+ - Character-level highlights auto-adjusted based on vim.o.background:
+   - Dark themes: brightness multiplied by 1.4
+   - Light themes: brightness multiplied by 0.92
+diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
+index 63c10e6..1eec55c 100644
+--- a/lua/codediff/config.lua
++++ b/lua/codediff/config.lua
+@@ -43,6 +43,7 @@ M.defaults = {
+     cycle_next_file = true, -- Wrap around when navigating files (]f/[f): true = cycle, false = stop at first/last
+     cycle_hunks_across_files = false, -- ]c/[c at file boundary jumps to first/last hunk of next/prev file (explorer/history mode)
+     jump_to_first_change = true, -- Auto-scroll to first change when opening a diff: true = jump to first hunk, false = stay at same line
++    highlight_added_deleted_files = true, -- Tint the full contents of added, untracked, and deleted files
+     highlight_priority = 100, -- Priority for line-level diff highlights (increase to override LSP highlights)
+     compute_moves = false, -- Detect moved code blocks (opt-in, may increase diff computation time)
+     compact_context_lines = 3, -- Number of context lines around hunks in compact mode
+diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
+index 71b46f6..82baedb 100644
+--- a/lua/codediff/ui/core.lua
++++ b/lua/codediff/ui/core.lua
+@@ -380,6 +380,41 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+   }
+ end
+ 
++-- ============================================================================
++-- Whole File Rendering
++-- ============================================================================
++
++--- Render a one-sided file with highlighting across all logical lines.
++---@param bufnr number
++---@param side "original"|"modified"
++function M.render_whole_file(bufnr, side)
++  vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
++  vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
++
++  if not config.options.diff.highlight_added_deleted_files then
++    return
++  end
++
++  local highlight_groups = {
++    original = "CodeDiffLineDelete",
++    modified = "CodeDiffLineInsert",
++  }
++  local hl_group = highlight_groups[side]
++  if not hl_group then
++    error("Invalid whole-file diff side: " .. tostring(side))
++  end
++
++  vim.api.nvim_buf_set_extmark(bufnr, ns_highlight, 0, 0, {
++    end_row = vim.api.nvim_buf_line_count(bufnr),
++    end_col = 0,
++    hl_group = hl_group,
++    hl_eol = true,
++    priority = config.options.diff.highlight_priority,
++    right_gravity = false,
++    end_right_gravity = true,
++  })
++end
++
+ -- ============================================================================
+ -- Single Buffer Rendering (for merge view)
+ -- ============================================================================
+diff --git a/lua/codediff/ui/lifecycle/session.lua b/lua/codediff/ui/lifecycle/session.lua
+index e481542..894f4b0 100644
+--- a/lua/codediff/ui/lifecycle/session.lua
++++ b/lua/codediff/ui/lifecycle/session.lua
+@@ -19,6 +19,7 @@ local welcome_window = require("codediff.ui.view.welcome_window")
+ --     modified_revision = string?,
+ --     original_state, modified_state,
+ --     suspended = bool,
++--     single_side = "original" | "modified" | nil,
+ --     stored_diff_result = table,
+ --     changedtick = { original = number, modified = number },
+ --     mtime = { original = number?, modified = number? },
+@@ -113,6 +114,7 @@ function M.create_session(
+     layout = "side-by-side",
+     exit_on_close = exit_on_close == true,
+     suspended = false,
++    single_side = nil,
+     stored_diff_result = lines_diff,
+     changedtick = {
+       original = vim.api.nvim_buf_get_changedtick(original_bufnr),
+diff --git a/lua/codediff/ui/lifecycle/state.lua b/lua/codediff/ui/lifecycle/state.lua
+index 3e4314c..f0baa3d 100644
+--- a/lua/codediff/ui/lifecycle/state.lua
++++ b/lua/codediff/ui/lifecycle/state.lua
+@@ -125,6 +125,14 @@ local function resume_diff(tabpage)
+     return
+   end
+ 
++  if diff.single_side then
++    local core = require("codediff.ui.core")
++    local bufnr = diff[diff.single_side .. "_bufnr"]
++    core.render_whole_file(bufnr, diff.single_side)
++    diff.suspended = false
++    return
++  end
++
+   -- Check if buffer or file changed while suspended
+   local original_tick_changed = vim.api.nvim_buf_get_changedtick(diff.original_bufnr) ~= diff.changedtick.original
+   local modified_tick_changed = vim.api.nvim_buf_get_changedtick(diff.modified_bufnr) ~= diff.changedtick.modified
+diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
+index 8cb1b80..e3333b5 100644
+--- a/lua/codediff/ui/view/inline_view.lua
++++ b/lua/codediff/ui/view/inline_view.lua
+@@ -5,6 +5,7 @@ local M = {}
+ local lifecycle = require("codediff.ui.lifecycle")
+ local auto_refresh = require("codediff.ui.auto_refresh")
+ local config = require("codediff.config")
++local core = require("codediff.ui.core")
+ local diff_module = require("codediff.core.diff")
+ local inline = require("codediff.ui.inline")
+ local semantic = require("codediff.ui.semantic_tokens")
+@@ -16,6 +17,15 @@ local panel = require("codediff.ui.view.panel")
+ local is_virtual_revision = helpers.is_virtual_revision
+ local prepare_buffer = helpers.prepare_buffer
+ 
++local function disable_refresh_and_clear_highlights(session)
++  for _, bufnr in pairs({ session.original_bufnr, session.modified_bufnr }) do
++    if vim.api.nvim_buf_is_valid(bufnr) then
++      auto_refresh.disable(bufnr)
++      lifecycle.clear_highlights(bufnr)
++    end
++  end
++end
++
+ -- ============================================================================
+ -- Compute diff and render inline highlights
+ -- ============================================================================
+@@ -347,19 +357,15 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
+     return false
+   end
+ 
+-  local old_modified_buf = session.modified_bufnr
+   local modified_win = session.modified_win
+   if not modified_win or not vim.api.nvim_win_is_valid(modified_win) then
+     return false
+   end
+ 
+-  -- Disable auto-refresh and clear old highlights from ALL namespaces.
+   -- ns_highlight/ns_filler may linger after toggling from side-by-side.
+-  if old_modified_buf and vim.api.nvim_buf_is_valid(old_modified_buf) then
+-    auto_refresh.disable(old_modified_buf)
+-    lifecycle.clear_highlights(old_modified_buf)
+-  end
++  disable_refresh_and_clear_highlights(session)
+ 
++  session.single_side = nil
+   lifecycle.update_diff_result(tabpage, nil)
+ 
+   local original_is_virtual = is_virtual_revision(session_config.original_revision)
+@@ -539,7 +545,7 @@ end
+ --- Used for untracked (??), added (A), and deleted (D) files in explorer/history.
+ ---@param tabpage number
+ ---@param file_path string Path to load (absolute for real files)
+----@param opts? { revision: string?, git_root: string?, rel_path: string? }
++---@param opts? { revision: string?, git_root: string?, rel_path: string?, side: "original"|"modified"? }
+ function M.show_single_file(tabpage, file_path, opts)
+   opts = opts or {}
+   local session = lifecycle.get_session(tabpage)
+@@ -555,14 +561,8 @@ function M.show_single_file(tabpage, file_path, opts)
+   end
+ 
+   -- Clear old inline decorations
+-  if session.modified_bufnr and vim.api.nvim_buf_is_valid(session.modified_bufnr) then
+-    inline.clear(session.modified_bufnr)
+-  end
+-
+   -- Disable old auto-refresh
+-  if session.modified_bufnr and vim.api.nvim_buf_is_valid(session.modified_bufnr) then
+-    auto_refresh.disable(session.modified_bufnr)
+-  end
++  disable_refresh_and_clear_highlights(session)
+ 
+   -- Load the file
+   local file_bufnr
+@@ -602,6 +602,8 @@ function M.show_single_file(tabpage, file_path, opts)
+   lifecycle.update_paths(tabpage, original_path, modified_path)
+   lifecycle.update_revisions(tabpage, original_revision, modified_revision)
+   lifecycle.update_diff_result(tabpage, { changes = {}, moves = {} })
++  session.single_side = side
++  core.render_whole_file(file_bufnr, side)
+ 
+   local view_keymaps = require("codediff.ui.view.keymaps")
+   view_keymaps.setup_all_keymaps(tabpage, orig_bufnr, mod_bufnr, session.mode == "explorer")
+@@ -624,10 +626,8 @@ function M.show_welcome(tabpage, load_bufnr)
+     return
+   end
+ 
+-  if session.modified_bufnr and vim.api.nvim_buf_is_valid(session.modified_bufnr) then
+-    inline.clear(session.modified_bufnr)
+-    auto_refresh.disable(session.modified_bufnr)
+-  end
++  disable_refresh_and_clear_highlights(session)
++  session.single_side = nil
+ 
+   vim.api.nvim_win_set_buf(mod_win, load_bufnr)
+   welcome_window.sync(mod_win)
+diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
+index 4ec0c64..ff0821c 100644
+--- a/lua/codediff/ui/view/side_by_side.lua
++++ b/lua/codediff/ui/view/side_by_side.lua
+@@ -6,6 +6,7 @@ local lifecycle = require("codediff.ui.lifecycle")
+ local virtual_file = require("codediff.core.virtual_file")
+ local auto_refresh = require("codediff.ui.auto_refresh")
+ local config = require("codediff.config")
++local core = require("codediff.ui.core")
+ 
+ -- Eagerly load explorer and history to avoid lazy require failures
+ -- when CWD changes in vim.schedule callbacks
+@@ -406,6 +407,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
+   if not session then
+     return false
+   end
++  session.single_side = nil
+ 
+   -- Get existing buffers and windows
+   local old_original_buf, old_modified_buf = lifecycle.get_buffers(tabpage)
+@@ -698,7 +700,7 @@ end
+ --- Core implementation for showing a single file without diff.
+ --- Closes the empty pane and loads the file into the remaining pane.
+ ---@param tabpage number
+----@param opts { keep: "original"|"modified", load_bufnr: number, original_path: string, modified_path: string, original_revision: string?, modified_revision: string? }
++---@param opts { keep: "original"|"modified", load_bufnr: number, original_path: string, modified_path: string, original_revision: string?, modified_revision: string?, highlight: boolean? }
+ local function show_single_file(tabpage, opts)
+   local session = lifecycle.get_session(tabpage)
+   if not session then
+@@ -707,17 +709,16 @@ local function show_single_file(tabpage, opts)
+ 
+   lifecycle.update_layout(tabpage, "side-by-side")
+   local orig_win, mod_win = lifecycle.get_windows(tabpage)
+-  local highlights = require("codediff.ui.highlights")
+ 
+   -- Clear highlights from current session buffers
+   local old_orig_buf, old_mod_buf = lifecycle.get_buffers(tabpage)
+-  if old_orig_buf and vim.api.nvim_buf_is_valid(old_orig_buf) then
+-    vim.api.nvim_buf_clear_namespace(old_orig_buf, highlights.ns_highlight, 0, -1)
+-    vim.api.nvim_buf_clear_namespace(old_orig_buf, highlights.ns_filler, 0, -1)
++  if old_orig_buf then
++    auto_refresh.disable(old_orig_buf)
++    lifecycle.clear_highlights(old_orig_buf)
+   end
+-  if old_mod_buf and vim.api.nvim_buf_is_valid(old_mod_buf) then
+-    vim.api.nvim_buf_clear_namespace(old_mod_buf, highlights.ns_highlight, 0, -1)
+-    vim.api.nvim_buf_clear_namespace(old_mod_buf, highlights.ns_filler, 0, -1)
++  if old_mod_buf then
++    auto_refresh.disable(old_mod_buf)
++    lifecycle.clear_highlights(old_mod_buf)
+   end
+ 
+   -- Mark single-pane BEFORE closing window (prevents cleanup trigger)
+@@ -769,6 +770,10 @@ local function show_single_file(tabpage, opts)
+     lifecycle.update_paths(tabpage, opts.original_path or "", opts.modified_path or "")
+     lifecycle.update_revisions(tabpage, opts.original_revision, opts.modified_revision)
+     lifecycle.update_diff_result(tabpage, { changes = {}, moves = {} })
++    session.single_side = opts.highlight ~= false and opts.keep or nil
++    if session.single_side then
++      core.render_whole_file(opts.load_bufnr, session.single_side)
++    end
+ 
+     local view_keymaps = require("codediff.ui.view.keymaps")
+     view_keymaps.setup_all_keymaps(tabpage, orig_bufnr, mod_bufnr, session.mode == "explorer")
+@@ -853,6 +858,7 @@ end
+ function M.show_welcome(tabpage, load_bufnr)
+   show_single_file(tabpage, {
+     keep = "modified",
++    highlight = false,
+     load_bufnr = load_bufnr,
+   })
+ end
+diff --git a/tests/ui/core_spec.lua b/tests/ui/core_spec.lua
+index 914350e..30f2d43 100644
+--- a/tests/ui/core_spec.lua
++++ b/tests/ui/core_spec.lua
+@@ -1,12 +1,21 @@
+ -- Test: render/core.lua - Core diff rendering logic
+ -- Critical tests for the heart of diff visualization
+ 
++local config = require("codediff.config")
+ local core = require("codediff.ui.core")
+ local highlights = require("codediff.ui.highlights")
+ local diff = require('codediff.core.diff')
+ 
++local function assert_whole_file_highlight(bufnr, expected_group)
++  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
++  assert.equal(1, #marks)
++  assert.equal(expected_group, marks[1][4].hl_group)
++  return marks[1][4]
++end
++
+ describe("Render Core", function()
+   before_each(function()
++    config.options.diff.highlight_added_deleted_files = true
+     highlights.setup()
+   end)
+ 
+@@ -493,4 +502,63 @@ describe("Render Core", function()
+ 
+     vim.api.nvim_buf_delete(buf, {force = true})
+   end)
++
++  it("renders whole files with the highlight for their side", function()
++    local test_cases = {
++      { side = "modified", hl_group = "CodeDiffLineInsert" },
++      { side = "original", hl_group = "CodeDiffLineDelete" },
++    }
++
++    for _, test_case in ipairs(test_cases) do
++      local buf = vim.api.nvim_create_buf(false, true)
++      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three" })
++
++      core.render_whole_file(buf, test_case.side)
++
++      local details = assert_whole_file_highlight(buf, test_case.hl_group)
++      assert.equal(3, details.end_row)
++      assert.is_true(details.hl_eol)
++      vim.api.nvim_buf_delete(buf, { force = true })
++    end
++  end)
++
++  it("uses one whole-file extmark for empty and large buffers", function()
++    local large_file = {}
++    for line = 1, 10000 do
++      large_file[line] = "line " .. line
++    end
++
++    for _, lines in ipairs({ { "" }, large_file }) do
++      local buf = vim.api.nvim_create_buf(false, true)
++      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
++
++      core.render_whole_file(buf, "modified")
++
++      assert_whole_file_highlight(buf, "CodeDiffLineInsert")
++      vim.api.nvim_buf_delete(buf, { force = true })
++    end
++  end)
++
++  it("expands a whole-file extmark when virtual content loads", function()
++    local buf = vim.api.nvim_create_buf(false, true)
++    core.render_whole_file(buf, "original")
++
++    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three" })
++
++    local details = assert_whole_file_highlight(buf, "CodeDiffLineDelete")
++    assert.equal(3, details.end_row)
++    vim.api.nvim_buf_delete(buf, { force = true })
++  end)
++
++  it("does not render whole-file highlights when disabled", function()
++    local buf = vim.api.nvim_create_buf(false, true)
++    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two" })
++    config.options.diff.highlight_added_deleted_files = false
++
++    core.render_whole_file(buf, "modified")
++
++    local marks = vim.api.nvim_buf_get_extmarks(buf, highlights.ns_highlight, 0, -1, {})
++    assert.equal(0, #marks)
++    vim.api.nvim_buf_delete(buf, { force = true })
++  end)
+ end)
+diff --git a/tests/ui/layout_spec.lua b/tests/ui/layout_spec.lua
+index 7ba6943..e4b2b28 100644
+--- a/tests/ui/layout_spec.lua
++++ b/tests/ui/layout_spec.lua
+@@ -4,6 +4,7 @@
+ local layout = require("codediff.ui.layout")
+ local lifecycle = require("codediff.ui.lifecycle")
+ local config = require("codediff.config")
++local highlights = require("codediff.ui.highlights")
+ 
+ -- Tolerance for width assertions (Neovim may round or add separators)
+ local WIDTH_TOLERANCE = 2
+@@ -15,6 +16,12 @@ local function assert_width_near(expected, actual, msg)
+   )
+ end
+ 
++local function assert_whole_file_highlight(bufnr, expected_group)
++  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
++  assert.are.equal(1, #marks, "Buffer should have one whole-file highlight")
++  assert.are.equal(expected_group, marks[1][4].hl_group)
++end
++
+ -- Create a mock session in lifecycle so layout.arrange() can read it
+ local function create_mock_session(tabpage, opts)
+   -- Directly inject into lifecycle's active_diffs
+@@ -929,10 +936,8 @@ describe("Layout Manager", function()
+     assert.is_true(vim.api.nvim_win_is_valid(mod_win), "Modified window should be valid")
+ 
+     -- Validate: no diff highlights on the modified buffer
+-    local highlights = require("codediff.ui.highlights")
+-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.modified_bufnr, highlights.ns_highlight, 0, -1, {})
++    assert_whole_file_highlight(session.modified_bufnr, "CodeDiffLineInsert")
+     local filler_marks = vim.api.nvim_buf_get_extmarks(session.modified_bufnr, highlights.ns_filler, 0, -1, {})
+-    assert.are.equal(0, #hl_marks, "No diff highlights should remain on modified buffer")
+     assert.are.equal(0, #filler_marks, "No filler highlights should remain on modified buffer")
+ 
+     -- Validate: layout — diff pane fills remainder
+@@ -1002,9 +1007,7 @@ describe("Layout Manager", function()
+     assert.is_true(vim.api.nvim_win_is_valid(orig_win), "Original window should be valid")
+ 
+     -- Validate: no diff highlights on the original buffer
+-    local highlights = require("codediff.ui.highlights")
+-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.original_bufnr, highlights.ns_highlight, 0, -1, {})
+-    assert.are.equal(0, #hl_marks, "No diff highlights should remain on original buffer")
++    assert_whole_file_highlight(session.original_bufnr, "CodeDiffLineDelete")
+ 
+     -- Validate: layout
+     local panel_w = vim.api.nvim_win_get_width(panel.winid)
+@@ -1019,7 +1022,7 @@ describe("Layout Manager", function()
+   -- =========================================================================
+   -- Case 16: show_added_virtual_file — closes orig, single-pane for "A" status
+   -- =========================================================================
+-  it("Case 16: show_added_virtual_file — closes orig, single-pane, no highlights", function()
++  it("Case 16: show_added_virtual_file — closes orig, single-pane, insert highlight", function()
+     local panel_width = 35
+     config.options.explorer = { position = "left", width = panel_width }
+ 
+@@ -1069,9 +1072,7 @@ describe("Layout Manager", function()
+     assert.is_true(vim.api.nvim_win_is_valid(mod_win), "Modified window should be valid")
+ 
+     -- Validate: no diff highlights on modified buffer
+-    local highlights = require("codediff.ui.highlights")
+-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.modified_bufnr, highlights.ns_highlight, 0, -1, {})
+-    assert.are.equal(0, #hl_marks, "No diff highlights on modified buffer")
++    assert_whole_file_highlight(session.modified_bufnr, "CodeDiffLineInsert")
+ 
+     -- Validate: layout
+     local panel_w = vim.api.nvim_win_get_width(panel.winid)
+@@ -1090,7 +1091,7 @@ describe("Layout Manager", function()
+   -- =========================================================================
+   -- Case 17: show_deleted_virtual_file — closes mod, single-pane for "D" in revision mode
+   -- =========================================================================
+-  it("Case 17: show_deleted_virtual_file — closes mod, single-pane, no highlights", function()
++  it("Case 17: show_deleted_virtual_file — closes mod, single-pane, delete highlight", function()
+     local panel_width = 35
+     config.options.explorer = { position = "left", width = panel_width }
+ 
+@@ -1139,9 +1140,7 @@ describe("Layout Manager", function()
+     assert.is_true(vim.api.nvim_win_is_valid(orig_win), "Original window should be valid")
+ 
+     -- Validate: no diff highlights
+-    local highlights = require("codediff.ui.highlights")
+-    local hl_marks = vim.api.nvim_buf_get_extmarks(session.original_bufnr, highlights.ns_highlight, 0, -1, {})
+-    assert.are.equal(0, #hl_marks, "No diff highlights on original buffer")
++    assert_whole_file_highlight(session.original_bufnr, "CodeDiffLineDelete")
+ 
+     -- Validate: layout
+     local panel_w = vim.api.nvim_win_get_width(panel.winid)
+diff --git a/tests/ui/lifecycle/lifecycle_spec.lua b/tests/ui/lifecycle/lifecycle_spec.lua
+index acf644a..d2df371 100644
+--- a/tests/ui/lifecycle/lifecycle_spec.lua
++++ b/tests/ui/lifecycle/lifecycle_spec.lua
+@@ -41,6 +41,7 @@ describe("Render Lifecycle", function()
+     end)
+ 
+     assert.is_true(success, "Should create and complete session without error")
++    assert.is_nil(lifecycle.get_session(tabpage).single_side)
+ 
+     vim.cmd('tabclose')
+     vim.api.nvim_buf_delete(left_buf, {force = true})
+diff --git a/tests/ui/view/inline_explorer_spec.lua b/tests/ui/view/inline_explorer_spec.lua
+index 0a3c24e..eba278d 100644
+--- a/tests/ui/view/inline_explorer_spec.lua
++++ b/tests/ui/view/inline_explorer_spec.lua
+@@ -31,6 +31,16 @@ local function count_inline_extmarks(bufnr)
+   return #marks
+ end
+ 
++local function get_whole_file_extmarks(bufnr)
++  return vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
++end
++
++local function assert_whole_file_highlight(bufnr, expected_group, message)
++  local marks = get_whole_file_extmarks(bufnr)
++  assert.equal(1, #marks, message)
++  assert.equal(expected_group, marks[1][4].hl_group)
++end
++
+ -- Helper: create an inline explorer placeholder session (no file selected yet)
+ local function create_explorer_placeholder(temp_dir)
+   local status_result = { unstaged = {}, staged = {}, conflicts = {} }
+@@ -63,7 +73,7 @@ end
+ 
+ describe("Inline diff with explorer", function()
+   before_each(function()
+-    require("codediff").setup({ diff = { layout = "inline" } })
++    require("codediff").setup({ diff = { layout = "inline", highlight_added_deleted_files = true } })
+     highlights.setup()
+   end)
+ 
+@@ -203,7 +213,7 @@ describe("Inline diff with explorer", function()
+   -- =========================================================================
+   -- Test 3: Untracked file shows without diff extmarks
+   -- =========================================================================
+-  it("Untracked file via show_single_file has no inline extmarks", function()
++  it("Untracked file via show_single_file has a whole-file insert highlight", function()
+     local temp_dir = get_temp_dir()
+ 
+     -- First create an explorer placeholder to establish a session
+@@ -239,6 +249,7 @@ describe("Inline diff with explorer", function()
+     -- Verify: NO inline diff extmarks (no diff for untracked files)
+     local marks = count_inline_extmarks(mod_buf)
+     assert.equal(0, marks, "Untracked file should have no inline diff extmarks")
++    assert_whole_file_highlight(mod_buf, "CodeDiffLineInsert", "Untracked file should have one whole-file highlight")
+ 
+     -- Verify: diff result should be empty
+     assert.is_not_nil(session.stored_diff_result, "stored_diff_result should exist")
+@@ -277,6 +288,7 @@ describe("Inline diff with explorer", function()
+     local single_buf = session_single.modified_bufnr
+     assert.equal(0, count_inline_extmarks(single_buf),
+       "Single file should have no inline extmarks")
++    assert_whole_file_highlight(single_buf, "CodeDiffLineInsert", "Single file should have one whole-file extmark")
+ 
+     -- Now switch to a diff (simulates selecting a modified file in explorer)
+     local orig_lines = { "hello", "world" }
+@@ -315,6 +327,8 @@ describe("Inline diff with explorer", function()
+     local marks = count_inline_extmarks(diff_buf)
+     assert.is_true(marks > 0,
+       "Should have inline extmarks after switching back to diff (got " .. marks .. ")")
++    assert.equal(0, #get_whole_file_extmarks(single_buf),
++      "Old single-file buffer should have its whole-file highlight cleared")
+ 
+     -- Cleanup
+     vim.fn.delete(untracked_path)
+@@ -433,4 +447,34 @@ describe("Inline diff with explorer", function()
+ 
+     vim.fn.delete(repo, "rf")
+   end)
++
++  it("Deleted files use a whole-file delete highlight across suspend and resume", function()
++    local temp_dir = get_temp_dir()
++    local _, tabpage = create_explorer_placeholder(temp_dir)
++    local file_path = vim.fn.tempname() .. "_inline_deleted.txt"
++    vim.fn.writefile({ "deleted one", "deleted two" }, file_path)
++
++    inline_view.show_single_file(tabpage, file_path, { side = "original" })
++
++    local session = lifecycle.get_session(tabpage)
++    assert_whole_file_highlight(session.original_bufnr, "CodeDiffLineDelete")
++
++    local state = require("codediff.ui.lifecycle.state")
++    state.suspend_diff(tabpage)
++    assert.equal(0, #get_whole_file_extmarks(session.original_bufnr))
++
++    state.resume_diff(tabpage)
++    assert_whole_file_highlight(session.original_bufnr, "CodeDiffLineDelete")
++    assert.same({ changes = {}, moves = {} }, session.stored_diff_result)
++
++    vim.bo[session.original_bufnr].swapfile = false
++    vim.api.nvim_buf_set_lines(session.original_bufnr, -1, -1, false, { "deleted three" })
++    vim.cmd("redraw")
++    vim.wait(300)
++    assert.equal(1, #get_whole_file_extmarks(session.original_bufnr))
++    assert.same({ changes = {}, moves = {} }, session.stored_diff_result)
++    vim.bo[session.original_bufnr].modified = false
++
++    vim.fn.delete(file_path)
++  end)
+ end)

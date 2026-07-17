@@ -1,0 +1,79 @@
+[stack]
+upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
+expectedHead = a29db0804bafb51bb6d7b514f4ba0dfd5aab7d5d
+expectedTree = 3d9c994c0162ba5d40ff28acb9f49a41c452ba64
+testCommand = make test
+publishRemote = upstream
+publishBranch = main
+repository = richardgill/codediff.nvim
+patches =
+    explorer-gf
+    zero-hunk-navigation
+    safe-last-diff-close
+    hide-native-tabline
+    special-file-highlights
+    preserve-explorer-state
+    modified-line-highlights
+    configurable-fillers
+    highlight-attributes
+    explorer-line-statistics
+    pure-line-char-highlights
+    fork-notice
+
+[patch "explorer-gf"]
+file = patches/001-explorer-gf.patch
+originCommit = 5cea7a6fac09650f47e4d4a9a529f0f1470e24d7
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/321
+
+[patch "zero-hunk-navigation"]
+file = patches/002-zero-hunk-navigation.patch
+originCommit = ee9443aaf3bede9722f2d91db80f444d727f9f8f
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/438
+
+[patch "safe-last-diff-close"]
+file = patches/003-safe-last-diff-close.patch
+originCommit = 2b2f488fab0b5c3b6dbc9c11ea19d2936cd03841
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/440
+
+[patch "hide-native-tabline"]
+file = patches/004-hide-native-tabline.patch
+originCommit = aa4964f8757aa5f5c4bec411846c7862b83c059b
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/441
+
+[patch "special-file-highlights"]
+file = patches/005-special-file-highlights.patch
+originCommit = 5d90f3ffb5d95cabfe4c447384c64a4cf704c4bf
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/442
+
+[patch "preserve-explorer-state"]
+file = patches/006-preserve-explorer-state.patch
+originCommit = 9e94576bf1ea2966a890ce03fbe45355b85ba423
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/443
+
+[patch "modified-line-highlights"]
+file = patches/007-modified-line-highlights.patch
+originCommit = 353297da211fb949f26df671a3ad9de401e2475b
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/324
+
+[patch "configurable-fillers"]
+file = patches/008-configurable-fillers.patch
+originCommit = c3acc612c6bff51a7a6ed3ff3fc47923e676d940
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/444
+
+[patch "highlight-attributes"]
+file = patches/010-highlight-attributes.patch
+originCommit = 496deed42da874892a2c6daa911432fda9aa7d64
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/447
+
+[patch "explorer-line-statistics"]
+file = patches/011-explorer-line-statistics.patch
+originCommit = 80d13b0a4ac7e89f2f3a7151dd960538ae402d92
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
+
+[patch "pure-line-char-highlights"]
+file = patches/012-pure-line-char-highlights.patch
+originCommit = 5b0c0e84288abe8b7607986bc08f105659d1c482
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/450
+
+[patch "fork-notice"]
+file = patches/013-fork-notice.patch
