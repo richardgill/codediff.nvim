@@ -3,8 +3,8 @@
 local M = {}
 
 local Tree = require("codediff.ui.lib.tree")
-local Line = require("codediff.ui.lib.line")
 local config = require("codediff.config")
+local line_layout = require("codediff.ui.explorer.line_layout")
 local line_stats = require("codediff.ui.explorer.line_stats")
 
 -- Merge artifact patterns (created by git mergetool)
@@ -49,29 +49,6 @@ local function is_merge_artifact(path)
     end
   end
   return false
-end
-
-local function truncate_to_width(text, max_width)
-  if max_width <= 0 then
-    return ""
-  end
-  if vim.fn.strdisplaywidth(text) <= max_width then
-    return text
-  end
-
-  local ellipsis = string.rep(".", math.min(3, max_width))
-  local prefix_width = max_width - #ellipsis
-  local prefix = {}
-  local width = 0
-  for char in vim.gsplit(text, "") do
-    local char_width = vim.fn.strdisplaywidth(char)
-    if width + char_width > prefix_width then
-      return table.concat(prefix) .. ellipsis
-    end
-    prefix[#prefix + 1] = char
-    width = width + char_width
-  end
-  return text
 end
 
 -- Filter out merge artifacts from file list
@@ -152,8 +129,9 @@ function M.create_tree_file_nodes(files, git_root, group)
     for i = 1, #parts - 1 do
       local dir_name = parts[i]
       if not current[dir_name] then
-        current[dir_name] = { _is_dir = true, _children = {} }
+        current[dir_name] = { _is_dir = true, _children = {}, _files = {} }
       end
+      current[dir_name]._files[#current[dir_name]._files + 1] = file
       current = current[dir_name]._children
     end
 
@@ -234,6 +212,8 @@ function M.create_tree_file_nodes(files, git_root, group)
             dir_path = full_path,
             group = group,
             indent_state = node_indent_state,
+            file_count = #item._files,
+            stats = line_stats.sum(item._files),
           },
         }, children)
       else
@@ -267,181 +247,103 @@ function M.create_tree_file_nodes(files, git_root, group)
   return build_nodes(dir_tree, "", {})
 end
 
+local function build_indent_markers(indent_state, use_indent_markers)
+  if not indent_state or #indent_state == 0 then
+    return ""
+  end
+  if not use_indent_markers then
+    return string.rep("  ", #indent_state)
+  end
+
+  local parts = {}
+  for index = 1, #indent_state - 1 do
+    parts[#parts + 1] = (indent_state[index] and INDENT_MARKERS.none or INDENT_MARKERS.edge) .. " "
+  end
+  parts[#parts + 1] = (indent_state[#indent_state] and INDENT_MARKERS.last or INDENT_MARKERS.item) .. " "
+  return table.concat(parts)
+end
+
+local function get_indent(node, data, explorer_config)
+  local use_indent_markers = explorer_config.indent_markers ~= false
+  if explorer_config.view_mode == "tree" and data.indent_state then
+    return build_indent_markers(data.indent_state, use_indent_markers), use_indent_markers and "NeoTreeIndentMarker" or "Normal"
+  end
+  return string.rep("  ", node:get_depth() - 1), "Normal"
+end
+
+local function group_context(node, data, explorer_config)
+  return {
+    name = data.name,
+    label = data.label,
+    file_count = data.file_count,
+    stats = explorer_config.line_stats.enabled and data.stats or nil,
+    expanded = node:is_expanded(),
+  }
+end
+
+local function folder_context(node, data, explorer_config)
+  local indent, indent_hl = get_indent(node, data, explorer_config)
+  local icon, icon_hl = M.get_folder_icon(node:is_expanded())
+  return {
+    name = data.name,
+    path = data.dir_path,
+    group = data.group,
+    file_count = data.file_count,
+    stats = explorer_config.line_stats.enabled and data.stats or nil,
+    indent = indent,
+    indent_hl = indent_hl,
+    icon = icon,
+    icon_hl = icon_hl,
+    expanded = node:is_expanded(),
+  }
+end
+
+local function file_context(node, data, explorer_config)
+  local indent, indent_hl = get_indent(node, data, explorer_config)
+  local full_path = data.path or node.text
+  local filename = full_path:match("([^/]+)$") or full_path
+  local directory = explorer_config.view_mode == "tree" and "" or full_path:sub(1, -(#filename + 1))
+  return {
+    path = full_path,
+    filename = filename,
+    directory = directory,
+    old_path = data.old_path,
+    group = data.group,
+    file_count = 1,
+    stats = explorer_config.line_stats.enabled and data.line_stats or nil,
+    status = data.status_symbol or "",
+    status_code = data.status,
+    status_hl = data.status_color,
+    status_right_margin = math.max(0, explorer_config.status_right_margin or 1),
+    indent = indent,
+    indent_hl = indent_hl,
+    icon = data.icon or "",
+    icon_hl = data.icon_color,
+  }
+end
+
+local function selected_background(is_selected)
+  if not is_selected then
+    return nil
+  end
+  return vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerSelected", link = false }).bg
+end
+
 -- Prepare node for rendering (format display)
 function M.prepare_node(node, max_width, selected_path, selected_group)
-  local line = Line()
   local data = node.data or {}
-  local explorer_config = config.options.explorer or {}
-  local use_indent_markers = explorer_config.indent_markers ~= false -- default true
-
-  -- Helper to build indent string with markers (for tree mode)
-  local function build_indent_markers(indent_state)
-    if not indent_state or #indent_state == 0 then
-      return ""
-    end
-
-    if not use_indent_markers then
-      -- Plain space indentation
-      return string.rep("  ", #indent_state)
-    end
-
-    local indent_parts = {}
-    -- All levels except the last one: show edge or space
-    for i = 1, #indent_state - 1 do
-      if indent_state[i] then
-        -- Ancestor was last child, show space
-        indent_parts[#indent_parts + 1] = INDENT_MARKERS.none .. " "
-      else
-        -- Ancestor was not last, show edge
-        indent_parts[#indent_parts + 1] = INDENT_MARKERS.edge .. " "
-      end
-    end
-    -- Last level: show item or last marker
-    if indent_state[#indent_state] then
-      indent_parts[#indent_parts + 1] = INDENT_MARKERS.last .. " "
-    else
-      indent_parts[#indent_parts + 1] = INDENT_MARKERS.item .. " "
-    end
-    return table.concat(indent_parts)
-  end
-
+  local explorer_config = config.options.explorer
+  local formatters = explorer_config.formatters
   if data.type == "group" then
-    -- Group header
-    line:append(" ", "CodeDiffExplorerTreeGroup")
-    line:append(data.label, "CodeDiffExplorerTreeGroup")
-    if #data.stat_segments > 0 then
-      line:append(" (", "CodeDiffExplorerTreeGroup")
-      for _, segment in ipairs(data.stat_segments) do
-        line:append(segment.text, segment.hl)
-      end
-      line:append(")", "CodeDiffExplorerTreeGroup")
-    end
-  elseif data.type == "directory" then
-    -- Directory node (tree view mode) - with indent markers
-    local indent = build_indent_markers(data.indent_state)
-    local folder_icon, folder_color = M.get_folder_icon(node:is_expanded())
-    if #indent > 0 then
-      line:append(indent, use_indent_markers and "NeoTreeIndentMarker" or "Normal")
-    end
-    line:append(folder_icon .. " ", folder_color or "Directory")
-    line:append(data.name, "Directory")
-  else
-    -- Match both path AND group to handle files in both staged and unstaged
-    local is_selected = data.path and data.path == selected_path and data.group == selected_group
-
-    -- Get selected background color once
-    local selected_bg = nil
-    if is_selected then
-      local sel_hl = vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerSelected", link = false })
-      selected_bg = sel_hl.bg
-    end
-
-    -- Helper to get highlight with selected background but original foreground
-    local function get_hl(default)
-      if not is_selected then
-        return default or "Normal"
-      end
-      -- Create a combined highlight: original fg + selected bg
-      local base_hl_name = default or "Normal"
-      local combined_name = "CodeDiffExplorerSel_" .. base_hl_name:gsub("[^%w]", "_")
-
-      -- Get foreground from base highlight
-      local base_hl = vim.api.nvim_get_hl(0, { name = base_hl_name, link = false })
-      local fg = base_hl.fg
-
-      -- Set the combined highlight (will be cached by nvim)
-      vim.api.nvim_set_hl(0, combined_name, { fg = fg, bg = selected_bg })
-      return combined_name
-    end
-
-    -- Check if we're in tree mode (directory is already shown in hierarchy)
-    local view_mode = explorer_config.view_mode or "list"
-
-    -- File entry - VSCode style: filename (bold) + directory (dimmed) + status (right-aligned)
-    local indent
-    if view_mode == "tree" and data.indent_state then
-      indent = build_indent_markers(data.indent_state)
-      if #indent > 0 then
-        line:append(indent, get_hl(use_indent_markers and "NeoTreeIndentMarker" or "Normal"))
-      end
-    else
-      indent = string.rep("  ", node:get_depth() - 1)
-      line:append(indent, get_hl("Normal"))
-    end
-
-    local icon_part = ""
-    if data.icon then
-      icon_part = data.icon .. " "
-      line:append(icon_part, get_hl(data.icon_color))
-    end
-
-    -- Status symbol at the end (e.g., "M", "D", "??")
-    local status_symbol = data.status_symbol or ""
-
-    -- calculate width of stats
-    local line_stats_options = explorer_config.line_stats or {}
-    local stat_segments = line_stats_options.enabled and line_stats.build_file_segments(data.line_stats, line_stats_options) or {}
-    local stats_width = 0
-    for _, segment in ipairs(stat_segments) do
-      stats_width = stats_width + vim.fn.strdisplaywidth(segment.text)
-    end
-
-    -- Split path into filename and directory
-    local full_path = data.path or node.text
-    local filename = full_path:match("([^/]+)$") or full_path
-    -- In tree mode, don't show directory (it's in the hierarchy)
-    local directory = (view_mode == "tree") and "" or full_path:sub(1, -(#filename + 1))
-
-    -- Calculate how much width we've used and reserve for status
-    local status_margin = config.options.explorer.status_right_margin or 1
-    local used_width = vim.fn.strdisplaywidth(indent) + vim.fn.strdisplaywidth(icon_part)
-    local stats_reserve = stats_width > 0 and stats_width + 1 or 0
-    -- Reserve = symbol + 2 cells of minimum gap from content + configurable trailing margin
-    local status_reserve = vim.fn.strdisplaywidth(status_symbol) + 2 + status_margin
-    local available_for_content = max_width - used_width - stats_reserve - status_reserve
-
-    -- Show: filename + full directory path within the space reserved for content
-    local filename_len = vim.fn.strdisplaywidth(filename)
-    local directory_len = vim.fn.strdisplaywidth(directory)
-    local space_len = (directory_len > 0) and 1 or 0
-
-    if filename_len > available_for_content then
-      filename = truncate_to_width(filename, available_for_content)
-      directory = ""
-      space_len = 0
-    elseif filename_len + space_len + directory_len > available_for_content then
-      local available_for_dir = available_for_content - filename_len - space_len
-      directory = available_for_dir > 3 and truncate_to_width(directory, available_for_dir) or ""
-      space_len = directory ~= "" and 1 or 0
-    end
-
-    -- Append filename (normal weight) and directory (dimmed)
-    line:append(filename, get_hl("Normal"))
-    if #directory > 0 then
-      line:append(" ", get_hl("Normal"))
-      line:append(directory, get_hl("ExplorerDirectorySmall"))
-    end
-
-    -- Right-align status symbol; trailing `status_margin` cells keep it visible against the window edge
-    local content_len = vim.fn.strdisplaywidth(filename) + space_len + vim.fn.strdisplaywidth(directory)
-    local padding_needed = math.max(2, available_for_content - content_len + 2)
-    line:append(string.rep(" ", padding_needed), get_hl("Normal"))
-
-    -- render stats
-    for _, segment in ipairs(stat_segments) do
-      line:append(segment.text, get_hl(segment.hl))
-    end
-    if stats_width > 0 then
-      line:append(" ", get_hl("Normal"))
-    end
-
-    line:append(status_symbol, get_hl(data.status_color))
-    if status_margin > 0 then
-      line:append(string.rep(" ", status_margin), get_hl("Normal"))
-    end
+    return line_layout.render(formatters.group(group_context(node, data, explorer_config)), max_width)
+  end
+  if data.type == "directory" then
+    return line_layout.render(formatters.folder(folder_context(node, data, explorer_config)), max_width)
   end
 
-  return line
+  local is_selected = data.path == selected_path and data.group == selected_group
+  local context = file_context(node, data, explorer_config)
+  return line_layout.render(formatters.file(context), max_width, selected_background(is_selected))
 end
 
 return M

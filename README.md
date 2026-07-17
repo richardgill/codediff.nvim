@@ -127,12 +127,14 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
       status_right_margin = 1,  -- Trailing cells between status symbol (M/A/D) and right edge; increase if Nerd Font icons clip it
       line_stats = {
-        enabled = false,         -- Show +insertions/-deletions per file (requires extra Git queries)
-        group_totals = true,     -- Include aggregate stats in group headings
-        count_untracked = false,         -- Show untracked file lines as insertions
-        max_untracked_bytes = 1024 * 1024, -- Skip untracked files larger than this limit
-        file_format = nil,               -- Optional function(file_stats) -> semantic text segments
-        group_format = nil,              -- Optional function(group_stats) -> semantic text segments
+        enabled = false,         -- Fetch and show Git line statistics
+        count_untracked = false, -- Count untracked file lines as insertions
+        max_untracked_bytes = 1024 * 1024, -- Skip larger untracked files
+      },
+      formatters = {
+        file = nil,   -- Optional function(ctx) -> line layout; nil uses the built-in formatter
+        folder = nil, -- Optional function(ctx) -> line layout; nil uses the built-in formatter
+        group = nil,  -- Optional function(ctx) -> line layout; nil uses the built-in formatter
       },
       visible_groups = {       -- Which groups to show (can be toggled at runtime)
         staged = true,
@@ -230,35 +232,72 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 
 Explorer line statistics are disabled by default because they require extra Git queries and consume space in the default 40-column explorer. Set `explorer.line_stats.enabled = true` to show Git numstat counts. Untracked files have no stats unless `count_untracked = true`; files larger than `max_untracked_bytes` are not read (1 MiB by default).
 
-Files use `+12 -4` (`bin` for binary files); group headings use `Changes (3 · +42 -8)`.
+Files use `+12 -4` (`bin` for binary files); group headings use `Changes (3 · +42 -8)`. Aggregate folder and group stats contain `files_changed`, `insertions`, `deletions`, `binary_files`, and `unavailable_files`. Binary and unavailable files count toward `files_changed` but not line totals.
 
-Customize files with `file_format` and headings with `group_format`:
+#### Explorer line formatters
+
+`explorer.formatters.file`, `folder`, and `group` can replace the complete corresponding explorer line. Each receives a context and returns a layout:
 
 ```lua
-file_format = function(stats)
-  if stats.binary then
-    return { { text = "binary", kind = "binary" } }
-  end
-  return {
-    { text = stats.insertions .. " added", kind = "insertions" },
-    { text = ", " },
-    { text = stats.deletions .. " removed", kind = "deletions" },
-  }
-end,
-group_format = function(stats)
-  return {
-    { text = stats.files_changed .. " files", kind = "files" },
-    { text = ": " },
-    { text = "+" .. stats.insertions, kind = "insertions" },
-    { text = " " },
-    { text = "-" .. stats.deletions, kind = "deletions" },
-  }
-end
+{
+  left = {
+    {
+      segments = { { text = "name.lua", hl = "Normal" } },
+      truncate_priority = 2,
+    },
+  },
+  right = {
+    {
+      segments = { { text = "M", hl = "CodeDiffStatusModified" } },
+    },
+  },
+  min_gap = 2,
+}
 ```
 
-File stats contain `insertions`, `deletions`, and `binary`; group stats also contain `files_changed`. Formatters return `{ text, kind? }` segments, where `kind` is `text`, `files`, `insertions`, `deletions`, or `binary`. Segments without a kind inherit the surrounding highlight.
+A region contains styled `segments`. A numeric `truncate_priority` makes it truncatable; regions without one stay fixed unless the fixed content itself cannot fit. Lower priorities truncate first. The renderer measures display cells, truncates regions with `...`, right-aligns `right`, and preserves at least `min_gap` cells when space permits. The built-in file formatter truncates directory, filename, then stats; status remains fixed. Folder names and group summaries are also truncatable.
 
-Group totals include all displayed files but exclude unavailable and binary line counts.
+Each segment is `{ text = string, hl? = highlight }`. `hl` accepts a Neovim highlight group, a `#RGB`/`#RRGGBB` foreground color, or a highlight definition such as `{ fg = "#3fb950", bold = true }`. Omitted `hl` uses `Normal`; selected file lines retain their selection background.
+
+All contexts include `file_count` and `stats`; `stats` is `nil` when line statistics are disabled. File contexts add `path`, `filename`, `directory`, `old_path`, `group`, `status`, `status_code`, `status_hl`, `status_right_margin`, `indent`, `indent_hl`, `icon`, and `icon_hl`. Folder contexts add `name`, `path`, `group`, `indent`, `indent_hl`, `icon`, `icon_hl`, and `expanded`. Group contexts add `name`, `label`, and `expanded`.
+
+See the [built-in formatter implementations](./lua/codediff/ui/explorer/formatters.lua) for complete file, folder, and group examples. The module intentionally exports `file`, `folder`, and `group`; each returns a fresh layout that users can assign directly or wrap:
+
+```lua
+local defaults = require("codediff.ui.explorer.formatters")
+local layout = defaults.folder(ctx)
+```
+
+A formatter can replace only the line type it needs:
+
+```lua
+require("codediff").setup({
+  explorer = {
+    line_stats = { enabled = true },
+    formatters = {
+      group = function(ctx)
+        local stats = ctx.stats
+        local summary = stats and string.format("%d · +%d -%d", ctx.file_count, stats.insertions, stats.deletions)
+          or tostring(ctx.file_count)
+        return {
+          left = {
+            {
+              segments = { { text = " " .. ctx.label, hl = "CodeDiffExplorerTreeGroup" } },
+              truncate_priority = 1,
+            },
+          },
+          right = {
+            {
+              segments = { { text = summary, hl = "#6cb6ff" } },
+            },
+          },
+          min_gap = 2,
+        }
+      end,
+    },
+  },
+})
+```
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 

@@ -219,11 +219,13 @@ Setup entry point:
       status_right_margin = 1,
       line_stats = {
         enabled = false,
-        group_totals = true,
         count_untracked = false,
         max_untracked_bytes = 1024 * 1024,
-        file_format = nil,
-        group_format = nil,
+      },
+      formatters = {
+        file = nil,
+        folder = nil,
+        group = nil,
       },
       visible_groups = {
         staged = true,
@@ -298,43 +300,95 @@ Setup entry point:
 
 Explorer line statistics are disabled by default because they require extra Git
 queries and consume space in the default 40-column explorer. With `enabled =
-true`, tracked files show Git numstat counts and group headings can show their
-totals. Untracked files have no stats unless `count_untracked = true`; files
-larger than `max_untracked_bytes` are not read (1 MiB by default).
+true`, tracked files show Git numstat counts and group headings show totals.
+Untracked files have no stats unless `count_untracked = true`; files larger than
+`max_untracked_bytes` are not read (1 MiB by default).
 
-Files use `+12 -4` (`bin` for binary files); group headings use
-`Changes (3 · +42 -8)`.
+Files use `+12 -4` (`bin` for binary files); group headings use `Changes (3 ·
++42 -8)`. Aggregate folder and group stats contain `files_changed`,
+`insertions`, `deletions`, `binary_files`, and `unavailable_files`. Binary and
+unavailable files count toward `files_changed` but not line totals.
 
-Customize files with `file_format` and headings with `group_format`:
+EXPLORER LINE FORMATTERS                    *codediff-explorer-line-formatters*
+
+`explorer.formatters.file`, `folder`, and `group` replace the complete
+corresponding explorer line. Each function receives a context and returns:
 >lua
-  file_format = function(stats)
-    if stats.binary then
-      return { { text = "binary", kind = "binary" } }
-    end
-    return {
-      { text = stats.insertions .. " added", kind = "insertions" },
-      { text = ", " },
-      { text = stats.deletions .. " removed", kind = "deletions" },
-    }
-  end,
-  group_format = function(stats)
-    return {
-      { text = stats.files_changed .. " files", kind = "files" },
-      { text = ": " },
-      { text = "+" .. stats.insertions, kind = "insertions" },
-      { text = " " },
-      { text = "-" .. stats.deletions, kind = "deletions" },
-    }
-  end
+  {
+    left = {
+      {
+        segments = { { text = "name.lua", hl = "Normal" } },
+        truncate_priority = 2,
+      },
+    },
+    right = {
+      {
+        segments = { { text = "M", hl = "CodeDiffStatusModified" } },
+      },
+    },
+    min_gap = 2,
+  }
 <
 
-File stats contain `insertions`, `deletions`, and `binary`; group stats also
-contain `files_changed`. Formatters return `{ text, kind? }` segments, where
-`kind` is `text`, `files`, `insertions`, `deletions`, or `binary`. Segments
-without a kind inherit the surrounding highlight.
+A region contains styled `segments`. A numeric `truncate_priority` makes it
+truncatable; regions without one stay fixed unless the fixed content itself
+cannot fit. Lower priorities truncate first. The renderer measures display
+cells, truncates regions with `...`, right-aligns `right`, and preserves
+`min_gap` cells when space permits. The defaults truncate directory, filename,
+then stats while keeping status fixed. Folder names and group summaries are
+also truncatable.
 
-Group totals include all displayed files but exclude unavailable and binary
-line counts.
+A segment is `{ text = string, hl? = highlight }`. `hl` accepts a Neovim
+highlight group, a `#RGB`/`#RRGGBB` foreground color, or a highlight definition
+such as `{ fg = "#3fb950", bold = true }`. Omitted `hl` uses `Normal`; selected
+file lines retain their selection background.
+
+All contexts include `file_count` and `stats`; `stats` is nil when line
+statistics are disabled. File contexts add `path`, `filename`, `directory`,
+`old_path`, `group`, `status`, `status_code`, `status_hl`,
+`status_right_margin`, `indent`, `indent_hl`, `icon`, and `icon_hl`. Folder
+contexts add `name`, `path`, `group`, `indent`, `indent_hl`, `icon`, `icon_hl`,
+and `expanded`. Group contexts add `name`, `label`, and `expanded`.
+
+Complete defaults for all three line types are in
+`lua/codediff/ui/explorer/formatters.lua`. The module intentionally exports
+`file`, `folder`, and `group`; each returns a fresh layout that users can assign
+directly or wrap:
+>lua
+  local defaults = require("codediff.ui.explorer.formatters")
+  local layout = defaults.folder(ctx)
+<
+
+A formatter can replace only the line type it needs:
+>lua
+  require("codediff").setup({
+    explorer = {
+      line_stats = { enabled = true },
+      formatters = {
+        group = function(ctx)
+          local stats = ctx.stats
+          local summary = stats
+            and string.format("%d · +%d -%d", ctx.file_count, stats.insertions, stats.deletions)
+            or tostring(ctx.file_count)
+          return {
+            left = {
+              {
+                segments = { { text = " " .. ctx.label, hl = "CodeDiffExplorerTreeGroup" } },
+                truncate_priority = 1,
+              },
+            },
+            right = {
+              {
+                segments = { { text = summary, hl = "#6cb6ff" } },
+              },
+            },
+            min_gap = 2,
+          }
+        end,
+      },
+    },
+  })
+<
 
 ==============================================================================
 HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
@@ -385,7 +439,7 @@ Explorer & history git status highlights (customizable):
 - CodeDiffStatusUntracked   Untracked files (links to DiagnosticInfo)
 - CodeDiffStatusConflict    Conflicting files (links to DiagnosticError)
 - CodeDiffExplorerSelected  Selected file background (links to Visual)
-- CodeDiffExplorerStat            Segments with kind="text" (links to NonText)
+- CodeDiffExplorerStat            General explorer stat text (links to NonText)
 - CodeDiffExplorerStatFiles       File-count segments (links to Number)
 - CodeDiffExplorerStatInsertions  Insertion segments (links to Added)
 - CodeDiffExplorerStatDeletions   Deletion segments (links to Removed)

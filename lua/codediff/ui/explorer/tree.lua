@@ -20,17 +20,15 @@ end
 
 -- Creates a collapsible heading such as "Changes (3 · +42 -8)" above its file nodes.
 local function create_group_node(label, name, files, children)
-  local line_stats_options = config.options.explorer.line_stats
-  local stat_segments = { { text = tostring(#files), hl = "CodeDiffExplorerTreeGroup" } }
-  if line_stats_options.enabled and line_stats_options.group_totals then
-    stat_segments = line_stats.build_group_segments(files, line_stats_options)
-  end
-
-  local formatted_stats = line_stats.text(stat_segments)
-  local text = formatted_stats == "" and label or string.format("%s (%s)", label, formatted_stats)
   return Tree.Node({
-    text = text,
-    data = { type = "group", name = name, label = label, stat_segments = stat_segments },
+    text = string.format("%s (%d)", label, #files),
+    data = {
+      type = "group",
+      name = name,
+      label = label,
+      file_count = #files,
+      stats = line_stats.sum(files),
+    },
   }, children)
 end
 

@@ -1,36 +1,6 @@
 -- Configuration module
 local M = {}
-
-local function default_file_format(stats)
-  if stats.binary then
-    return { { text = "bin", kind = "binary" } }
-  end
-
-  local segments = {}
-  if stats.insertions > 0 then
-    segments[#segments + 1] = { text = "+" .. stats.insertions, kind = "insertions" }
-  end
-  if stats.deletions > 0 then
-    if #segments > 0 then
-      segments[#segments + 1] = { text = " " }
-    end
-    segments[#segments + 1] = { text = "-" .. stats.deletions, kind = "deletions" }
-  end
-  return segments
-end
-
-local function default_group_format(stats)
-  local segments = { { text = tostring(stats.files_changed), kind = "files" } }
-  if stats.insertions > 0 then
-    segments[#segments + 1] = { text = " · " }
-    segments[#segments + 1] = { text = "+" .. stats.insertions, kind = "insertions" }
-  end
-  if stats.deletions > 0 then
-    segments[#segments + 1] = { text = stats.insertions > 0 and " " or " · " }
-    segments[#segments + 1] = { text = "-" .. stats.deletions, kind = "deletions" }
-  end
-  return segments
-end
+local explorer_formatters = require("codediff.ui.explorer.formatters")
 
 M.defaults = {
   -- Highlight configuration
@@ -102,12 +72,14 @@ M.defaults = {
     flatten_dirs = true, -- Flatten single-child directory chains in tree view (e.g., src/components/ui/)
     status_right_margin = 1, -- Trailing cells between the status symbol (M/A/D) and the right edge; increase if Nerd Font icons clip it
     line_stats = {
-      enabled = false, -- Show per-file insertion/deletion counts from git numstat
-      group_totals = true, -- Include aggregate insertion/deletion counts in group headings
+      enabled = false, -- Show insertion/deletion counts from git numstat
       count_untracked = false, -- Show untracked file lines as insertions
       max_untracked_bytes = 1024 * 1024, -- Skip untracked files larger than this limit
-      file_format = default_file_format, -- Function(file_stats) -> semantic text segments
-      group_format = default_group_format, -- Function(group_stats) -> semantic text segments
+    },
+    formatters = {
+      file = explorer_formatters.file,
+      folder = explorer_formatters.folder,
+      group = explorer_formatters.group,
     },
     visible_groups = { -- Which groups to show in explorer (can be toggled at runtime)
       staged = true,
