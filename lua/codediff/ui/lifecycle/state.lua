@@ -3,6 +3,7 @@
 local M = {}
 
 local highlights = require("codediff.ui.highlights")
+local path = require("codediff.core.path")
 
 -- Save buffer state before modifications
 local function save_buffer_state(bufnr)
@@ -49,6 +50,7 @@ local function clear_buffer_highlights(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, highlights.ns_conflict, 0, -1)
   local ns_inline = vim.api.nvim_create_namespace("codediff-inline")
   vim.api.nvim_buf_clear_namespace(bufnr, ns_inline, 0, -1)
+  require("codediff.ui.gutter_signs").clear_buffer(bufnr)
 end
 
 M.clear_buffer_highlights = clear_buffer_highlights
@@ -193,6 +195,14 @@ local function resume_diff(tabpage)
     else
       local core = require("codediff.ui.core")
       core.render_diff(diff.original_bufnr, diff.modified_bufnr, original_lines, modified_lines, lines_diff)
+      if diff.single_pane then
+        local gutter_signs = require("codediff.ui.gutter_signs")
+        if not path.is_empty(diff.original) and diff.original_win and vim.api.nvim_win_is_valid(diff.original_win) then
+          gutter_signs.set_whole_file(diff.original_bufnr, "original")
+        elseif not path.is_empty(diff.modified) and diff.modified_win and vim.api.nvim_win_is_valid(diff.modified_win) then
+          gutter_signs.set_whole_file(diff.modified_bufnr, "modified")
+        end
+      end
     end
 
     -- Re-sync scrollbind ONLY if diff was recomputed and not inline mode
