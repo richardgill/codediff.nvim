@@ -238,10 +238,10 @@ gutter_signs = {
   unchanged_priority = nil,
 }
 
--- Hide other signs with lower priorities.
+-- Hide other Neovim signs with lower priorities.
 gutter_signs = {
   changed_priority = 100,
-  unchanged_priority = 7,
+  unchanged_priority = 99,
 }
 ```
 
@@ -644,12 +644,13 @@ The plugin defines highlight groups matching VSCode's diff colors:
 - `CodeDiffFiller` - Gray foreground for filler line slashes (`╱╱╱`)
 - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
 - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
+
+To customize gutter colors, define these four highlight groups in your colorscheme configuration:
+
 - `CodeDiffGutterInsert` - Insert sign; defaults to `CodeDiffLineInsert`
 - `CodeDiffGutterDelete` - Delete sign; defaults to `CodeDiffLineDelete`
 - `CodeDiffGutterInsertNumber` - Insert line number; defaults to `CodeDiffCharInsert`
 - `CodeDiffGutterDeleteNumber` - Delete line number; defaults to `CodeDiffCharDelete`
-
-To customize gutter colors, define these four highlight groups in your colorscheme configuration.
 
 <details open>
 <summary><b>📸 Visual Examples</b> (click to collapse)</summary>

@@ -309,7 +309,7 @@ the diff view is suspended or closed.
     unchanged_priority = nil,
   }
 
-  -- Hide other signs with lower priorities.
+  -- Hide other Neovim signs with lower priorities.
   gutter_signs = {
     changed_priority = 100,
     unchanged_priority = 99,
@@ -342,10 +342,6 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
 - CodeDiffLineDelete - light red background for deleted lines
 - CodeDiffCharInsert - deep/dark green for inserted characters
 - CodeDiffCharDelete - deep/dark red for deleted characters
-- CodeDiffGutterInsert - insert sign (defaults to CodeDiffLineInsert)
-- CodeDiffGutterDelete - delete sign (defaults to CodeDiffLineDelete)
-- CodeDiffGutterInsertNumber - insert line number (defaults to CodeDiffCharInsert)
-- CodeDiffGutterDeleteNumber - delete line number (defaults to CodeDiffCharDelete)
 - CodeDiffFiller - gray foreground for filler line slashes (///)
 - CodeDiffLineMove - background for moved lines (derived from DiffChange)
 - CodeDiffCharMove - character-level highlight for moved text
@@ -357,7 +353,12 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
 - CodeDiffHelpDesc - descriptions in keymap help (links to Normal)
 
 To customize gutter colors, define these four highlight groups in your
-colorscheme configuration.
+colorscheme configuration:
+
+- CodeDiffGutterInsert - insert sign (defaults to CodeDiffLineInsert)
+- CodeDiffGutterDelete - delete sign (defaults to CodeDiffLineDelete)
+- CodeDiffGutterInsertNumber - insert line number (defaults to CodeDiffCharInsert)
+- CodeDiffGutterDeleteNumber - delete line number (defaults to CodeDiffCharDelete)
 
 Default behavior:
 - Uses DiffAdd and DiffDelete for line-level highlights
