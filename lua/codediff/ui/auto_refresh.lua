@@ -290,7 +290,7 @@ local function do_result_diff_update(bufnr)
   end
 
   -- Render highlights on result buffer only (modified side = insertions shown as green)
-  core.render_single_buffer(bufnr, lines_diff, "modified")
+  core.render_single_buffer(bufnr, lines_diff, "modified", base_lines)
 end
 
 -- Trigger throttled diff update for result buffer

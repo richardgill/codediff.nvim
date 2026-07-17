@@ -138,6 +138,11 @@ function M.setup()
   vim.api.nvim_set_hl(0, "CodeDiffCharInsert", char_insert_color)
   vim.api.nvim_set_hl(0, "CodeDiffCharDelete", char_delete_color)
 
+  local line_insert_text_color = resolve_color(opts.line_insert_text, line_insert_color.bg, line_insert_color.ctermbg)
+  local line_delete_text_color = resolve_color(opts.line_delete_text, line_delete_color.bg, line_delete_color.ctermbg)
+  vim.api.nvim_set_hl(0, "CodeDiffLineInsertText", line_insert_text_color)
+  vim.api.nvim_set_hl(0, "CodeDiffLineDeleteText", line_delete_text_color)
+
   -- Moved code highlights (derived from DiffChange — the standard "changed" color)
   local diff_change_hl = vim.api.nvim_get_hl(0, { name = "DiffChange", link = false })
   local move_fallback = effective_bg(diff_change_hl) or 0x4f5258
