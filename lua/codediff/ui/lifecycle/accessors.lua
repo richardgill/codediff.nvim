@@ -12,6 +12,12 @@ local function is_virtual_revision(revision)
   return revision ~= nil and revision ~= "WORKING"
 end
 
+local function clear_gutter_signs(sess)
+  local gutter_signs = require("codediff.ui.gutter_signs")
+  gutter_signs.clear_buffer(sess.original_bufnr)
+  gutter_signs.clear_buffer(sess.modified_bufnr)
+end
+
 -- ============================================================================
 -- PUBLIC API - GETTERS (return copies/values, safe)
 -- ============================================================================
@@ -215,6 +221,9 @@ function M.update_suspended(tabpage, suspended)
   end
 
   sess.suspended = suspended
+  if suspended then
+    clear_gutter_signs(sess)
+  end
   return true
 end
 
@@ -227,6 +236,9 @@ function M.update_layout(tabpage, layout)
   end
 
   sess.layout = layout
+  if layout == "inline" then
+    clear_gutter_signs(sess)
+  end
   return true
 end
 
@@ -293,6 +305,14 @@ function M.update_buffers(tabpage, original_bufnr, modified_bufnr)
   end
 
   local state = require("codediff.ui.lifecycle.state")
+  local gutter_signs = require("codediff.ui.gutter_signs")
+
+  if sess.original_bufnr ~= original_bufnr and sess.original_bufnr ~= modified_bufnr then
+    gutter_signs.clear_buffer(sess.original_bufnr)
+  end
+  if sess.modified_bufnr ~= original_bufnr and sess.modified_bufnr ~= modified_bufnr then
+    gutter_signs.clear_buffer(sess.modified_bufnr)
+  end
 
   sess.original_bufnr = original_bufnr
   sess.modified_bufnr = modified_bufnr
@@ -358,6 +378,9 @@ function M.set_result(tabpage, result_bufnr, result_win)
   -- Mark result window with restore flag
   if result_win and vim.api.nvim_win_is_valid(result_win) then
     vim.w[result_win].codediff_restore = 1
+  end
+  if result_win then
+    clear_gutter_signs(sess)
   end
 
   return true
