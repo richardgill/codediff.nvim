@@ -51,6 +51,29 @@ local function is_merge_artifact(path)
   return false
 end
 
+local function truncate_to_width(text, max_width)
+  if max_width <= 0 then
+    return ""
+  end
+  if vim.fn.strdisplaywidth(text) <= max_width then
+    return text
+  end
+
+  local ellipsis = string.rep(".", math.min(3, max_width))
+  local prefix_width = max_width - #ellipsis
+  local prefix = {}
+  local width = 0
+  for char in vim.gsplit(text, "") do
+    local char_width = vim.fn.strdisplaywidth(char)
+    if width + char_width > prefix_width then
+      return table.concat(prefix) .. ellipsis
+    end
+    prefix[#prefix + 1] = char
+    width = width + char_width
+  end
+  return text
+end
+
 -- Filter out merge artifacts from file list
 function M.filter_merge_artifacts(files)
   if not config.options.diff.hide_merge_artifacts then
@@ -370,35 +393,19 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     local status_reserve = vim.fn.strdisplaywidth(status_symbol) + 2 + status_margin
     local available_for_content = max_width - used_width - stats_reserve - status_reserve
 
-    -- Show: filename + full directory path, truncate directory from left if needed
+    -- Show: filename + full directory path within the space reserved for content
     local filename_len = vim.fn.strdisplaywidth(filename)
     local directory_len = vim.fn.strdisplaywidth(directory)
     local space_len = (directory_len > 0) and 1 or 0
 
-    if filename_len + space_len + directory_len > available_for_content then
-      -- Truncate directory from the right (keep the start)
+    if filename_len > available_for_content then
+      filename = truncate_to_width(filename, available_for_content)
+      directory = ""
+      space_len = 0
+    elseif filename_len + space_len + directory_len > available_for_content then
       local available_for_dir = available_for_content - filename_len - space_len
-      if available_for_dir > 3 then
-        local ellipsis = "..."
-        local chars_to_keep = available_for_dir - vim.fn.strdisplaywidth(ellipsis)
-
-        -- Truncate directory by display width, not byte index
-        local byte_pos = 0
-        local accumulated_width = 0
-        for char in vim.gsplit(directory, "") do
-          local char_width = vim.fn.strdisplaywidth(char)
-          if accumulated_width + char_width > chars_to_keep then
-            break
-          end
-          accumulated_width = accumulated_width + char_width
-          byte_pos = byte_pos + #char
-        end
-        directory = directory:sub(1, byte_pos) .. ellipsis
-      else
-        -- Not enough space for directory, just show filename
-        directory = ""
-        space_len = 0
-      end
+      directory = available_for_dir > 3 and truncate_to_width(directory, available_for_dir) or ""
+      space_len = directory ~= "" and 1 or 0
     end
 
     -- Append filename (normal weight) and directory (dimmed)

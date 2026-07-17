@@ -67,6 +67,18 @@ describe("Explorer line stats", function()
     assert.matches("changed%.lua%s+%+22 %-8 M%s*$", content)
   end)
 
+  it("keeps stats and status visible for long filenames", function()
+    config.options.explorer.line_stats.enabled = true
+    local files = {
+      { path = "a-very-long-filename-that-needs-truncation.lua", status = "??", line_stats = { insertions = 4, deletions = 0 } },
+    }
+    local node = nodes.create_file_nodes(files, "/repo", "unstaged")[1]
+    local content = nodes.prepare_node(node, 40, nil, nil):content()
+
+    assert.matches("a%-very%-long%-filename.*%.%.%.%s+%+4 %?%? %s*$", content)
+    assert.equals(40, vim.fn.strdisplaywidth(content))
+  end)
+
   it("can hide group totals", function()
     config.options.explorer.line_stats.enabled = true
     config.options.explorer.line_stats.group_totals = false
