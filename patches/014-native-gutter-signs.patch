@@ -1,4 +1,4 @@
-From abc9ffdd3755d0994730af8d1abca02748387410 Mon Sep 17 00:00:00 2001
+From 3c89559cbc665de02d2a504994328e445d38f469 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 20:18:52 +0100
 Subject: [PATCH] Added native gutter signs support
@@ -28,7 +28,7 @@ Subject: [PATCH] Added native gutter signs support
  create mode 100644 tests/ui/gutter_signs_spec.lua
 
 diff --git a/README.md b/README.md
-index e71d6b8..ff1e843 100644
+index edda6af..dbbc095 100644
 --- a/README.md
 +++ b/README.md
 @@ -108,6 +108,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -39,7 +39,7 @@ index e71d6b8..ff1e843 100644
        compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
        compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
        compact_sync_folds = true,          -- Sync fold open/close across panes (mirrors Vim diff mode behavior)
-@@ -272,6 +273,39 @@ Group totals include all displayed files but exclude unavailable and binary line
+@@ -311,6 +312,39 @@ require("codediff").setup({
  
  The C library will be downloaded automatically on first use. No `build` step needed!
  
@@ -79,7 +79,7 @@ index e71d6b8..ff1e843 100644
  ### Managing Library Installation
  
  The plugin automatically manages the C library installation:
-@@ -666,6 +700,13 @@ The plugin defines these diff highlight groups:
+@@ -705,6 +739,13 @@ The plugin defines these diff highlight groups:
  - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
  - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
  
@@ -94,7 +94,7 @@ index e71d6b8..ff1e843 100644
  <summary><b>📸 Visual Examples</b> (click to collapse)</summary>
  
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 8ef6a22..6cd930f 100644
+index 373259e..3f6d2b9 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -217,6 +217,7 @@ Setup entry point:
@@ -105,9 +105,9 @@ index 8ef6a22..6cd930f 100644
        compute_moves = false,
        compact_context_lines = 3,
        compact_sync_folds = true,
-@@ -359,6 +360,51 @@ without a kind inherit the surrounding highlight.
- Group totals include all displayed files but exclude unavailable and binary
- line counts.
+@@ -413,6 +414,51 @@ A formatter can replace only the line type it needs:
+   })
+ <
  
 +==============================================================================
 +NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
@@ -157,7 +157,7 @@ index 8ef6a22..6cd930f 100644
  ==============================================================================
  HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
  
-@@ -378,6 +424,14 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
+@@ -432,6 +478,14 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
  - CodeDiffHelpSep - separators in keymap help (links to NonText)
  - CodeDiffHelpDesc - descriptions in keymap help (links to Normal)
  
@@ -200,10 +200,10 @@ index 0000000..dec3e5b
 +
 +Neovim 0.11 introduced the experimental `nvim__ns_set()` API, which can scope persistent extmark namespaces to windows. CodeDiff does not depend on that private-style API; window-local signs can be reconsidered when Neovim exposes a stable supported mechanism.
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 32f228e..91abfe4 100644
+index 32f7150..2286d9c 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
-@@ -83,6 +83,7 @@ M.defaults = {
+@@ -53,6 +53,7 @@ M.defaults = {
      jump_to_first_change = true, -- Auto-scroll to first change when opening a diff: true = jump to first hunk, false = stay at same line
      highlight_added_deleted_files = true, -- Tint the full contents of added, untracked, and deleted files
      highlight_priority = 100, -- Priority for line-level diff highlights (increase to override LSP highlights)

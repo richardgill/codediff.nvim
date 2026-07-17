@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 4cfc8ff5786e51f8ed513994e336dda3b38a43bb
-expectedTree = d88707bd1612b20fb0bb2b19869de1aaaf0f29d7
+expectedHead = 8fac1316a79669eb0837914a08227aed7d085ba7
+expectedTree = ac470cbb83b3a9960a7a6cd5fad8677f54e5f16d
 testCommand = make test
 publishRemote = upstream
 publishBranch = main
@@ -68,7 +68,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/447
 
 [patch "explorer-line-statistics"]
 file = patches/011-explorer-line-statistics.patch
-originCommit = 80d13b0a4ac7e89f2f3a7151dd960538ae402d92
+originCommit = 15f8a5de2192ec1bfbb6a39cbc440f1c462d4d82
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 
 [patch "pure-line-char-highlights"]

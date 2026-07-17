@@ -1,4 +1,4 @@
-From 8ca896214e7d929000e5553a34336fe834eee9bc Mon Sep 17 00:00:00 2001
+From 107c6bfc8484d75709c774fe3247ad6b3a421035 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 17:42:10 +0100
 Subject: [PATCH] fix: reserve character highlights for modified lines
@@ -18,7 +18,7 @@ Subject: [PATCH] fix: reserve character highlights for modified lines
  create mode 100644 lua/codediff/ui/char_ranges.lua
 
 diff --git a/README.md b/README.md
-index 873c3b6..e71d6b8 100644
+index 7c95a22..edda6af 100644
 --- a/README.md
 +++ b/README.md
 @@ -66,6 +66,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -33,7 +33,7 @@ index 873c3b6..e71d6b8 100644
        -- Character-level: accepts highlight group names or hex colors
        -- If specified, these override char_brightness calculation
        char_insert = nil,            -- Character-level insertions (nil = auto-derive)
-@@ -648,13 +653,15 @@ The plugin handles syntax highlighting differently based on buffer type:
+@@ -687,13 +692,15 @@ The plugin handles syntax highlighting differently based on buffer type:
  
  ### Highlight Groups
  
@@ -52,7 +52,7 @@ index 873c3b6..e71d6b8 100644
  - `CodeDiffFiller` - Gray foreground for non-empty filler line patterns
  - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
  - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
-@@ -680,7 +687,8 @@ The plugin defines highlight groups matching VSCode's diff colors:
+@@ -719,7 +726,8 @@ The plugin defines highlight groups matching VSCode's diff colors:
  
  **Default behavior:**
  - Uses your colorscheme's `DiffAdd`, `DiffChange`, and `DiffDelete` for line-level highlights
@@ -63,10 +63,10 @@ index 873c3b6..e71d6b8 100644
    - **Light themes** (`background = "light"`): Brightness multiplied by `0.92` (8% darker)
  - This auto-detection works out-of-box for most colorschemes
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 8b6b641..32f228e 100644
+index 4e2f126..32f7150 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
-@@ -40,6 +40,11 @@ M.defaults = {
+@@ -10,6 +10,11 @@ M.defaults = {
      line_change = "DiffChange", -- Line-level modifications (base color)
      line_delete = "DiffDelete", -- Line-level deletions (base color)
  
