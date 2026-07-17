@@ -1,60 +1,56 @@
 local M = {}
 
 local HIGHLIGHTS = {
-  custom = "CodeDiffExplorerStat",
+  text = "CodeDiffExplorerStat",
+  files = "CodeDiffExplorerStatFiles",
   insertions = "CodeDiffExplorerStatInsertions",
   deletions = "CodeDiffExplorerStatDeletions",
   binary = "CodeDiffExplorerStatBinary",
 }
 
+local function add_highlights(segments, default_highlight)
+  local highlighted = {}
+  for _, segment in ipairs(segments) do
+    highlighted[#highlighted + 1] = {
+      text = segment.text,
+      hl = segment.kind and HIGHLIGHTS[segment.kind] or default_highlight,
+    }
+  end
+  return highlighted
+end
+
 -- Returns highlighted parts, e.g. { { text = "+12", hl = "CodeDiffExplorerStatInsertions" } }.
-function M.build_segments(stats, line_stats_options)
+function M.build_file_segments(stats, line_stats_options)
   if not stats then
     return {}
   end
-  local formatter = line_stats_options.format
-  if formatter then
-    local text = formatter(stats)
-    return text and text ~= "" and { { text = text, hl = HIGHLIGHTS.custom } } or {}
-  end
-  if stats.binary then
-    return { { text = "bin", hl = HIGHLIGHTS.binary } }
-  end
+  return add_highlights(line_stats_options.file_format(stats), "Normal")
+end
 
-  local segments = {}
-  local insertions = stats.insertions or 0
-  local deletions = stats.deletions or 0
-  if insertions > 0 then
-    segments[#segments + 1] = { text = "+" .. insertions, hl = HIGHLIGHTS.insertions }
-  end
-  if deletions > 0 then
-    segments[#segments + 1] = { text = "-" .. deletions, hl = HIGHLIGHTS.deletions }
-  end
-  return segments
+function M.build_group_segments(files, line_stats_options)
+  return add_highlights(line_stats_options.group_format(M.sum_text_stats(files)), "CodeDiffExplorerTreeGroup")
 end
 
 -- Joins highlighted parts into plain text for labels, e.g. "+12 -4".
-function M.text(stats, line_stats_options)
+function M.text(segments)
   local parts = {}
-  for _, segment in ipairs(M.build_segments(stats, line_stats_options)) do
+  for _, segment in ipairs(segments) do
     parts[#parts + 1] = segment.text
   end
-  return table.concat(parts, " ")
+  return table.concat(parts)
 end
 
--- Sums text-file stats, e.g. +10/-2 and +3/-1 sum to: +13/-3; returns nil when none are available.
+-- Sums text-file stats, e.g. +10/-2 and +3/-1 sum to: +13/-3.
 function M.sum_text_stats(files)
-  local total = { insertions = 0, deletions = 0, binary = false }
-  local has_text_stats = false
+  local total = { files_changed = #files, insertions = 0, deletions = 0 }
   for _, file in ipairs(files) do
     local stats = file.line_stats
     if stats and not stats.binary then
       total.insertions = total.insertions + (stats.insertions or 0)
       total.deletions = total.deletions + (stats.deletions or 0)
-      has_text_stats = true
     end
   end
-  return has_text_stats and total or nil
+  return total
 end
 
 return M

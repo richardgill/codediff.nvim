@@ -198,16 +198,22 @@ function M.setup()
   vim.api.nvim_set_hl(0, "CodeDiffStatusRenamed", { link = "DiagnosticInfo", default = true })
   vim.api.nvim_set_hl(0, "CodeDiffStatusUntracked", { link = "DiagnosticInfo", default = true })
   vim.api.nvim_set_hl(0, "CodeDiffStatusConflict", { link = "DiagnosticError", default = true })
-  vim.api.nvim_set_hl(0, "CodeDiffExplorerStat", { link = "NonText", default = true })
-  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatInsertions", { link = "DiagnosticOk", default = true })
-  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatDeletions", { link = "DiagnosticError", default = true })
-  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatBinary", { link = "NonText", default = true })
 
   -- Helper to check if a highlight group exists and has foreground color
   local function hl_exists(name)
     local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
     return ok and hl and (hl.fg or hl.foreground)
   end
+
+  -- Added and Removed are only available in Neovim 0.10+.
+  local insertion_highlight = hl_exists("Added") and "Added" or "DiagnosticOk"
+  local deletion_highlight = hl_exists("Removed") and "Removed" or "DiagnosticError"
+
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStat", { link = "NonText", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatFiles", { link = "Number", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatInsertions", { link = insertion_highlight, default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatDeletions", { link = deletion_highlight, default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatBinary", { link = "NonText", default = true })
 
   -- Helper to set conflict sign highlight with user config as priority 0
   -- @param hl_name string The highlight group name to set

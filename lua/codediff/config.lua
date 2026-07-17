@@ -1,6 +1,37 @@
 -- Configuration module
 local M = {}
 
+local function default_file_format(stats)
+  if stats.binary then
+    return { { text = "bin", kind = "binary" } }
+  end
+
+  local segments = {}
+  if stats.insertions > 0 then
+    segments[#segments + 1] = { text = "+" .. stats.insertions, kind = "insertions" }
+  end
+  if stats.deletions > 0 then
+    if #segments > 0 then
+      segments[#segments + 1] = { text = " " }
+    end
+    segments[#segments + 1] = { text = "-" .. stats.deletions, kind = "deletions" }
+  end
+  return segments
+end
+
+local function default_group_format(stats)
+  local segments = { { text = tostring(stats.files_changed), kind = "files" } }
+  if stats.insertions > 0 then
+    segments[#segments + 1] = { text = " · " }
+    segments[#segments + 1] = { text = "+" .. stats.insertions, kind = "insertions" }
+  end
+  if stats.deletions > 0 then
+    segments[#segments + 1] = { text = stats.insertions > 0 and " " or " · " }
+    segments[#segments + 1] = { text = "-" .. stats.deletions, kind = "deletions" }
+  end
+  return segments
+end
+
 M.defaults = {
   -- Highlight configuration
   highlights = {
@@ -75,7 +106,8 @@ M.defaults = {
       group_totals = true, -- Include aggregate insertion/deletion counts in group headings
       count_untracked = false, -- Show untracked file lines as insertions
       max_untracked_bytes = 1024 * 1024, -- Skip untracked files larger than this limit
-      format = nil, -- Optional function(stats) -> string; nil uses the built-in +N -N / bin format
+      file_format = default_file_format, -- Function(file_stats) -> semantic text segments
+      group_format = default_group_format, -- Function(group_stats) -> semantic text segments
     },
     visible_groups = { -- Which groups to show in explorer (can be toggled at runtime)
       staged = true,

@@ -308,7 +308,14 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
   if data.type == "group" then
     -- Group header
     line:append(" ", "CodeDiffExplorerTreeGroup")
-    line:append(node.text, "CodeDiffExplorerTreeGroup")
+    line:append(data.label, "CodeDiffExplorerTreeGroup")
+    if #data.stat_segments > 0 then
+      line:append(" (", "CodeDiffExplorerTreeGroup")
+      for _, segment in ipairs(data.stat_segments) do
+        line:append(segment.text, segment.hl)
+      end
+      line:append(")", "CodeDiffExplorerTreeGroup")
+    end
   elseif data.type == "directory" then
     -- Directory node (tree view mode) - with indent markers
     local indent = build_indent_markers(data.indent_state)
@@ -373,8 +380,8 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
 
     -- calculate width of stats
     local line_stats_options = explorer_config.line_stats or {}
-    local stat_segments = line_stats_options.enabled and line_stats.build_segments(data.line_stats, line_stats_options) or {}
-    local stats_width = math.max(0, #stat_segments - 1)
+    local stat_segments = line_stats_options.enabled and line_stats.build_file_segments(data.line_stats, line_stats_options) or {}
+    local stats_width = 0
     for _, segment in ipairs(stat_segments) do
       stats_width = stats_width + vim.fn.strdisplaywidth(segment.text)
     end
@@ -421,10 +428,7 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     line:append(string.rep(" ", padding_needed), get_hl("Normal"))
 
     -- render stats
-    for index, segment in ipairs(stat_segments) do
-      if index > 1 then
-        line:append(" ", get_hl("Normal"))
-      end
+    for _, segment in ipairs(stat_segments) do
       line:append(segment.text, get_hl(segment.hl))
     end
     if stats_width > 0 then

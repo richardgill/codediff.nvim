@@ -131,7 +131,8 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
         group_totals = true,     -- Include aggregate stats in group headings
         count_untracked = false,         -- Show untracked file lines as insertions
         max_untracked_bytes = 1024 * 1024, -- Skip untracked files larger than this limit
-        format = nil,                    -- Optional function(stats) -> string; nil uses "+12 -4" / "bin"
+        file_format = nil,               -- Optional function(file_stats) -> semantic text segments
+        group_format = nil,              -- Optional function(group_stats) -> semantic text segments
       },
       visible_groups = {       -- Which groups to show (can be toggled at runtime)
         staged = true,
@@ -229,18 +230,35 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 
 Explorer line statistics are disabled by default because they require extra Git queries and consume space in the default 40-column explorer. Set `explorer.line_stats.enabled = true` to show Git numstat counts. Untracked files have no stats unless `count_untracked = true`; files larger than `max_untracked_bytes` are not read (1 MiB by default).
 
-Set `format` to customize the text for both file stats and group totals:
+Files use `+12 -4` (`bin` for binary files); group headings use `Changes (3 · +42 -8)`.
+
+Customize files with `file_format` and headings with `group_format`:
 
 ```lua
-format = function(stats)
+file_format = function(stats)
   if stats.binary then
-    return "binary"
+    return { { text = "binary", kind = "binary" } }
   end
-  return string.format("%d added, %d removed", stats.insertions, stats.deletions)
+  return {
+    { text = stats.insertions .. " added", kind = "insertions" },
+    { text = ", " },
+    { text = stats.deletions .. " removed", kind = "deletions" },
+  }
+end,
+group_format = function(stats)
+  return {
+    { text = stats.files_changed .. " files", kind = "files" },
+    { text = ": " },
+    { text = "+" .. stats.insertions, kind = "insertions" },
+    { text = " " },
+    { text = "-" .. stats.deletions, kind = "deletions" },
+  }
 end
 ```
 
-The formatter receives `{ insertions: number, deletions: number, binary: boolean }`. The default formatter hides zero counts, uses `+12 -4` for text files, and `bin` for binary files.
+File stats contain `insertions`, `deletions`, and `binary`; group stats also contain `files_changed`. Formatters return `{ text, kind? }` segments, where `kind` is `text`, `files`, `insertions`, `deletions`, or `binary`. Segments without a kind inherit the surrounding highlight.
+
+Group totals include all displayed files but exclude unavailable and binary line counts.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 
