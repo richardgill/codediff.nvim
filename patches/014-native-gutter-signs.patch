@@ -1,0 +1,1159 @@
+From abc9ffdd3755d0994730af8d1abca02748387410 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Fri, 17 Jul 2026 20:18:52 +0100
+Subject: [PATCH] Added native gutter signs support
+
+---
+ README.md                               |  41 ++++
+ doc/codediff.txt                        |  54 +++++
+ doc/tags                                |   1 +
+ docs/native-gutter-signs-blocker.md     |   9 +
+ lua/codediff/config.lua                 |   1 +
+ lua/codediff/ui/core.lua                |   5 +
+ lua/codediff/ui/gutter_signs.lua        | 151 +++++++++++++
+ lua/codediff/ui/highlights.lua          |   5 +
+ lua/codediff/ui/inline.lua              |   3 +
+ lua/codediff/ui/lifecycle/accessors.lua |  23 ++
+ lua/codediff/ui/lifecycle/state.lua     |   9 +
+ lua/codediff/ui/move.lua                |  20 +-
+ lua/codediff/ui/view/side_by_side.lua   |  11 +-
+ lua/codediff/ui/view/welcome_window.lua |   4 -
+ tests/ui/gutter_signs_spec.lua          | 270 ++++++++++++++++++++++++
+ tests/ui/highlights_spec.lua            |  26 +++
+ tests/ui/view/move_rendering_spec.lua   | 110 ++--------
+ tests/ui/welcome_spec.lua               |   8 +-
+ 18 files changed, 629 insertions(+), 122 deletions(-)
+ create mode 100644 docs/native-gutter-signs-blocker.md
+ create mode 100644 lua/codediff/ui/gutter_signs.lua
+ create mode 100644 tests/ui/gutter_signs_spec.lua
+
+diff --git a/README.md b/README.md
+index e71d6b8..ff1e843 100644
+--- a/README.md
++++ b/README.md
+@@ -108,6 +108,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+       jump_to_first_change = true,        -- Auto-scroll to first change when opening a diff: false to stay at same line
+       highlight_added_deleted_files = true, -- Tint full contents of added, untracked, and deleted files
+       highlight_priority = 100,           -- Priority for line-level diff highlights (increase to override LSP highlights)
++      gutter_signs = false,                -- Native +/- signs; see Native gutter signs below
+       compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
+       compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
+       compact_sync_folds = true,          -- Sync fold open/close across panes (mirrors Vim diff mode behavior)
+@@ -272,6 +273,39 @@ Group totals include all displayed files but exclude unavailable and binary line
+ 
+ The C library will be downloaded automatically on first use. No `build` step needed!
+ 
++### Native gutter signs
++
++```lua
++-- Disabled by default; existing move annotations remain.
++gutter_signs = false
++
++-- Enabled defaults.
++gutter_signs = {
++  insert_text = " +",
++  delete_text = " -",
++  highlight_numbers = true,
++  changed_priority = 100,
++  unchanged_priority = nil,
++}
++
++-- Hide other Neovim signs with lower priorities.
++gutter_signs = {
++  changed_priority = 100,
++  unchanged_priority = 7,
++}
++```
++
++Set this under `diff`. `insert_text` and `delete_text` must each occupy one or two display cells, as measured by `strdisplaywidth()`, because Neovim limits native sign text to two display cells. The leading space in the defaults is part of the sign highlight.
++
++CodeDiff uses persistent native Neovim signs and does not modify `signcolumn` or `statuscolumn`. This example keeps a sign column and places signs after line numbers:
++
++```lua
++vim.opt.signcolumn = "yes"
++vim.opt.statuscolumn = "%C%=%l %s"
++```
++
++`signcolumn = "yes:2"` allows a second sign on each line. Changed signs use priority 100 by default. An unchanged blocker at priority 99 can hide lower-priority Gitsigns, remote signs, diagnostics, or other signs across unchanged lines while the changed signs still win. Signs are buffer-local and therefore appear in every window showing a CodeDiff buffer until the diff view is suspended or closed. Native gutter signs require Neovim 0.9 or newer.
++
+ ### Managing Library Installation
+ 
+ The plugin automatically manages the C library installation:
+@@ -666,6 +700,13 @@ The plugin defines these diff highlight groups:
+ - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
+ - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
+ 
++To customize gutter colors, define these four highlight groups in your colorscheme configuration:
++
++- `CodeDiffGutterInsert` - Insert sign; defaults to `CodeDiffLineInsert`
++- `CodeDiffGutterDelete` - Delete sign; defaults to `CodeDiffLineDelete`
++- `CodeDiffGutterInsertNumber` - Insert line number; defaults to `CodeDiffCharInsert`
++- `CodeDiffGutterDeleteNumber` - Delete line number; defaults to `CodeDiffCharDelete`
++
+ <details open>
+ <summary><b>📸 Visual Examples</b> (click to collapse)</summary>
+ 
+diff --git a/doc/codediff.txt b/doc/codediff.txt
+index 8ef6a22..6cd930f 100644
+--- a/doc/codediff.txt
++++ b/doc/codediff.txt
+@@ -217,6 +217,7 @@ Setup entry point:
+       jump_to_first_change = true,
+       highlight_added_deleted_files = true,
+       highlight_priority = 100,
++      gutter_signs = false,
+       compute_moves = false,
+       compact_context_lines = 3,
+       compact_sync_folds = true,
+@@ -359,6 +360,51 @@ without a kind inherit the surrounding highlight.
+ Group totals include all displayed files but exclude unavailable and binary
+ line counts.
+ 
++==============================================================================
++NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
++
++Native gutter signs are disabled by default and require Neovim 0.9+. They are
++buffer-local, so they appear in every window showing a CodeDiff buffer until
++the diff view is suspended or closed.
++
++>lua
++  -- Disabled by default; existing move annotations remain.
++  gutter_signs = false
++
++  -- Enabled defaults.
++  gutter_signs = {
++    insert_text = " +",
++    delete_text = " -",
++    highlight_numbers = true,
++    changed_priority = 100,
++    unchanged_priority = nil,
++  }
++
++  -- Hide other Neovim signs with lower priorities.
++  gutter_signs = {
++    changed_priority = 100,
++    unchanged_priority = 7,
++  }
++<
++
++Place `gutter_signs` under `diff`. `insert_text` and `delete_text` must each
++occupy one or two display cells, as measured by strdisplaywidth(), because
++Neovim limits native sign text to two display cells. The leading space in the
++defaults is part of the sign highlight.
++
++CodeDiff does not modify signcolumn or statuscolumn. This example keeps a sign
++column and places signs after line numbers:
++
++>lua
++  vim.opt.signcolumn = "yes"
++  vim.opt.statuscolumn = "%C%=%l %s"
++<
++
++`signcolumn = "yes:2"` allows a second sign on each line. Changed signs use
++priority 100 by default. An unchanged blocker at priority 99 can hide
++lower-priority Gitsigns, remote signs, diagnostics, debugger signs, and other
++signs across unchanged lines while changed signs still win.
++
+ ==============================================================================
+ HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
+ 
+@@ -378,6 +424,14 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
+ - CodeDiffHelpSep - separators in keymap help (links to NonText)
+ - CodeDiffHelpDesc - descriptions in keymap help (links to Normal)
+ 
++To customize gutter colors, define these four highlight groups in your
++colorscheme configuration:
++
++- CodeDiffGutterInsert - insert sign (defaults to CodeDiffLineInsert)
++- CodeDiffGutterDelete - delete sign (defaults to CodeDiffLineDelete)
++- CodeDiffGutterInsertNumber - insert line number (defaults to CodeDiffCharInsert)
++- CodeDiffGutterDeleteNumber - delete line number (defaults to CodeDiffCharDelete)
++
+ Default behavior:
+ - Uses DiffAdd, DiffChange, and DiffDelete for line-level highlights
+ - Added and untracked files use line_insert across the full file
+diff --git a/doc/tags b/doc/tags
+index 5ee5d4c..5b7dbf7 100644
+--- a/doc/tags
++++ b/doc/tags
+@@ -6,6 +6,7 @@ codediff-commands	codediff.txt	/*codediff-commands*
+ codediff-configuration	codediff.txt	/*codediff-configuration*
+ codediff-events	codediff.txt	/*codediff-events*
+ codediff-filler-text	codediff.txt	/*codediff-filler-text*
++codediff-gutter-signs	codediff.txt	/*codediff-gutter-signs*
+ codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
+ codediff-history	codediff.txt	/*codediff-history*
+ codediff-history-line-range	codediff.txt	/*codediff-history-line-range*
+diff --git a/docs/native-gutter-signs-blocker.md b/docs/native-gutter-signs-blocker.md
+new file mode 100644
+index 0000000..dec3e5b
+--- /dev/null
++++ b/docs/native-gutter-signs-blocker.md
+@@ -0,0 +1,9 @@
++# Native gutter signs design constraint
++
++Neovim ignores `sign_text` when an extmark has `ephemeral = true`. This is tracked in [neovim/neovim#32936](https://github.com/neovim/neovim/issues/32936) and was reproduced on Neovim 0.11.5 and 0.12.2.
++
++CodeDiff therefore uses ordinary persistent ranged extmarks. A changed hunk, move segment, whole-file sign, or unchanged-line blocker needs only one extmark per contiguous range, so storage does not scale with the number of lines covered.
++
++Persistent signs are buffer-local rather than window-local. If another window shows a buffer participating in an active CodeDiff view, it shows the same CodeDiff signs. Suspending or closing the diff clears them.
++
++Neovim 0.11 introduced the experimental `nvim__ns_set()` API, which can scope persistent extmark namespaces to windows. CodeDiff does not depend on that private-style API; window-local signs can be reconsidered when Neovim exposes a stable supported mechanism.
+diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
+index 32f228e..91abfe4 100644
+--- a/lua/codediff/config.lua
++++ b/lua/codediff/config.lua
+@@ -83,6 +83,7 @@ M.defaults = {
+     jump_to_first_change = true, -- Auto-scroll to first change when opening a diff: true = jump to first hunk, false = stay at same line
+     highlight_added_deleted_files = true, -- Tint the full contents of added, untracked, and deleted files
+     highlight_priority = 100, -- Priority for line-level diff highlights (increase to override LSP highlights)
++    gutter_signs = false, -- Native +/- signs; optionally block lower-priority signs on unchanged lines
+     compute_moves = false, -- Detect moved code blocks (opt-in, may increase diff computation time)
+     compact_context_lines = 3, -- Number of context lines around hunks in compact mode
+     compact_sync_folds = true, -- Sync fold open/close across panes in compact mode (mirrors Vim diff mode behavior)
+diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
+index 4b4f80c..0dcc38e 100644
+--- a/lua/codediff/ui/core.lua
++++ b/lua/codediff/ui/core.lua
+@@ -5,6 +5,7 @@ local config = require("codediff.config")
+ local highlights = require("codediff.ui.highlights")
+ local filler_renderer = require("codediff.ui.filler")
+ local char_ranges = require("codediff.ui.char_ranges")
++local gutter_signs = require("codediff.ui.gutter_signs")
+ 
+ -- Namespace references
+ local ns_highlight = highlights.ns_highlight
+@@ -205,6 +206,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_highlight, 0, -1)
+   vim.api.nvim_buf_clear_namespace(left_bufnr, ns_filler, 0, -1)
+   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_filler, 0, -1)
++  gutter_signs.set_changed_ranges(left_bufnr, right_bufnr, lines_diff.changes)
+ 
+   local total_left_fillers = 0
+   local total_right_fillers = 0
+@@ -334,6 +336,7 @@ function M.render_single_buffer(bufnr, diff, side, counterpart_lines)
+   -- Clear existing highlights
+   vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
+   vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
++  gutter_signs.clear_buffer(bufnr)
+ 
+   -- Get buffer lines for character highlight calculations
+   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+@@ -401,6 +404,8 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_highlight, 0, -1)
+   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_filler, 0, -1)
+   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_conflict, 0, -1)
++  gutter_signs.clear_buffer(left_bufnr)
++  gutter_signs.clear_buffer(right_bufnr)
+ 
+   -- Get buffer lines for character highlight calculations
+   local left_lines = vim.api.nvim_buf_get_lines(left_bufnr, 0, -1, false)
+diff --git a/lua/codediff/ui/gutter_signs.lua b/lua/codediff/ui/gutter_signs.lua
+new file mode 100644
+index 0000000..3663407
+--- /dev/null
++++ b/lua/codediff/ui/gutter_signs.lua
+@@ -0,0 +1,151 @@
++local M = {}
++
++local config = require("codediff.config")
++
++local namespace = vim.api.nvim_create_namespace("codediff-gutter-signs")
++local supports_native_signs = vim.fn.has("nvim-0.9") == 1
++local default_move_priority = 250
++local default_options = {
++  insert_text = " +",
++  delete_text = " -",
++  highlight_numbers = true,
++  changed_priority = 100,
++}
++local signs = {
++  original = {
++    text_option = "delete_text",
++    hl_group = "CodeDiffGutterDelete",
++    number_hl_group = "CodeDiffGutterDeleteNumber",
++  },
++  modified = {
++    text_option = "insert_text",
++    hl_group = "CodeDiffGutterInsert",
++    number_hl_group = "CodeDiffGutterInsertNumber",
++  },
++  unchanged = { text = "  ", hl_group = "Normal" },
++  move_single = { text = "─", hl_group = "CodeDiffMoveTo" },
++  move_first = { text = "┌", hl_group = "CodeDiffMoveTo" },
++  move_middle = { text = "│", hl_group = "CodeDiffMoveTo" },
++  move_last = { text = "└", hl_group = "CodeDiffMoveTo" },
++}
++
++local get_options = function()
++  local options = config.options.diff.gutter_signs
++  if type(options) ~= "table" then
++    return nil
++  end
++  if not supports_native_signs then
++    vim.notify_once("[codediff] diff.gutter_signs requires Neovim 0.9 or newer", vim.log.levels.WARN)
++    return nil
++  end
++  return vim.tbl_extend("force", default_options, options)
++end
++
++local get_changed_sign = function(side, options)
++  local sign = signs[side]
++  return {
++    text = options[sign.text_option],
++    hl_group = sign.hl_group,
++    number_hl_group = options.highlight_numbers and sign.number_hl_group or nil,
++  }
++end
++
++local set_sign_range = function(bufnr, range, sign, priority)
++  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) or not range or range.end_line <= range.start_line then
++    return
++  end
++
++  local line_count = vim.api.nvim_buf_line_count(bufnr)
++  local start_row = math.max(range.start_line - 1, 0)
++  local end_row = math.min(range.end_line - 1, line_count)
++  if end_row <= start_row then
++    return
++  end
++
++  vim.api.nvim_buf_set_extmark(bufnr, namespace, start_row, 0, {
++    end_row = end_row - 1,
++    end_col = 0,
++    sign_text = sign.text,
++    sign_hl_group = sign.hl_group,
++    number_hl_group = sign.number_hl_group,
++    priority = priority,
++    strict = false,
++  })
++end
++
++local set_whole_buffer_sign = function(bufnr, sign, priority, tracks_appends)
++  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
++    return
++  end
++
++  local line_count = vim.api.nvim_buf_line_count(bufnr)
++  vim.api.nvim_buf_set_extmark(bufnr, namespace, 0, 0, {
++    end_row = tracks_appends and line_count or line_count - 1,
++    end_col = 0,
++    end_right_gravity = tracks_appends,
++    sign_text = sign.text,
++    sign_hl_group = sign.hl_group,
++    number_hl_group = sign.number_hl_group,
++    priority = priority,
++    strict = false,
++  })
++end
++
++M.clear_buffer = function(bufnr)
++  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
++    vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
++  end
++end
++
++M.set_changed_ranges = function(left_bufnr, right_bufnr, changes)
++  M.clear_buffer(left_bufnr)
++  M.clear_buffer(right_bufnr)
++
++  local options = get_options()
++  if not options then
++    return
++  end
++
++  if options.unchanged_priority then
++    set_whole_buffer_sign(left_bufnr, signs.unchanged, options.unchanged_priority, false)
++    set_whole_buffer_sign(right_bufnr, signs.unchanged, options.unchanged_priority, false)
++  end
++
++  local priority = options.changed_priority
++  local original_sign = get_changed_sign("original", options)
++  local modified_sign = get_changed_sign("modified", options)
++  for _, change in ipairs(changes or {}) do
++    set_sign_range(left_bufnr, change.original, original_sign, priority)
++    set_sign_range(right_bufnr, change.modified, modified_sign, priority)
++  end
++end
++
++M.set_move_range = function(bufnr, first, last)
++  local options = get_options()
++  if not supports_native_signs or last < first then
++    return
++  end
++
++  local priority = options and options.changed_priority or default_move_priority
++  if first == last then
++    set_sign_range(bufnr, { start_line = first, end_line = first + 1 }, signs.move_single, priority)
++    return
++  end
++
++  set_sign_range(bufnr, { start_line = first, end_line = first + 1 }, signs.move_first, priority)
++  set_sign_range(bufnr, { start_line = first + 1, end_line = last }, signs.move_middle, priority)
++  set_sign_range(bufnr, { start_line = last, end_line = last + 1 }, signs.move_last, priority)
++end
++
++M.set_whole_file = function(bufnr, side)
++  M.clear_buffer(bufnr)
++
++  local options = get_options()
++  if not options then
++    return
++  end
++
++  set_whole_buffer_sign(bufnr, get_changed_sign(side, options), options.changed_priority, true)
++end
++
++return M
+diff --git a/lua/codediff/ui/highlights.lua b/lua/codediff/ui/highlights.lua
+index a9e875b..9475ee1 100644
+--- a/lua/codediff/ui/highlights.lua
++++ b/lua/codediff/ui/highlights.lua
+@@ -179,6 +179,11 @@ function M.setup()
+   vim.api.nvim_set_hl(0, "CodeDiffLineInsertText", line_insert_text_color)
+   vim.api.nvim_set_hl(0, "CodeDiffLineDeleteText", line_delete_text_color)
+ 
++  vim.api.nvim_set_hl(0, "CodeDiffGutterInsert", { link = "CodeDiffLineInsert", default = true })
++  vim.api.nvim_set_hl(0, "CodeDiffGutterDelete", { link = "CodeDiffLineDelete", default = true })
++  vim.api.nvim_set_hl(0, "CodeDiffGutterInsertNumber", { link = "CodeDiffCharInsert", default = true })
++  vim.api.nvim_set_hl(0, "CodeDiffGutterDeleteNumber", { link = "CodeDiffCharDelete", default = true })
++
+   -- Moved code highlights (derived from DiffChange — the standard "changed" color)
+   local move_fallback = diff_change_bg or 0x4f5258
+   local line_move_color = resolve_color(opts.line_move, move_fallback, base256_color(0, 0, 2))
+diff --git a/lua/codediff/ui/inline.lua b/lua/codediff/ui/inline.lua
+index 5b2bbbb..d19e8b0 100644
+--- a/lua/codediff/ui/inline.lua
++++ b/lua/codediff/ui/inline.lua
+@@ -5,6 +5,7 @@ local M = {}
+ local config = require("codediff.config")
+ local highlights = require("codediff.ui.highlights")
+ local char_ranges = require("codediff.ui.char_ranges")
++local gutter_signs = require("codediff.ui.gutter_signs")
+ 
+ -- Dedicated namespace for inline diff (separate from side-by-side namespaces)
+ M.ns_inline = vim.api.nvim_create_namespace("codediff-inline")
+@@ -263,6 +264,7 @@ end
+ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines, opts)
+   -- Clear previous inline decorations
+   vim.api.nvim_buf_clear_namespace(bufnr, M.ns_inline, 0, -1)
++  gutter_signs.clear_buffer(bufnr)
+   -- Clear merged highlight cache on re-render (colorscheme may have changed)
+   merged_hl_cache = {}
+ 
+@@ -353,6 +355,7 @@ end
+ function M.clear(bufnr)
+   if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+     vim.api.nvim_buf_clear_namespace(bufnr, M.ns_inline, 0, -1)
++    gutter_signs.clear_buffer(bufnr)
+   end
+ end
+ 
+diff --git a/lua/codediff/ui/lifecycle/accessors.lua b/lua/codediff/ui/lifecycle/accessors.lua
+index 2ce0f84..f9ad748 100644
+--- a/lua/codediff/ui/lifecycle/accessors.lua
++++ b/lua/codediff/ui/lifecycle/accessors.lua
+@@ -12,6 +12,12 @@ local function is_virtual_revision(revision)
+   return revision ~= nil and revision ~= "WORKING"
+ end
+ 
++local function clear_gutter_signs(sess)
++  local gutter_signs = require("codediff.ui.gutter_signs")
++  gutter_signs.clear_buffer(sess.original_bufnr)
++  gutter_signs.clear_buffer(sess.modified_bufnr)
++end
++
+ -- ============================================================================
+ -- PUBLIC API - GETTERS (return copies/values, safe)
+ -- ============================================================================
+@@ -214,6 +220,9 @@ function M.update_suspended(tabpage, suspended)
+   end
+ 
+   sess.suspended = suspended
++  if suspended then
++    clear_gutter_signs(sess)
++  end
+   return true
+ end
+ 
+@@ -226,6 +235,9 @@ function M.update_layout(tabpage, layout)
+   end
+ 
+   sess.layout = layout
++  if layout == "inline" then
++    clear_gutter_signs(sess)
++  end
+   return true
+ end
+ 
+@@ -290,6 +302,14 @@ function M.update_buffers(tabpage, original_bufnr, modified_bufnr)
+   end
+ 
+   local state = require("codediff.ui.lifecycle.state")
++  local gutter_signs = require("codediff.ui.gutter_signs")
++
++  if sess.original_bufnr ~= original_bufnr and sess.original_bufnr ~= modified_bufnr then
++    gutter_signs.clear_buffer(sess.original_bufnr)
++  end
++  if sess.modified_bufnr ~= original_bufnr and sess.modified_bufnr ~= modified_bufnr then
++    gutter_signs.clear_buffer(sess.modified_bufnr)
++  end
+ 
+   sess.original_bufnr = original_bufnr
+   sess.modified_bufnr = modified_bufnr
+@@ -353,6 +373,9 @@ function M.set_result(tabpage, result_bufnr, result_win)
+   if result_win and vim.api.nvim_win_is_valid(result_win) then
+     vim.w[result_win].codediff_restore = 1
+   end
++  if result_win then
++    clear_gutter_signs(sess)
++  end
+ 
+   return true
+ end
+diff --git a/lua/codediff/ui/lifecycle/state.lua b/lua/codediff/ui/lifecycle/state.lua
+index f0baa3d..b22103d 100644
+--- a/lua/codediff/ui/lifecycle/state.lua
++++ b/lua/codediff/ui/lifecycle/state.lua
+@@ -49,6 +49,7 @@ local function clear_buffer_highlights(bufnr)
+   vim.api.nvim_buf_clear_namespace(bufnr, highlights.ns_conflict, 0, -1)
+   local ns_inline = vim.api.nvim_create_namespace("codediff-inline")
+   vim.api.nvim_buf_clear_namespace(bufnr, ns_inline, 0, -1)
++  require("codediff.ui.gutter_signs").clear_buffer(bufnr)
+ end
+ 
+ M.clear_buffer_highlights = clear_buffer_highlights
+@@ -193,6 +194,14 @@ local function resume_diff(tabpage)
+     else
+       local core = require("codediff.ui.core")
+       core.render_diff(diff.original_bufnr, diff.modified_bufnr, original_lines, modified_lines, lines_diff)
++      if diff.single_pane then
++        local gutter_signs = require("codediff.ui.gutter_signs")
++        if diff.original_path and diff.original_path ~= "" and diff.original_win and vim.api.nvim_win_is_valid(diff.original_win) then
++          gutter_signs.set_whole_file(diff.original_bufnr, "original")
++        elseif diff.modified_path and diff.modified_path ~= "" and diff.modified_win and vim.api.nvim_win_is_valid(diff.modified_win) then
++          gutter_signs.set_whole_file(diff.modified_bufnr, "modified")
++        end
++      end
+     end
+ 
+     -- Re-sync scrollbind ONLY if diff was recomputed and not inline mode
+diff --git a/lua/codediff/ui/move.lua b/lua/codediff/ui/move.lua
+index a929f7f..d7c02ff 100644
+--- a/lua/codediff/ui/move.lua
++++ b/lua/codediff/ui/move.lua
+@@ -3,6 +3,7 @@ local M = {}
+ 
+ local highlights = require("codediff.ui.highlights")
+ local filler_renderer = require("codediff.ui.filler")
++local gutter_signs = require("codediff.ui.gutter_signs")
+ local ns_highlight = highlights.ns_highlight
+ 
+ -- ============================================================================
+@@ -69,26 +70,12 @@ end
+ -- Per-Line Highlights and Signs
+ -- ============================================================================
+ 
+-local function get_sign(line, first, last)
+-  if first == last then
+-    return "─"
+-  end
+-  if line == first then
+-    return "┌"
+-  end
+-  if line == last then
+-    return "└"
+-  end
+-  return "│"
+-end
+-
+ local function highlight_moved_lines(bufnr, first, last, line_count)
+   for line = first, last do
+     if line > line_count then
+       break
+     end
+     local line_idx = line - 1
+-    local sign = get_sign(line, first, last)
+     -- Range extmark for highlight (overrides diff highlight at priority 250)
+     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, line_idx, 0, {
+       end_line = line_idx + 1,
+@@ -97,14 +84,13 @@ local function highlight_moved_lines(bufnr, first, last, line_count)
+       hl_eol = true,
+       priority = 250,
+     })
+-    -- Separate point extmark for sign + number highlight (no end_line — won't bleed)
++    -- Separate point extmark for number highlight (no end_line — won't bleed)
+     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, line_idx, 0, {
+       number_hl_group = "CodeDiffMoveTo",
+-      sign_text = sign,
+-      sign_hl_group = "CodeDiffMoveTo",
+       priority = 250,
+     })
+   end
++  gutter_signs.set_move_range(bufnr, first, math.min(last, line_count))
+ end
+ 
+ -- ============================================================================
+diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
+index ff0821c..f574907 100644
+--- a/lua/codediff/ui/view/side_by_side.lua
++++ b/lua/codediff/ui/view/side_by_side.lua
+@@ -707,11 +707,15 @@ local function show_single_file(tabpage, opts)
+     return
+   end
+ 
++  local gutter_signs = require("codediff.ui.gutter_signs")
++  local old_orig_buf, old_mod_buf = lifecycle.get_buffers(tabpage)
++  gutter_signs.clear_buffer(old_orig_buf)
++  gutter_signs.clear_buffer(old_mod_buf)
++
+   lifecycle.update_layout(tabpage, "side-by-side")
+   local orig_win, mod_win = lifecycle.get_windows(tabpage)
+ 
+   -- Clear highlights from current session buffers
+-  local old_orig_buf, old_mod_buf = lifecycle.get_buffers(tabpage)
+   if old_orig_buf then
+     auto_refresh.disable(old_orig_buf)
+     lifecycle.clear_highlights(old_orig_buf)
+@@ -775,6 +779,11 @@ local function show_single_file(tabpage, opts)
+       core.render_whole_file(opts.load_bufnr, session.single_side)
+     end
+ 
++    local path = opts.keep == "original" and opts.original_path or opts.modified_path
++    if path and path ~= "" then
++      gutter_signs.set_whole_file(opts.load_bufnr, opts.keep)
++    end
++
+     local view_keymaps = require("codediff.ui.view.keymaps")
+     view_keymaps.setup_all_keymaps(tabpage, orig_bufnr, mod_bufnr, session.mode == "explorer")
+   end
+diff --git a/lua/codediff/ui/view/welcome_window.lua b/lua/codediff/ui/view/welcome_window.lua
+index 66d2e8c..a11e30b 100644
+--- a/lua/codediff/ui/view/welcome_window.lua
++++ b/lua/codediff/ui/view/welcome_window.lua
+@@ -5,17 +5,13 @@ local welcome = require("codediff.ui.welcome")
+ local option_names = {
+   "number",
+   "relativenumber",
+-  "signcolumn",
+   "foldcolumn",
+-  "statuscolumn",
+ }
+ 
+ local welcome_opts = {
+   number = false,
+   relativenumber = false,
+-  signcolumn = "no",
+   foldcolumn = "0",
+-  statuscolumn = " ",
+ }
+ 
+ local function is_valid_window(winid)
+diff --git a/tests/ui/gutter_signs_spec.lua b/tests/ui/gutter_signs_spec.lua
+new file mode 100644
+index 0000000..3e30436
+--- /dev/null
++++ b/tests/ui/gutter_signs_spec.lua
+@@ -0,0 +1,270 @@
++local config = require("codediff.config")
++local gutter_signs = require("codediff.ui.gutter_signs")
++local gutter_signs_namespace = vim.api.nvim_create_namespace("codediff-gutter-signs")
++
++local get_signs = function(bufnr)
++  local marks = vim.api.nvim_buf_get_extmarks(bufnr, gutter_signs_namespace, 0, -1, { details = true })
++  return vim.tbl_map(function(mark)
++    return {
++      row = mark[2],
++      text = vim.trim(mark[4].sign_text or ""),
++      raw_text = mark[4].sign_text,
++      hl = mark[4].sign_hl_group,
++      number_hl = mark[4].number_hl_group,
++      priority = mark[4].priority,
++      end_row = mark[4].end_row,
++    }
++  end, marks)
++end
++
++local find_sign = function(bufnr, text)
++  for _, sign in ipairs(get_signs(bufnr)) do
++    if sign.text == text then
++      return sign
++    end
++  end
++end
++
++local create_session = function()
++  local original_bufnr = vim.api.nvim_create_buf(false, true)
++  local modified_bufnr = vim.api.nvim_create_buf(false, true)
++  vim.api.nvim_buf_set_lines(original_bufnr, 0, -1, false, { "one", "two", "three" })
++  vim.api.nvim_buf_set_lines(modified_bufnr, 0, -1, false, { "one", "changed", "three" })
++
++  local original_win = vim.api.nvim_get_current_win()
++  vim.api.nvim_win_set_buf(original_win, original_bufnr)
++  vim.cmd("rightbelow vsplit")
++  local modified_win = vim.api.nvim_get_current_win()
++  vim.api.nvim_win_set_buf(modified_win, modified_bufnr)
++
++  return {
++    layout = "side-by-side",
++    suspended = false,
++    original_bufnr = original_bufnr,
++    modified_bufnr = modified_bufnr,
++    original_win = original_win,
++    modified_win = modified_win,
++  }
++end
++
++local destroy_session = function(session)
++  gutter_signs.clear_buffer(session.original_bufnr)
++  gutter_signs.clear_buffer(session.modified_bufnr)
++  if vim.api.nvim_win_is_valid(session.modified_win) then
++    vim.api.nvim_win_close(session.modified_win, true)
++  end
++  for _, bufnr in ipairs({ session.original_bufnr, session.modified_bufnr }) do
++    if vim.api.nvim_buf_is_valid(bufnr) then
++      vim.api.nvim_buf_delete(bufnr, { force = true })
++    end
++  end
++end
++
++local changed_ranges = {
++  {
++    original = { start_line = 2, end_line = 3 },
++    modified = { start_line = 2, end_line = 3 },
++  },
++}
++
++describe("Native gutter signs", function()
++  local session
++
++  before_each(function()
++    config.options = vim.deepcopy(config.defaults)
++    session = create_session()
++  end)
++
++  after_each(function()
++    destroy_session(session)
++  end)
++
++  it("does not create signs or change window options when disabled", function()
++    vim.wo[session.original_win].signcolumn = "yes:2"
++    vim.wo[session.original_win].statuscolumn = "%C%=%l %s"
++
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
++
++    assert.same({}, get_signs(session.original_bufnr))
++    assert.equals("yes:2", vim.wo[session.original_win].signcolumn)
++    assert.equals("%C%=%l %s", vim.wo[session.original_win].statuscolumn)
++  end)
++
++  it("preserves move signs when changed signs are disabled", function()
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
++    gutter_signs.set_move_range(session.original_bufnr, 1, 3)
++
++    assert.equals(250, find_sign(session.original_bufnr, "┌").priority)
++    assert.equals(250, find_sign(session.original_bufnr, "│").priority)
++    assert.equals(250, find_sign(session.original_bufnr, "└").priority)
++  end)
++
++  it("uses the enabled defaults for changed signs", function()
++    config.options.diff.gutter_signs = {}
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
++
++    local original = get_signs(session.original_bufnr)[1]
++    assert.same({
++      row = 1,
++      raw_text = " -",
++      priority = 100,
++      hl = "CodeDiffGutterDelete",
++      number_hl = "CodeDiffGutterDeleteNumber",
++    }, {
++      row = original.row,
++      raw_text = original.raw_text,
++      priority = original.priority,
++      hl = original.hl,
++      number_hl = original.number_hl,
++    })
++
++    local modified = get_signs(session.modified_bufnr)[1]
++    assert.equals(" +", modified.raw_text)
++    assert.equals("CodeDiffGutterInsert", modified.hl)
++    assert.equals("CodeDiffGutterInsertNumber", modified.number_hl)
++  end)
++
++  it("supports custom text and disabled number highlights", function()
++    config.options.diff.gutter_signs = {
++      insert_text = "++",
++      delete_text = "--",
++      highlight_numbers = false,
++    }
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
++
++    local original = get_signs(session.original_bufnr)[1]
++    local modified = get_signs(session.modified_bufnr)[1]
++    assert.equals("--", original.raw_text)
++    assert.equals("++", modified.raw_text)
++    assert.is_nil(original.number_hl)
++    assert.is_nil(modified.number_hl)
++  end)
++
++  it("leaves unchanged lines alone when unchanged_priority is nil", function()
++    config.options.diff.gutter_signs = { changed_priority = 100 }
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, {})
++
++    assert.same({}, get_signs(session.original_bufnr))
++  end)
++
++  it("uses one ranged whitespace blocker for the whole buffer", function()
++    config.options.diff.gutter_signs = { changed_priority = 100, unchanged_priority = 99 }
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
++
++    local blocker = get_signs(session.original_bufnr)[1]
++    assert.equals("", blocker.text)
++    assert.equals(99, blocker.priority)
++    assert.equals(0, blocker.row)
++    assert.equals(2, blocker.end_row)
++    assert.equals(100, find_sign(session.original_bufnr, "-").priority)
++  end)
++
++  it("keeps external signs and window options untouched", function()
++    config.options.diff.gutter_signs = { changed_priority = 100, unchanged_priority = 99 }
++    vim.wo[session.original_win].signcolumn = "yes:2"
++    vim.wo[session.original_win].statuscolumn = "%C%=%l %s"
++    local external_namespace = vim.api.nvim_create_namespace("codediff-gutter-signs-test-external")
++    vim.api.nvim_buf_set_extmark(session.original_bufnr, external_namespace, 0, 0, {
++      sign_text = "X",
++      priority = 98,
++    })
++
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, {})
++
++    local external = vim.api.nvim_buf_get_extmarks(session.original_bufnr, external_namespace, 0, -1, { details = true })
++    assert.equals(99, get_signs(session.original_bufnr)[1].priority)
++    assert.equals(98, external[1][4].priority)
++    assert.equals("yes:2", vim.wo[session.original_win].signcolumn)
++    assert.equals("%C%=%l %s", vim.wo[session.original_win].statuscolumn)
++  end)
++
++  it("lets move signs override changed signs", function()
++    config.options.diff.gutter_signs = { changed_priority = 100 }
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, {
++      {
++        original = { start_line = 1, end_line = 4 },
++        modified = { start_line = 1, end_line = 4 },
++      },
++    })
++    gutter_signs.set_move_range(session.original_bufnr, 1, 3)
++
++    assert.equals(0, find_sign(session.original_bufnr, "┌").row)
++    assert.equals(1, find_sign(session.original_bufnr, "│").row)
++    assert.equals(2, find_sign(session.original_bufnr, "└").row)
++  end)
++
++  it("renders a growing whole-file sign with one extmark", function()
++    config.options.diff.gutter_signs = { changed_priority = 100 }
++    gutter_signs.set_whole_file(session.modified_bufnr, "modified")
++
++    local sign = get_signs(session.modified_bufnr)[1]
++    assert.equals("+", sign.text)
++    assert.equals("CodeDiffGutterInsert", sign.hl)
++    assert.equals("CodeDiffGutterInsertNumber", sign.number_hl)
++    assert.equals(3, sign.end_row)
++
++    vim.api.nvim_buf_set_lines(session.modified_bufnr, 3, -1, false, { "loaded later" })
++    assert.equals(4, get_signs(session.modified_bufnr)[1].end_row)
++  end)
++
++  it("restores whole-file signs after tab resume", function()
++    config.options.diff.gutter_signs = { changed_priority = 100 }
++    local lifecycle = require("codediff.ui.lifecycle")
++    local state = require("codediff.ui.lifecycle.state")
++    local tabpage = vim.api.nvim_get_current_tabpage()
++    lifecycle.create_session(
++      tabpage,
++      "standalone",
++      nil,
++      "",
++      "modified.txt",
++      nil,
++      nil,
++      session.original_bufnr,
++      session.modified_bufnr,
++      session.original_win,
++      session.modified_win,
++      { changes = {}, moves = {} }
++    )
++    local tracked = lifecycle.get_session(tabpage)
++    tracked.single_pane = true
++    tracked.original_win = nil
++    gutter_signs.set_whole_file(session.modified_bufnr, "modified")
++
++    state.suspend_diff(tabpage)
++    assert.same({}, get_signs(session.modified_bufnr))
++    state.resume_diff(tabpage)
++
++    assert.equals("+", get_signs(session.modified_bufnr)[1].text)
++    lifecycle.cleanup(tabpage)
++  end)
++
++  it("clears signs during inline and conflict transitions", function()
++    config.options.diff.gutter_signs = { changed_priority = 100 }
++    local lifecycle = require("codediff.ui.lifecycle")
++    local tabpage = vim.api.nvim_get_current_tabpage()
++    lifecycle.create_session(
++      tabpage,
++      "standalone",
++      nil,
++      "original.txt",
++      "modified.txt",
++      nil,
++      nil,
++      session.original_bufnr,
++      session.modified_bufnr,
++      session.original_win,
++      session.modified_win,
++      { changes = {}, moves = {} }
++    )
++
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
++    lifecycle.update_layout(tabpage, "inline")
++    assert.same({}, get_signs(session.original_bufnr))
++
++    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
++    lifecycle.set_result(tabpage, session.modified_bufnr, session.modified_win)
++    assert.same({}, get_signs(session.original_bufnr))
++    lifecycle.cleanup(tabpage)
++  end)
++end)
+diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
+index 8caba15..9fd8e6c 100644
+--- a/tests/ui/highlights_spec.lua
++++ b/tests/ui/highlights_spec.lua
+@@ -25,6 +25,10 @@ local function reset_codediff()
+   for _, group in ipairs(groups) do
+     pcall(vim.api.nvim_set_hl, 0, group, {})
+   end
++  vim.cmd("highlight clear CodeDiffGutterInsert")
++  vim.cmd("highlight clear CodeDiffGutterDelete")
++  vim.cmd("highlight clear CodeDiffGutterInsertNumber")
++  vim.cmd("highlight clear CodeDiffGutterDeleteNumber")
+   config.options = vim.deepcopy(config.defaults)
+   require("codediff").setup({})
+ end
+@@ -216,6 +220,28 @@ describe("highlights.lua color derivation", function()
+     assert.is_nil(insert.bold)
+   end)
+ 
++  it("defines stable gutter highlight defaults", function()
++    highlights.setup()
++
++    assert.equals("CodeDiffLineInsert", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsert", link = true }).link)
++    assert.equals("CodeDiffLineDelete", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterDelete", link = true }).link)
++    assert.equals("CodeDiffCharInsert", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsertNumber", link = true }).link)
++    assert.equals("CodeDiffCharDelete", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterDeleteNumber", link = true }).link)
++  end)
++
++  it("preserves colorscheme gutter highlight overrides", function()
++    vim.api.nvim_set_hl(0, "CodeDiffGutterInsert", { fg = 0x123456, bg = 0x654321 })
++    vim.api.nvim_set_hl(0, "CodeDiffGutterInsertNumber", { bg = 0xabcdef })
++
++    highlights.setup()
++
++    local sign = vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsert", link = false })
++    local number = vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsertNumber", link = false })
++    assert.equals(0x123456, sign.fg)
++    assert.equals(0x654321, sign.bg)
++    assert.equals(0xabcdef, number.bg)
++  end)
++
+   it("re-derives on :colorscheme change", function()
+     -- First setup: bg-based DiffAdd
+     vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x111111 })
+diff --git a/tests/ui/view/move_rendering_spec.lua b/tests/ui/view/move_rendering_spec.lua
+index b15759c..93dfdb0 100644
+--- a/tests/ui/view/move_rendering_spec.lua
++++ b/tests/ui/view/move_rendering_spec.lua
+@@ -1,6 +1,6 @@
+ -- Test: Move rendering in side-by-side mode
+--- Verifies CodeDiffLineMove highlights, sign column symbols, and number_hl_group
+--- on moved code blocks detected by the diff engine.
++-- Verifies CodeDiffLineMove highlights and number_hl_group on moved code
++-- blocks detected by the diff engine.
+ 
+ local view = require("codediff.ui.view")
+ local diff = require("codediff.core.diff")
+@@ -66,20 +66,6 @@ local function lines_with_hl(bufnr, hl_group)
+   return set
+ end
+ 
+--- Return map of 0-indexed line -> sign_text for extmarks that have sign_text
+-local function signs_on_buf(bufnr)
+-  local marks = get_extmarks(bufnr)
+-  local map = {}
+-  for _, m in ipairs(marks) do
+-    local details = m[4]
+-    if details.sign_text then
+-      -- Neovim pads sign_text to 2 chars; trim trailing whitespace for comparison
+-      map[m[2]] = { text = vim.trim(details.sign_text), hl = details.sign_hl_group }
+-    end
+-  end
+-  return map
+-end
+-
+ -- Return map of 0-indexed line -> number_hl_group
+ local function number_hl_on_buf(bufnr)
+   local marks = get_extmarks(bufnr)
+@@ -93,6 +79,12 @@ local function number_hl_on_buf(bufnr)
+   return map
+ end
+ 
++local function assert_no_highlight_signs(bufnr)
++  for _, mark in ipairs(get_extmarks(bufnr)) do
++    assert.is_nil(mark[4].sign_text)
++  end
++end
++
+ describe("Move rendering (side-by-side)", function()
+   after_each(function()
+     while vim.fn.tabpagenr("$") > 1 do
+@@ -157,89 +149,15 @@ describe("Move rendering (side-by-side)", function()
+   end)
+ 
+   -- ──────────────────────────────────────────────────────────────────────────
+-  -- Test 2: Sign column symbols correct on original side
+-  -- ──────────────────────────────────────────────────────────────────────────
+-  it("sets correct sign column symbols on original side", function()
+-    local tabpage, lp, rp = create_move_view(orig, mod, "sign_orig")
+-
+-    local orig_buf = lifecycle.get_buffers(tabpage)
+-    assert(orig_buf, "original buffer must exist")
+-
+-    local signs = signs_on_buf(orig_buf)
+-
+-    local block_len = orig_last - orig_first + 1
+-
+-    for line = orig_first, orig_last do
+-      local line_0 = line - 1
+-      assert(signs[line_0], "sign expected on original line " .. line)
+-
+-      local expected_sign
+-      if block_len == 1 then
+-        expected_sign = "─"
+-      elseif line == orig_first then
+-        expected_sign = "┌"
+-      elseif line == orig_last then
+-        expected_sign = "└"
+-      else
+-        expected_sign = "│"
+-      end
+-
+-      assert.equal(expected_sign, signs[line_0].text,
+-        "original line " .. line .. " sign mismatch")
+-      assert.equal("CodeDiffMoveTo", signs[line_0].hl,
+-        "original line " .. line .. " sign_hl_group mismatch")
+-    end
+-
+-    vim.fn.delete(lp)
+-    vim.fn.delete(rp)
+-  end)
+-
+-  -- ──────────────────────────────────────────────────────────────────────────
+-  -- Test 3: Sign column symbols correct on modified side
+-  -- ──────────────────────────────────────────────────────────────────────────
+-  it("sets correct sign column symbols on modified side", function()
+-    local tabpage, lp, rp = create_move_view(orig, mod, "sign_mod")
+-
+-    local _, mod_buf = lifecycle.get_buffers(tabpage)
+-    assert(mod_buf, "modified buffer must exist")
+-
+-    local signs = signs_on_buf(mod_buf)
+-
+-    local block_len = mod_last - mod_first + 1
+-
+-    for line = mod_first, mod_last do
+-      local line_0 = line - 1
+-      assert(signs[line_0], "sign expected on modified line " .. line)
+-
+-      local expected_sign
+-      if block_len == 1 then
+-        expected_sign = "─"
+-      elseif line == mod_first then
+-        expected_sign = "┌"
+-      elseif line == mod_last then
+-        expected_sign = "└"
+-      else
+-        expected_sign = "│"
+-      end
+-
+-      assert.equal(expected_sign, signs[line_0].text,
+-        "modified line " .. line .. " sign mismatch")
+-      assert.equal("CodeDiffMoveTo", signs[line_0].hl,
+-        "modified line " .. line .. " sign_hl_group mismatch")
+-    end
+-
+-    vim.fn.delete(lp)
+-    vim.fn.delete(rp)
+-  end)
+-
+-  -- ──────────────────────────────────────────────────────────────────────────
+-  -- Test 4: number_hl_group is CodeDiffMoveTo on moved lines
++  -- Test 2: number_hl_group is CodeDiffMoveTo on moved lines
+   -- ──────────────────────────────────────────────────────────────────────────
+   it("sets number_hl_group to CodeDiffMoveTo on moved lines", function()
+     local tabpage, lp, rp = create_move_view(orig, mod, "numhl")
+ 
+     local orig_buf, mod_buf = lifecycle.get_buffers(tabpage)
+     assert(orig_buf and mod_buf, "buffers must exist")
++    assert_no_highlight_signs(orig_buf)
++    assert_no_highlight_signs(mod_buf)
+ 
+     -- Original side
+     local nhl_orig = number_hl_on_buf(orig_buf)
+@@ -260,7 +178,7 @@ describe("Move rendering (side-by-side)", function()
+   end)
+ 
+   -- ──────────────────────────────────────────────────────────────────────────
+-  -- Test 5: No move rendering when compute_moves = false
++  -- Test 3: No move rendering when compute_moves = false
+   -- ──────────────────────────────────────────────────────────────────────────
+   it("produces no CodeDiffLineMove extmarks when compute_moves is false", function()
+     local tabpage, lp, rp = create_move_view(orig, mod, "nomove", {
+@@ -280,8 +198,8 @@ describe("Move rendering (side-by-side)", function()
+     vim.fn.delete(rp)
+   end)
+ 
+-  -- Test 6: All test pairs — moved lines get correct highlights and signs
+-  it("renders correct highlights and signs for ALL test pairs", function()
++  -- Test 4: All test pairs — moved lines get correct highlights
++  it("renders correct highlights for ALL test pairs", function()
+     local pairs_dir = "scripts/test_pairs"
+     local handle = vim.loop.fs_scandir(pairs_dir)
+     assert.is_truthy(handle, "test_pairs directory should exist")
+diff --git a/tests/ui/welcome_spec.lua b/tests/ui/welcome_spec.lua
+index a9110f8..8abdae6 100644
+--- a/tests/ui/welcome_spec.lua
++++ b/tests/ui/welcome_spec.lua
+@@ -130,9 +130,9 @@ describe("Welcome Page", function()
+ 
+       assert.is_false(vim.wo[main_win].number)
+       assert.is_false(vim.wo[main_win].relativenumber)
+-      assert.equals("no", vim.wo[main_win].signcolumn)
++      assert.equals("yes:1", vim.wo[main_win].signcolumn)
+       assert.equals("0", vim.wo[main_win].foldcolumn)
+-      assert.equals(" ", vim.wo[main_win].statuscolumn)
++      assert.equals("%l", vim.wo[main_win].statuscolumn)
+ 
+       assert.is_true(vim.wo[other_win].number)
+       assert.is_false(vim.wo[other_win].relativenumber)
+@@ -276,9 +276,9 @@ describe("Welcome Page", function()
+       assert.is_true(session.single_pane == true, "Session should be in single_pane mode")
+       assert.is_false(vim.wo[session.modified_win].number)
+       assert.is_false(vim.wo[session.modified_win].relativenumber)
+-      assert.equals("no", vim.wo[session.modified_win].signcolumn)
++      assert.equals("yes:1", vim.wo[session.modified_win].signcolumn)
+       assert.equals("0", vim.wo[session.modified_win].foldcolumn)
+-      assert.equals(" ", vim.wo[session.modified_win].statuscolumn)
++      assert.equals("%l", vim.wo[session.modified_win].statuscolumn)
+ 
+       -- Restore changes: modify the file again
+       repo.write_file("test.txt", { "line 1", "line 2 changed again" })

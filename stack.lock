@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = a29db0804bafb51bb6d7b514f4ba0dfd5aab7d5d
-expectedTree = 3d9c994c0162ba5d40ff28acb9f49a41c452ba64
+expectedHead = 4cfc8ff5786e51f8ed513994e336dda3b38a43bb
+expectedTree = d88707bd1612b20fb0bb2b19869de1aaaf0f29d7
 testCommand = make test
 publishRemote = upstream
 publishBranch = main
@@ -18,6 +18,7 @@ patches =
     highlight-attributes
     explorer-line-statistics
     pure-line-char-highlights
+    native-gutter-signs
     fork-notice
 
 [patch "explorer-gf"]
@@ -74,6 +75,11 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 file = patches/012-pure-line-char-highlights.patch
 originCommit = 5b0c0e84288abe8b7607986bc08f105659d1c482
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/450
+
+[patch "native-gutter-signs"]
+file = patches/014-native-gutter-signs.patch
+originCommit = ede01f7db74f736b4d6d83270fb47200ac040627
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 
 [patch "fork-notice"]
 file = patches/013-fork-notice.patch
