@@ -4,7 +4,7 @@ local M = {}
 local config = require("codediff.config")
 local highlights = require("codediff.ui.highlights")
 local filler_renderer = require("codediff.ui.filler")
-local compat = require("codediff.core.compat")
+local char_ranges = require("codediff.ui.char_ranges")
 
 -- Namespace references
 local ns_highlight = highlights.ns_highlight
@@ -26,15 +26,6 @@ end
 
 local function get_modified_line_highlight(mapping)
   return has_lines(mapping.original) and "CodeDiffLineChange" or "CodeDiffLineInsert"
-end
-
--- Check if a column position is past the visible line content
-local function is_past_line_content(line_number, column, lines)
-  if line_number < 1 or line_number > #lines then
-    return true
-  end
-  local line_content = lines[line_number]
-  return column > #line_content
 end
 
 -- ============================================================================
@@ -69,103 +60,17 @@ end
 -- Step 2: Character-Level Highlights
 -- ============================================================================
 
--- Convert UTF-16 code unit offset to UTF-8 byte offset
--- The diff algorithm returns UTF-16 positions (VSCode/JavaScript native)
--- but Neovim expects byte positions for highlighting
--- For ASCII text, UTF-16 index equals byte index (no change)
--- utf16_col: 1-based UTF-16 code unit position
--- Returns: 1-based byte position
-local function utf16_col_to_byte_col(line, utf16_col)
-  if not line or utf16_col <= 1 then
-    return utf16_col
-  end
-  -- vim.str_byteindex uses 0-based indexing, our columns are 1-based
-  local ok, byte_idx = pcall(compat.str_byteindex_utf16, line, utf16_col - 1)
-  if ok then
-    return byte_idx + 1
-  end
-  -- Fallback: return original column if conversion fails
-  return utf16_col
-end
+local function apply_char_highlight(args)
+  local line_count = vim.api.nvim_buf_line_count(args.bufnr)
+  local segments = char_ranges.to_line_segments(args.range, args.counterpart, args.lines, args.counterpart_lines)
 
-local function apply_char_highlight(bufnr, char_range, hl_group, lines)
-  local start_line = char_range.start_line
-  local start_col = char_range.start_col
-  local end_line = char_range.end_line
-  local end_col = char_range.end_col
-
-  if is_empty_range(char_range) then
-    return
-  end
-
-  if is_past_line_content(start_line, start_col, lines) then
-    return
-  end
-
-  -- Convert UTF-16 column positions to byte positions for Neovim
-  if start_line >= 1 and start_line <= #lines then
-    local line_content = lines[start_line]
-    start_col = utf16_col_to_byte_col(line_content, start_col)
-  end
-
-  if end_line >= 1 and end_line <= #lines then
-    local line_content = lines[end_line]
-    end_col = utf16_col_to_byte_col(line_content, end_col)
-    end_col = math.min(end_col, #line_content + 1)
-  end
-
-  -- Verify buffer has enough lines (buffer may have changed since diff was computed)
-  local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
-  if start_line > buf_line_count or end_line > buf_line_count then
-    return
-  end
-
-  if start_line == end_line then
-    local line_idx = start_line - 1
-    if line_idx >= 0 then
-      -- Additional safety: verify column is within current buffer line length
-      local ok = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, line_idx, start_col - 1, {
-        end_col = end_col - 1,
-        hl_group = hl_group,
+  for _, segment in ipairs(segments) do
+    if segment.line <= line_count then
+      pcall(vim.api.nvim_buf_set_extmark, args.bufnr, ns_highlight, segment.line - 1, segment.start_col, {
+        end_col = segment.end_col,
+        hl_group = segment.line_text and args.line_text_hl_group or args.hl_group,
         priority = 200,
       })
-      if not ok then
-        -- Column out of range, skip this highlight
-        return
-      end
-    end
-  else
-    local first_line_idx = start_line - 1
-    if first_line_idx >= 0 then
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, first_line_idx, start_col - 1, {
-        end_line = first_line_idx + 1,
-        end_col = 0,
-        hl_group = hl_group,
-        priority = 200,
-      })
-    end
-
-    for line = start_line + 1, end_line - 1 do
-      local line_idx = line - 1
-      if line_idx >= 0 and line <= buf_line_count then
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, line_idx, 0, {
-          end_line = line_idx + 1,
-          end_col = 0,
-          hl_group = hl_group,
-          priority = 200,
-        })
-      end
-    end
-
-    if end_col > 1 or end_line ~= start_line then
-      local last_line_idx = end_line - 1
-      if last_line_idx >= 0 and last_line_idx ~= first_line_idx and end_line <= buf_line_count then
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, last_line_idx, 0, {
-          end_col = end_col - 1,
-          hl_group = hl_group,
-          priority = 200,
-        })
-      end
     end
   end
 end
@@ -322,11 +227,27 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
     if mapping.inner_changes then
       for _, inner in ipairs(mapping.inner_changes) do
         if not is_empty_range(inner.original) then
-          apply_char_highlight(left_bufnr, inner.original, "CodeDiffCharDelete", original_lines)
+          apply_char_highlight({
+            bufnr = left_bufnr,
+            range = inner.original,
+            counterpart = inner.modified,
+            hl_group = "CodeDiffCharDelete",
+            line_text_hl_group = "CodeDiffLineDeleteText",
+            lines = original_lines,
+            counterpart_lines = modified_lines,
+          })
         end
 
         if not is_empty_range(inner.modified) then
-          apply_char_highlight(right_bufnr, inner.modified, "CodeDiffCharInsert", modified_lines)
+          apply_char_highlight({
+            bufnr = right_bufnr,
+            range = inner.modified,
+            counterpart = inner.original,
+            hl_group = "CodeDiffCharInsert",
+            line_text_hl_group = "CodeDiffLineInsertText",
+            lines = modified_lines,
+            counterpart_lines = original_lines,
+          })
         end
       end
     end
@@ -409,7 +330,7 @@ end
 -- side: "original" or "modified" - which side of the diff this buffer represents
 --       "original" = deletions (red highlights)
 --       "modified" = insertions (green highlights)
-function M.render_single_buffer(bufnr, diff, side)
+function M.render_single_buffer(bufnr, diff, side, counterpart_lines)
   -- Clear existing highlights
   vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
   vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
@@ -419,6 +340,8 @@ function M.render_single_buffer(bufnr, diff, side)
 
   -- Determine highlight groups based on side
   local char_hl = side == "original" and "CodeDiffCharDelete" or "CodeDiffCharInsert"
+  local line_text_hl = side == "original" and "CodeDiffLineDeleteText" or "CodeDiffLineInsertText"
+  local counterpart_side = side == "original" and "modified" or "original"
 
   for _, mapping in ipairs(diff.changes) do
     -- Get the range for our side
@@ -438,7 +361,15 @@ function M.render_single_buffer(bufnr, diff, side)
       for _, inner in ipairs(mapping.inner_changes) do
         local inner_range = inner[side]
         if inner_range and not is_empty_range(inner_range) then
-          apply_char_highlight(bufnr, inner_range, char_hl, lines)
+          apply_char_highlight({
+            bufnr = bufnr,
+            range = inner_range,
+            counterpart = inner[counterpart_side],
+            hl_group = char_hl,
+            line_text_hl_group = line_text_hl,
+            lines = lines,
+            counterpart_lines = counterpart_lines,
+          })
         end
       end
     end
@@ -490,7 +421,15 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
       for _, inner in ipairs(change.inner_changes) do
         local inner_range = inner.modified
         if inner_range and not is_empty_range(inner_range) then
-          apply_char_highlight(left_bufnr, inner_range, "CodeDiffCharInsert", left_lines)
+          apply_char_highlight({
+            bufnr = left_bufnr,
+            range = inner_range,
+            counterpart = inner.original,
+            hl_group = "CodeDiffCharInsert",
+            line_text_hl_group = "CodeDiffLineInsertText",
+            lines = left_lines,
+            counterpart_lines = base_lines,
+          })
         end
       end
     end
@@ -505,7 +444,15 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
       for _, inner in ipairs(change.inner_changes) do
         local inner_range = inner.modified
         if inner_range and not is_empty_range(inner_range) then
-          apply_char_highlight(right_bufnr, inner_range, "CodeDiffCharInsert", right_lines)
+          apply_char_highlight({
+            bufnr = right_bufnr,
+            range = inner_range,
+            counterpart = inner.original,
+            hl_group = "CodeDiffCharInsert",
+            line_text_hl_group = "CodeDiffLineInsertText",
+            lines = right_lines,
+            counterpart_lines = base_lines,
+          })
         end
       end
     end

@@ -4,25 +4,25 @@
 local config = require("codediff.config")
 local core = require("codediff.ui.core")
 local highlights = require("codediff.ui.highlights")
-local diff = require('codediff.core.diff')
+local diff = require("codediff.core.diff")
+
+local function has_highlight(source, hl_group, line)
+  local marks = type(source) == "number"
+      and vim.api.nvim_buf_get_extmarks(source, highlights.ns_highlight, 0, -1, { details = true })
+    or source
+  for _, mark in ipairs(marks) do
+    if mark[4].hl_group == hl_group and (not line or mark[2] == line - 1) then
+      return true
+    end
+  end
+  return false
+end
 
 local function assert_whole_file_highlight(bufnr, expected_group)
   local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
   assert.equal(1, #marks)
   assert.equal(expected_group, marks[1][4].hl_group)
   return marks[1][4]
-end
-
-local function has_highlight(bufnr, hl_group)
-  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
-
-  for _, mark in ipairs(marks) do
-    if mark[4].hl_group == hl_group then
-      return true
-    end
-  end
-
-  return false
 end
 
 describe("Render Core", function()
@@ -32,7 +32,7 @@ describe("Render Core", function()
   end)
 
   -- Test 1: Basic added lines rendering
-  it("Renders added lines with correct highlights", function()
+  it("Renders pure added lines without character highlights", function()
     local left_buf = vim.api.nvim_create_buf(false, true)
     local right_buf = vim.api.nvim_create_buf(false, true)
 
@@ -46,20 +46,23 @@ describe("Render Core", function()
     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
 
     -- Verify added line has highlight
-    assert.is_true(has_highlight(right_buf, "CodeDiffLineInsert"), "Added line should use CodeDiffLineInsert")
-    assert.is_false(has_highlight(right_buf, "CodeDiffLineChange"), "Added line should not use CodeDiffLineChange")
+    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, { details = true })
+    assert.is_true(has_highlight(right_marks, "CodeDiffLineInsert"), "Added line should have line highlight")
+    assert.is_true(has_highlight(right_marks, "CodeDiffLineInsertText"), "Added text should have inserted-line text highlight")
+    assert.is_false(has_highlight(right_marks, "CodeDiffCharInsert"), "Added line should not have character highlight")
+    assert.is_false(has_highlight(right_marks, "CodeDiffLineChange"), "Added line should not use CodeDiffLineChange")
 
     vim.api.nvim_buf_delete(left_buf, {force = true})
     vim.api.nvim_buf_delete(right_buf, {force = true})
   end)
 
   -- Test 2: Basic deleted lines rendering
-  it("Renders deleted lines with correct highlights", function()
+  it("Renders pure deleted lines without character highlights", function()
     local left_buf = vim.api.nvim_create_buf(false, true)
     local right_buf = vim.api.nvim_create_buf(false, true)
 
-    local original = {"line 1", "line 2", "line 3"}
-    local modified = {"line 1", "line 2"}
+    local original = {"The quick brown fox", "deleted line", "tail"}
+    local modified = {"The quick red fox", "tail"}
 
     vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, original)
     vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, modified)
@@ -68,8 +71,10 @@ describe("Render Core", function()
     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
 
     -- Verify deleted line has highlight
-    local left_marks = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_highlight, 0, -1, {})
-    assert.is_true(#left_marks > 0, "Deleted line should have highlight extmark")
+    local left_marks = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_highlight, 0, -1, { details = true })
+    assert.is_true(has_highlight(left_marks, "CodeDiffLineDelete", 2), "Deleted line should have line highlight")
+    assert.is_true(has_highlight(left_marks, "CodeDiffLineDeleteText", 2), "Deleted text should have deleted-line text highlight")
+    assert.is_false(has_highlight(left_marks, "CodeDiffCharDelete", 2), "Deleted line should not have character highlight")
 
     vim.api.nvim_buf_delete(left_buf, {force = true})
     vim.api.nvim_buf_delete(right_buf, {force = true})
@@ -121,12 +126,12 @@ describe("Render Core", function()
   end)
 
   -- Test 5: Character-level diff highlights
-  it("Renders character-level differences within modified lines", function()
+  it("Renders character-level differences only within paired modified lines", function()
     local left_buf = vim.api.nvim_create_buf(false, true)
     local right_buf = vim.api.nvim_create_buf(false, true)
 
-    local original = {"The quick brown fox"}
-    local modified = {"The quick red fox"}
+    local original = {"The quick brown fox", "tail"}
+    local modified = {"added line", "The quick red fox", "tail"}
 
     vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, original)
     vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, modified)
@@ -135,12 +140,14 @@ describe("Render Core", function()
     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
 
     -- Should have character-level highlights
-    local left_marks = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_highlight, 0, -1, {details = true})
-    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, {details = true})
+    local left_marks = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_highlight, 0, -1, { details = true })
+    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, { details = true })
 
     -- Check that we have highlights (character diffs create multiple extmarks)
-    assert.is_true(#left_marks > 0, "Left should have character-level highlights")
-    assert.is_true(#right_marks > 0, "Right should have character-level highlights")
+    assert.is_true(has_highlight(left_marks, "CodeDiffCharDelete", 1), "Paired original line should have character highlights")
+    assert.is_true(has_highlight(right_marks, "CodeDiffCharInsert", 2), "Paired modified line should have character highlights")
+    assert.is_true(has_highlight(right_marks, "CodeDiffLineInsertText", 1), "Completely added line should have inserted-line text highlights")
+    assert.is_false(has_highlight(right_marks, "CodeDiffCharInsert", 1), "Pure added line should not have character highlights")
 
     vim.api.nvim_buf_delete(left_buf, {force = true})
     vim.api.nvim_buf_delete(right_buf, {force = true})
@@ -434,7 +441,7 @@ describe("Render Core", function()
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
 
     local lines_diff = diff.compute_diff(original, modified)
-    core.render_single_buffer(buf, lines_diff, "modified")
+    core.render_single_buffer(buf, lines_diff, "modified", original)
 
     -- Verify added line has highlight
     assert.is_true(has_highlight(buf, "CodeDiffLineInsert"), "Added line should use CodeDiffLineInsert")
@@ -453,7 +460,7 @@ describe("Render Core", function()
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, original)
 
     local lines_diff = diff.compute_diff(original, modified)
-    core.render_single_buffer(buf, lines_diff, "original")
+    core.render_single_buffer(buf, lines_diff, "original", modified)
 
     -- Verify deleted line has highlight
     local marks = vim.api.nvim_buf_get_extmarks(buf, highlights.ns_highlight, 0, -1, {})
@@ -473,7 +480,7 @@ describe("Render Core", function()
 
     -- First render
     local lines_diff_v1 = diff.compute_diff(original_v1, modified_v1)
-    core.render_single_buffer(buf, lines_diff_v1, "modified")
+    core.render_single_buffer(buf, lines_diff_v1, "modified", original_v1)
 
     local marks_after_first = vim.api.nvim_buf_get_extmarks(buf, highlights.ns_highlight, 0, -1, {})
     local first_count = #marks_after_first
@@ -482,7 +489,7 @@ describe("Render Core", function()
     local no_change = {"same"}
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, no_change)
     local lines_diff_v2 = diff.compute_diff(no_change, no_change)
-    core.render_single_buffer(buf, lines_diff_v2, "modified")
+    core.render_single_buffer(buf, lines_diff_v2, "modified", no_change)
 
     local marks_after_second = vim.api.nvim_buf_get_extmarks(buf, highlights.ns_highlight, 0, -1, {})
 
@@ -502,7 +509,7 @@ describe("Render Core", function()
     local lines_diff = diff.compute_diff(content, content)
     
     local success = pcall(function()
-      core.render_single_buffer(buf, lines_diff, "modified")
+      core.render_single_buffer(buf, lines_diff, "modified", content)
     end)
 
     assert.is_true(success, "Should handle no changes without error")
@@ -578,7 +585,7 @@ describe("Render Core", function()
     local modified = {"line 1", "new content"}
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
-    core.render_single_buffer(buf, diff.compute_diff(original, modified), "modified")
+    core.render_single_buffer(buf, diff.compute_diff(original, modified), "modified", original)
 
     assert.is_true(has_highlight(buf, "CodeDiffLineChange"), "Modified line should use CodeDiffLineChange")
     assert.is_false(has_highlight(buf, "CodeDiffLineInsert"), "Modified line should not use CodeDiffLineInsert")
