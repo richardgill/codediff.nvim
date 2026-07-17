@@ -4,7 +4,7 @@ local M = {}
 
 local config = require("codediff.config")
 local highlights = require("codediff.ui.highlights")
-local compat = require("codediff.core.compat")
+local char_ranges = require("codediff.ui.char_ranges")
 
 -- Dedicated namespace for inline diff (separate from side-by-side namespaces)
 M.ns_inline = vim.api.nvim_create_namespace("codediff-inline")
@@ -123,21 +123,6 @@ function M.compute_syntax_highlights(lines, filetype)
 end
 
 -- ============================================================================
--- Helper: UTF-16 to byte column conversion (shared with ui/core.lua)
--- ============================================================================
-
-local function utf16_col_to_byte_col(line, utf16_col)
-  if not line or utf16_col <= 1 then
-    return utf16_col
-  end
-  local ok, byte_idx = pcall(compat.str_byteindex_utf16, line, utf16_col - 1)
-  if ok then
-    return byte_idx + 1
-  end
-  return utf16_col
-end
-
--- ============================================================================
 -- Build virtual line chunks with character-level highlights
 -- ============================================================================
 
@@ -159,12 +144,12 @@ local function build_highlighted_virt_line(line_text, char_ranges, syntax_hls, b
   end
 
   -- Determine diff highlight for each byte position
-  -- nil = CodeDiffLineDelete, true = CodeDiffCharDelete
-  local char_delete_at = {}
+  -- nil = CodeDiffLineDelete, otherwise the text-level diff highlight
+  local diff_hl_at = {}
   if char_ranges then
     for _, range in ipairs(char_ranges) do
       for col = range.start_col, range.end_col do
-        char_delete_at[col] = true
+        diff_hl_at[col] = range.hl_group
       end
     end
   end
@@ -183,7 +168,7 @@ local function build_highlighted_virt_line(line_text, char_ranges, syntax_hls, b
   local prev_hl = nil
 
   local function get_hl_at(col)
-    local diff_hl = char_delete_at[col] and "CodeDiffCharDelete" or base_hl
+    local diff_hl = diff_hl_at[col] or base_hl
     local syn_hl = syntax_at[col]
     if syn_hl then
       return get_merged_hl(syn_hl, diff_hl)
@@ -220,58 +205,21 @@ end
 -- Given inner_changes and a 1-based original line number, extract byte-position
 -- ranges on that line that have character-level deletions.
 -- Returns: sorted list of {start_col, end_col} in byte positions
-local function get_char_ranges_for_orig_line(inner_changes, orig_line_1based, original_lines)
-  if not inner_changes then
-    return nil
-  end
-
+local function get_char_ranges_for_orig_line(inner_changes, orig_line_1based, original_lines, modified_lines)
   local ranges = {}
-  local line_text = original_lines[orig_line_1based]
-  if not line_text then
-    return nil
-  end
 
-  for _, inner in ipairs(inner_changes) do
-    local orig = inner.original
-    if not orig then
-      goto continue
-    end
-
-    -- Check if this inner change touches our line
-    if orig.start_line <= orig_line_1based and orig.end_line >= orig_line_1based then
-      -- Empty range check
-      if orig.start_line == orig.end_line and orig.start_col == orig.end_col then
-        goto continue
-      end
-
-      local start_col, end_col
-
-      if orig.start_line == orig_line_1based then
-        start_col = utf16_col_to_byte_col(line_text, orig.start_col)
-      else
-        start_col = 1
-      end
-
-      if orig.end_line == orig_line_1based then
-        end_col = utf16_col_to_byte_col(line_text, orig.end_col) - 1
-        end_col = math.max(end_col, start_col) -- ensure valid range
-      else
-        end_col = #line_text
-      end
-
-      -- Clamp to line length
-      start_col = math.max(1, math.min(start_col, #line_text + 1))
-      end_col = math.min(end_col, #line_text)
-
-      if end_col >= start_col then
-        table.insert(ranges, { start_col = start_col, end_col = end_col })
+  for _, inner in ipairs(inner_changes or {}) do
+    for _, segment in ipairs(char_ranges.to_line_segments(inner.original, inner.modified, original_lines, modified_lines)) do
+      if segment.line == orig_line_1based then
+        table.insert(ranges, {
+          start_col = segment.start_col + 1,
+          end_col = segment.end_col,
+          hl_group = segment.line_text and "CodeDiffLineDeleteText" or "CodeDiffCharDelete",
+        })
       end
     end
-
-    ::continue::
   end
 
-  -- Sort by start_col
   table.sort(ranges, function(a, b)
     return a.start_col < b.start_col
   end)
@@ -283,86 +231,19 @@ end
 -- Apply char-level highlights on modified buffer lines
 -- ============================================================================
 
-local function apply_modified_char_highlights(bufnr, inner_changes, modified_lines)
-  if not inner_changes then
-    return
-  end
+local function apply_modified_char_highlights(bufnr, inner_changes, original_lines, modified_lines)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
 
-  local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
-
-  for _, inner in ipairs(inner_changes) do
-    local mod = inner.modified
-    if not mod then
-      goto continue
-    end
-
-    -- Empty range check
-    if mod.start_line == mod.end_line and mod.start_col == mod.end_col then
-      goto continue
-    end
-
-    local start_line = mod.start_line
-    local end_line = mod.end_line
-    local start_col = mod.start_col
-    local end_col = mod.end_col
-
-    if start_line > buf_line_count or end_line > buf_line_count then
-      goto continue
-    end
-
-    -- Convert UTF-16 columns to byte positions
-    if start_line >= 1 and start_line <= #modified_lines then
-      start_col = utf16_col_to_byte_col(modified_lines[start_line], start_col)
-    end
-    if end_line >= 1 and end_line <= #modified_lines then
-      end_col = utf16_col_to_byte_col(modified_lines[end_line], end_col)
-      end_col = math.min(end_col, #modified_lines[end_line] + 1)
-    end
-
-    if start_line == end_line then
-      local line_idx = start_line - 1
-      if line_idx >= 0 then
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, line_idx, start_col - 1, {
-          end_col = end_col - 1,
-          hl_group = "CodeDiffCharInsert",
+  for _, inner in ipairs(inner_changes or {}) do
+    for _, segment in ipairs(char_ranges.to_line_segments(inner.modified, inner.original, modified_lines, original_lines)) do
+      if segment.line <= line_count then
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, segment.line - 1, segment.start_col, {
+          end_col = segment.end_col,
+          hl_group = segment.line_text and "CodeDiffLineInsertText" or "CodeDiffCharInsert",
           priority = 200,
         })
       end
-    else
-      -- Multi-line char highlight
-      local first_idx = start_line - 1
-      if first_idx >= 0 then
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, first_idx, start_col - 1, {
-          end_line = first_idx + 1,
-          end_col = 0,
-          hl_group = "CodeDiffCharInsert",
-          priority = 200,
-        })
-      end
-      for line = start_line + 1, end_line - 1 do
-        local idx = line - 1
-        if idx >= 0 and line <= buf_line_count then
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, idx, 0, {
-            end_line = idx + 1,
-            end_col = 0,
-            hl_group = "CodeDiffCharInsert",
-            priority = 200,
-          })
-        end
-      end
-      if end_col > 1 or end_line ~= start_line then
-        local last_idx = end_line - 1
-        if last_idx >= 0 and last_idx ~= first_idx and end_line <= buf_line_count then
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, last_idx, 0, {
-            end_col = end_col - 1,
-            hl_group = "CodeDiffCharInsert",
-            priority = 200,
-          })
-        end
-      end
     end
-
-    ::continue::
   end
 end
 
@@ -413,7 +294,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
 
       for orig_line = orig_start, orig_end - 1 do
         local line_text = original_lines[orig_line] or ""
-        local char_ranges = get_char_ranges_for_orig_line(mapping.inner_changes, orig_line, original_lines)
+        local char_ranges = get_char_ranges_for_orig_line(mapping.inner_changes, orig_line, original_lines, modified_lines)
         local line_syntax = syntax_hls[orig_line]
         local chunks = build_highlighted_virt_line(line_text, char_ranges, line_syntax)
         table.insert(virt_lines, chunks)
@@ -460,7 +341,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
 
     -- Step 3: Character-level highlights on modified buffer lines
     if has_modified and mapping.inner_changes then
-      apply_modified_char_highlights(bufnr, mapping.inner_changes, modified_lines)
+      apply_modified_char_highlights(bufnr, mapping.inner_changes, original_lines, modified_lines)
     end
   end
 end

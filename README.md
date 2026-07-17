@@ -65,6 +65,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       line_insert = "DiffAdd",      -- Line-level insertions
       line_delete = "DiffDelete",   -- Line-level deletions
 
+      -- Background behind text characters on lines with no corresponding line on the opposite side.
+      -- The rest of the row uses line_insert/line_delete.
+      line_insert_text = nil, -- nil inherits line_insert
+      line_delete_text = nil, -- nil inherits line_delete
+
       -- Character-level: accepts highlight group names or hex colors
       -- If specified, these override char_brightness calculation
       char_insert = nil,            -- Character-level insertions (nil = auto-derive)
@@ -601,12 +606,14 @@ The plugin handles syntax highlighting differently based on buffer type:
 
 ### Highlight Groups
 
-The plugin defines highlight groups matching VSCode's diff colors:
+The plugin defines these diff highlight groups:
 
 - `CodeDiffLineInsert` - Light green background for inserted lines
 - `CodeDiffLineDelete` - Light red background for deleted lines
-- `CodeDiffCharInsert` - Deep/dark green for inserted characters
-- `CodeDiffCharDelete` - Deep/dark red for deleted characters
+- `CodeDiffLineInsertText` - Background behind text characters on inserted lines with no corresponding line opposite; defaults to `CodeDiffLineInsert`
+- `CodeDiffLineDeleteText` - Background behind text characters on deleted lines with no corresponding line opposite; defaults to `CodeDiffLineDelete`
+- `CodeDiffCharInsert` - Stronger background behind inserted text within a modified line
+- `CodeDiffCharDelete` - Stronger background behind deleted text within a modified line
 - `CodeDiffFiller` - Gray foreground for filler line slashes (`╱╱╱`)
 - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
 - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
@@ -632,7 +639,8 @@ The plugin defines highlight groups matching VSCode's diff colors:
 
 **Default behavior:**
 - Uses your colorscheme's `DiffAdd` and `DiffDelete` for line-level highlights
-- Character-level highlights are auto-adjusted based on `vim.o.background`:
+- Text on inserted/deleted lines with no corresponding line on the opposite side inherits the corresponding line-level color
+- Character-level highlights within modified lines are auto-adjusted based on `vim.o.background`:
   - **Dark themes** (`background = "dark"`): Brightness multiplied by `1.4` (40% brighter)
   - **Light themes** (`background = "light"`): Brightness multiplied by `0.92` (8% darker)
 - This auto-detection works out-of-box for most colorschemes

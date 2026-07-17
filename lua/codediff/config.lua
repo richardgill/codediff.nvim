@@ -8,6 +8,11 @@ M.defaults = {
     line_insert = "DiffAdd", -- Line-level insertions (base color)
     line_delete = "DiffDelete", -- Line-level deletions (base color)
 
+    -- Background behind text characters on lines with no corresponding line on the opposite side.
+    -- The rest of the row uses line_insert/line_delete.
+    line_insert_text = nil, -- nil inherits line_insert
+    line_delete_text = nil, -- nil inherits line_delete
+
     -- Character-level highlights: accepts highlight group names or color values
     -- If specified, these override char_brightness calculation
     char_insert = nil, -- Character-level insertions (if nil, derived from line_insert with char_brightness)
