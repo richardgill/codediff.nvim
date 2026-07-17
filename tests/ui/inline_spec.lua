@@ -35,7 +35,23 @@ describe("Inline Diff Rendering", function()
     inline.render_inline_diff(buf, lines_diff, original, modified)
 
     -- Added line should have highlight extmark
-    assert.is_true(has_highlight(buf, "CodeDiffLineInsert"), "Added line should have CodeDiffLineInsert highlight")
+    local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
+    local has_insert_hl = false
+    local has_insert_text = false
+    local has_char_insert = false
+    for _, mark in ipairs(marks) do
+      local details = mark[4]
+      if details.hl_group == "CodeDiffLineInsert" then
+        has_insert_hl = true
+      elseif details.hl_group == "CodeDiffLineInsertText" then
+        has_insert_text = true
+      elseif details.hl_group == "CodeDiffCharInsert" then
+        has_char_insert = true
+      end
+    end
+    assert.is_true(has_insert_hl, "Added line should have CodeDiffLineInsert highlight")
+    assert.is_true(has_insert_text, "Added text should have CodeDiffLineInsertText highlight")
+    assert.is_false(has_char_insert, "Added line should not have CodeDiffCharInsert highlight")
     assert.is_false(has_highlight(buf, "CodeDiffLineChange"), "Added line should not have CodeDiffLineChange highlight")
 
     vim.api.nvim_buf_delete(buf, { force = true })
@@ -106,7 +122,7 @@ describe("Inline Diff Rendering", function()
     local buf = vim.api.nvim_create_buf(false, true)
 
     local original = { "hello world" }
-    local modified = { "hello whirl" }
+    local modified = { "hello whirl", "added line" }
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
 
@@ -116,15 +132,21 @@ describe("Inline Diff Rendering", function()
     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
 
     local has_char_insert = false
+    local has_insert_text = false
+    local has_char_insert_on_added_line = false
     for _, mark in ipairs(marks) do
       local details = mark[4]
       if details.hl_group == "CodeDiffCharInsert" then
         has_char_insert = true
-        break
+        has_char_insert_on_added_line = has_char_insert_on_added_line or mark[2] == 1
+      elseif details.hl_group == "CodeDiffLineInsertText" and mark[2] == 1 then
+        has_insert_text = true
       end
     end
 
     assert.is_true(has_char_insert, "Should have character-level insert highlight")
+    assert.is_true(has_insert_text, "Added EOF line should have inserted-line text highlight")
+    assert.is_false(has_char_insert_on_added_line, "Added EOF line should not have character highlight")
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
@@ -205,7 +227,7 @@ describe("Inline Diff Rendering", function()
   end)
 
   -- Test 8: Pure deletion at end of file
-  it("handles pure deletion at end of file", function()
+  it("handles complete deletion at end of file", function()
     local buf = vim.api.nvim_create_buf(false, true)
 
     local original = { "line 1", "line 2", "line 3" }
@@ -218,15 +240,27 @@ describe("Inline Diff Rendering", function()
 
     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
     local has_virt_lines = false
+    local has_delete_text = false
+    local has_char_delete = false
     for _, mark in ipairs(marks) do
       local details = mark[4]
       if details.virt_lines and #details.virt_lines > 0 then
         has_virt_lines = true
-        break
+        for _, virt_line in ipairs(details.virt_lines) do
+          for _, chunk in ipairs(virt_line) do
+            if chunk[2] == "CodeDiffLineDeleteText" then
+              has_delete_text = true
+            elseif chunk[2] == "CodeDiffCharDelete" then
+              has_char_delete = true
+            end
+          end
+        end
       end
     end
 
-    assert.is_true(has_virt_lines, "Pure deletion should show virtual lines")
+    assert.is_true(has_virt_lines, "Complete deletion should show virtual lines")
+    assert.is_true(has_delete_text, "Complete deletion should have CodeDiffLineDeleteText chunks")
+    assert.is_false(has_char_delete, "Complete deletion should not have CodeDiffCharDelete chunks")
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
@@ -235,7 +269,7 @@ describe("Inline Diff Rendering", function()
   it("virtual lines contain char-level delete highlights as separate chunks", function()
     local buf = vim.api.nvim_create_buf(false, true)
 
-    local original = { "hello world" }
+    local original = { "hello world", "deleted line" }
     local modified = { "hello whirl" }
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
@@ -246,14 +280,18 @@ describe("Inline Diff Rendering", function()
     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.ns_inline, 0, -1, { details = true })
 
     local found_char_delete_in_virt = false
+    local found_delete_text_in_virt = false
+    local found_char_delete_on_deleted_line = false
     for _, mark in ipairs(marks) do
       local details = mark[4]
       if details.virt_lines then
-        for _, virt_line in ipairs(details.virt_lines) do
+        for line_index, virt_line in ipairs(details.virt_lines) do
           for _, chunk in ipairs(virt_line) do
             if chunk[2] == "CodeDiffCharDelete" then
               found_char_delete_in_virt = true
-              break
+              found_char_delete_on_deleted_line = found_char_delete_on_deleted_line or line_index == 2
+            elseif chunk[2] == "CodeDiffLineDeleteText" and line_index == 2 then
+              found_delete_text_in_virt = true
             end
           end
         end
@@ -261,6 +299,8 @@ describe("Inline Diff Rendering", function()
     end
 
     assert.is_true(found_char_delete_in_virt, "Virtual lines should contain CodeDiffCharDelete chunks for changed characters")
+    assert.is_true(found_delete_text_in_virt, "Deleted EOF line should have deleted-line text chunks")
+    assert.is_false(found_char_delete_on_deleted_line, "Deleted EOF line should not have character chunks")
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)

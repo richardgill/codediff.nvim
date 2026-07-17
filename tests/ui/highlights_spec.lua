@@ -12,6 +12,8 @@ local function reset_codediff()
     "CodeDiffLineInsert",
     "CodeDiffLineChange",
     "CodeDiffLineDelete",
+    "CodeDiffLineInsertText",
+    "CodeDiffLineDeleteText",
     "CodeDiffCharInsert",
     "CodeDiffCharDelete",
     "CodeDiffExplorerStat",
@@ -51,9 +53,24 @@ describe("highlights.lua color derivation", function()
     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
     local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
+    local insert_text = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsertText", link = false })
+    local delete_text = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDeleteText", link = false })
     assert.are.equal(0x123456, insert.bg, "Insert bg should come from DiffAdd.bg")
     assert.are.equal(0xabcdef, change.bg, "Change bg should come from DiffChange.bg")
     assert.are.equal(0x654321, delete.bg, "Delete bg should come from DiffDelete.bg")
+    assert.are.equal(insert.bg, insert_text.bg, "Inserted line text should inherit line insert")
+    assert.are.equal(delete.bg, delete_text.bg, "Deleted line text should inherit line delete")
+  end)
+
+  it("uses explicit inserted and deleted line text colors", function()
+    config.options.highlights.line_insert_text = "#112233"
+    config.options.highlights.line_delete_text = "#445566"
+    highlights.setup()
+
+    local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsertText", link = false })
+    local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDeleteText", link = false })
+    assert.are.equal(0x112233, insert.bg)
+    assert.are.equal(0x445566, delete.bg)
   end)
 
   it("reads fg when colorscheme uses fg + reverse (regression: #366 sorbet)", function()

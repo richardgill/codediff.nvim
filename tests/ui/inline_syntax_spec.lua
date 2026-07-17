@@ -118,11 +118,11 @@ describe("Inline virt_lines syntax highlighting", function()
     end
 
     assert.is_truthy(virt_chunks, "Should have virt_line chunks")
-    -- Without syntax, chunks should only use CodeDiffLineDelete/CodeDiffCharDelete
+    -- Without syntax, chunks should only use delete-side diff highlights
     for _, chunk in ipairs(virt_chunks) do
       local hl = chunk[2]
       assert.is_true(
-        hl == "CodeDiffLineDelete" or hl == "CodeDiffCharDelete",
+        hl == "CodeDiffLineDelete" or hl == "CodeDiffLineDeleteText" or hl == "CodeDiffCharDelete",
         "Without syntax, should only use diff highlights, got: " .. tostring(hl)
       )
     end
