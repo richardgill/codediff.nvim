@@ -1,4 +1,4 @@
-From 107c6bfc8484d75709c774fe3247ad6b3a421035 Mon Sep 17 00:00:00 2001
+From 7de96c6e15b65576f0782f04e99f3990cb26e9e1 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 17:42:10 +0100
 Subject: [PATCH] fix: reserve character highlights for modified lines

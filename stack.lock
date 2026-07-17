@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 8fac1316a79669eb0837914a08227aed7d085ba7
-expectedTree = ac470cbb83b3a9960a7a6cd5fad8677f54e5f16d
+expectedHead = 70c7f696d580a0920b883c871019ff2e2462e44f
+expectedTree = aee1bb5739c1724ac0a74e08661ca5f9b525ffdb
 testCommand = make test
 publishRemote = upstream
 publishBranch = main
@@ -78,7 +78,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/450
 
 [patch "native-gutter-signs"]
 file = patches/014-native-gutter-signs.patch
-originCommit = ede01f7db74f736b4d6d83270fb47200ac040627
+originCommit = 7b6aafbadb98fd772828f28f9264e4346b5ecd89
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 
 [patch "fork-notice"]

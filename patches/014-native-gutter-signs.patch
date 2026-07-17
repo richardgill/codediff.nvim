@@ -1,4 +1,4 @@
-From 3c89559cbc665de02d2a504994328e445d38f469 Mon Sep 17 00:00:00 2001
+From 90c4de4a1b44c8d456f2c8fda129d2bf0312a8df Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 20:18:52 +0100
 Subject: [PATCH] Added native gutter signs support
@@ -28,7 +28,7 @@ Subject: [PATCH] Added native gutter signs support
  create mode 100644 tests/ui/gutter_signs_spec.lua
 
 diff --git a/README.md b/README.md
-index edda6af..dbbc095 100644
+index edda6af..96779c1 100644
 --- a/README.md
 +++ b/README.md
 @@ -108,6 +108,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -51,8 +51,8 @@ index edda6af..dbbc095 100644
 +
 +-- Enabled defaults.
 +gutter_signs = {
-+  insert_text = " +",
-+  delete_text = " -",
++  insert_text = "＋",
++  delete_text = "－",
 +  highlight_numbers = true,
 +  changed_priority = 100,
 +  unchanged_priority = nil,
@@ -65,7 +65,7 @@ index edda6af..dbbc095 100644
 +}
 +```
 +
-+Set this under `diff`. `insert_text` and `delete_text` must each occupy one or two display cells, as measured by `strdisplaywidth()`, because Neovim limits native sign text to two display cells. The leading space in the defaults is part of the sign highlight.
++Set this under `diff`. `insert_text` and `delete_text` must each occupy one or two display cells, as measured by `strdisplaywidth()`, because Neovim limits native sign text to two display cells. The fullwidth defaults each occupy two display cells.
 +
 +CodeDiff uses persistent native Neovim signs and does not modify `signcolumn` or `statuscolumn`. This example keeps a sign column and places signs after line numbers:
 +
@@ -94,7 +94,7 @@ index edda6af..dbbc095 100644
  <summary><b>📸 Visual Examples</b> (click to collapse)</summary>
  
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 373259e..3f6d2b9 100644
+index 373259e..15d3d98 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -217,6 +217,7 @@ Setup entry point:
@@ -122,8 +122,8 @@ index 373259e..3f6d2b9 100644
 +
 +  -- Enabled defaults.
 +  gutter_signs = {
-+    insert_text = " +",
-+    delete_text = " -",
++    insert_text = "＋",
++    delete_text = "－",
 +    highlight_numbers = true,
 +    changed_priority = 100,
 +    unchanged_priority = nil,
@@ -138,8 +138,8 @@ index 373259e..3f6d2b9 100644
 +
 +Place `gutter_signs` under `diff`. `insert_text` and `delete_text` must each
 +occupy one or two display cells, as measured by strdisplaywidth(), because
-+Neovim limits native sign text to two display cells. The leading space in the
-+defaults is part of the sign highlight.
++Neovim limits native sign text to two display cells. The fullwidth defaults
++each occupy two display cells.
 +
 +CodeDiff does not modify signcolumn or statuscolumn. This example keeps a sign
 +column and places signs after line numbers:
@@ -250,7 +250,7 @@ index 4b4f80c..0dcc38e 100644
    local left_lines = vim.api.nvim_buf_get_lines(left_bufnr, 0, -1, false)
 diff --git a/lua/codediff/ui/gutter_signs.lua b/lua/codediff/ui/gutter_signs.lua
 new file mode 100644
-index 0000000..3663407
+index 0000000..e2bdad7
 --- /dev/null
 +++ b/lua/codediff/ui/gutter_signs.lua
 @@ -0,0 +1,151 @@
@@ -262,8 +262,8 @@ index 0000000..3663407
 +local supports_native_signs = vim.fn.has("nvim-0.9") == 1
 +local default_move_priority = 250
 +local default_options = {
-+  insert_text = " +",
-+  delete_text = " -",
++  insert_text = "＋",
++  delete_text = "－",
 +  highlight_numbers = true,
 +  changed_priority = 100,
 +}
@@ -651,7 +651,7 @@ index 66d2e8c..a11e30b 100644
  local function is_valid_window(winid)
 diff --git a/tests/ui/gutter_signs_spec.lua b/tests/ui/gutter_signs_spec.lua
 new file mode 100644
-index 0000000..3e30436
+index 0000000..18d92f0
 --- /dev/null
 +++ b/tests/ui/gutter_signs_spec.lua
 @@ -0,0 +1,270 @@
@@ -763,7 +763,7 @@ index 0000000..3e30436
 +    local original = get_signs(session.original_bufnr)[1]
 +    assert.same({
 +      row = 1,
-+      raw_text = " -",
++      raw_text = "－",
 +      priority = 100,
 +      hl = "CodeDiffGutterDelete",
 +      number_hl = "CodeDiffGutterDeleteNumber",
@@ -776,7 +776,7 @@ index 0000000..3e30436
 +    })
 +
 +    local modified = get_signs(session.modified_bufnr)[1]
-+    assert.equals(" +", modified.raw_text)
++    assert.equals("＋", modified.raw_text)
 +    assert.equals("CodeDiffGutterInsert", modified.hl)
 +    assert.equals("CodeDiffGutterInsertNumber", modified.number_hl)
 +  end)
@@ -808,12 +808,12 @@ index 0000000..3e30436
 +    config.options.diff.gutter_signs = { changed_priority = 100, unchanged_priority = 99 }
 +    gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
 +
-+    local blocker = get_signs(session.original_bufnr)[1]
++    local blocker = find_sign(session.original_bufnr, "")
 +    assert.equals("", blocker.text)
 +    assert.equals(99, blocker.priority)
 +    assert.equals(0, blocker.row)
 +    assert.equals(2, blocker.end_row)
-+    assert.equals(100, find_sign(session.original_bufnr, "-").priority)
++    assert.equals(100, find_sign(session.original_bufnr, "－").priority)
 +  end)
 +
 +  it("keeps external signs and window options untouched", function()
@@ -855,7 +855,7 @@ index 0000000..3e30436
 +    gutter_signs.set_whole_file(session.modified_bufnr, "modified")
 +
 +    local sign = get_signs(session.modified_bufnr)[1]
-+    assert.equals("+", sign.text)
++    assert.equals("＋", sign.text)
 +    assert.equals("CodeDiffGutterInsert", sign.hl)
 +    assert.equals("CodeDiffGutterInsertNumber", sign.number_hl)
 +    assert.equals(3, sign.end_row)
@@ -892,7 +892,7 @@ index 0000000..3e30436
 +    assert.same({}, get_signs(session.modified_bufnr))
 +    state.resume_diff(tabpage)
 +
-+    assert.equals("+", get_signs(session.modified_bufnr)[1].text)
++    assert.equals("＋", get_signs(session.modified_bufnr)[1].text)
 +    lifecycle.cleanup(tabpage)
 +  end)
 +
