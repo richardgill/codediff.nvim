@@ -5,6 +5,7 @@ local M = {}
 local Tree = require("codediff.ui.lib.tree")
 local Line = require("codediff.ui.lib.line")
 local config = require("codediff.config")
+local line_stats = require("codediff.ui.explorer.line_stats")
 
 -- Merge artifact patterns (created by git mergetool)
 local MERGE_ARTIFACT_PATTERNS = {
@@ -106,6 +107,7 @@ function M.create_file_nodes(files, git_root, group)
         status_color = status_info.color,
         git_root = git_root,
         group = group,
+        line_stats = file.line_stats,
       },
     })
   end
@@ -230,6 +232,7 @@ function M.create_tree_file_nodes(files, git_root, group)
             git_root = git_root,
             group = group,
             indent_state = node_indent_state,
+            line_stats = file.line_stats,
           },
         })
       end
@@ -345,6 +348,14 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     -- Status symbol at the end (e.g., "M", "D", "??")
     local status_symbol = data.status_symbol or ""
 
+    -- calculate width of stats
+    local line_stats_options = explorer_config.line_stats or {}
+    local stat_segments = line_stats_options.enabled and line_stats.build_segments(data.line_stats, line_stats_options) or {}
+    local stats_width = math.max(0, #stat_segments - 1)
+    for _, segment in ipairs(stat_segments) do
+      stats_width = stats_width + vim.fn.strdisplaywidth(segment.text)
+    end
+
     -- Split path into filename and directory
     local full_path = data.path or node.text
     local filename = full_path:match("([^/]+)$") or full_path
@@ -354,9 +365,10 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     -- Calculate how much width we've used and reserve for status
     local status_margin = config.options.explorer.status_right_margin or 1
     local used_width = vim.fn.strdisplaywidth(indent) + vim.fn.strdisplaywidth(icon_part)
+    local stats_reserve = stats_width > 0 and stats_width + 1 or 0
     -- Reserve = symbol + 2 cells of minimum gap from content + configurable trailing margin
     local status_reserve = vim.fn.strdisplaywidth(status_symbol) + 2 + status_margin
-    local available_for_content = max_width - used_width - status_reserve
+    local available_for_content = max_width - used_width - stats_reserve - status_reserve
 
     -- Show: filename + full directory path, truncate directory from left if needed
     local filename_len = vim.fn.strdisplaywidth(filename)
@@ -400,6 +412,18 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     local content_len = vim.fn.strdisplaywidth(filename) + space_len + vim.fn.strdisplaywidth(directory)
     local padding_needed = math.max(2, available_for_content - content_len + 2)
     line:append(string.rep(" ", padding_needed), get_hl("Normal"))
+
+    -- render stats
+    for index, segment in ipairs(stat_segments) do
+      if index > 1 then
+        line:append(" ", get_hl("Normal"))
+      end
+      line:append(segment.text, get_hl(segment.hl))
+    end
+    if stats_width > 0 then
+      line:append(" ", get_hl("Normal"))
+    end
+
     line:append(status_symbol, get_hl(data.status_color))
     if status_margin > 0 then
       line:append(string.rep(" ", status_margin), get_hl("Normal"))

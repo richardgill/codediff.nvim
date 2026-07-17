@@ -217,6 +217,13 @@ Setup entry point:
         ignore = { ".git/**", ".jj/**" },
       },
       status_right_margin = 1,
+      line_stats = {
+        enabled = false,
+        group_totals = true,
+        count_untracked = false,
+        max_untracked_bytes = 1024 * 1024,
+        format = nil,
+      },
       visible_groups = {
         staged = true,
         unstaged = true,
@@ -288,6 +295,26 @@ Setup entry point:
   })
 <
 
+Explorer line statistics are disabled by default because they require extra Git
+queries and consume space in the default 40-column explorer. With `enabled =
+true`, tracked files show Git numstat counts and group headings can show their
+totals. Untracked files have no stats unless `count_untracked = true`; files
+larger than `max_untracked_bytes` are not read (1 MiB by default).
+
+Set `format` to customize the text for both file stats and group totals:
+>lua
+  format = function(stats)
+    if stats.binary then
+      return "binary"
+    end
+    return string.format("%d added, %d removed", stats.insertions, stats.deletions)
+  end
+<
+
+The formatter receives `{ insertions: number, deletions: number, binary:
+boolean }`. The default formatter hides zero counts, uses `+12 -4` for text
+files, and `bin` for binary files.
+
 ==============================================================================
 HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
 
@@ -337,6 +364,10 @@ Explorer & history git status highlights (customizable):
 - CodeDiffStatusUntracked   Untracked files (links to DiagnosticInfo)
 - CodeDiffStatusConflict    Conflicting files (links to DiagnosticError)
 - CodeDiffExplorerSelected  Selected file background (links to Visual)
+- CodeDiffExplorerStat            Custom explorer stat text (links to NonText)
+- CodeDiffExplorerStatInsertions  Explorer insertion counts (links to DiagnosticOk)
+- CodeDiffExplorerStatDeletions   Explorer deletion counts (links to DiagnosticError)
+- CodeDiffExplorerStatBinary      Explorer binary-file label (links to NonText)
 
 Override in your config or colorscheme:
 >lua

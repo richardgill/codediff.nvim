@@ -70,6 +70,13 @@ M.defaults = {
     auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
     flatten_dirs = true, -- Flatten single-child directory chains in tree view (e.g., src/components/ui/)
     status_right_margin = 1, -- Trailing cells between the status symbol (M/A/D) and the right edge; increase if Nerd Font icons clip it
+    line_stats = {
+      enabled = false, -- Show per-file insertion/deletion counts from git numstat
+      group_totals = true, -- Include aggregate insertion/deletion counts in group headings
+      count_untracked = false, -- Show untracked file lines as insertions
+      max_untracked_bytes = 1024 * 1024, -- Skip untracked files larger than this limit
+      format = nil, -- Optional function(stats) -> string; nil uses the built-in +N -N / bin format
+    },
     visible_groups = { -- Which groups to show in explorer (can be toggled at runtime)
       staged = true,
       unstaged = true,

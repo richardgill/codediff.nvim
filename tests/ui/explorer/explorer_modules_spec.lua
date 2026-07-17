@@ -33,6 +33,12 @@ describe("Explorer submodules", function()
       assert.is_not_nil(mod)
     end)
 
+    it("loads line stats module", function()
+      local ok, mod = pcall(require, "codediff.ui.explorer.line_stats")
+      assert.is_true(ok, "Failed to require codediff.ui.explorer.line_stats")
+      assert.is_not_nil(mod)
+    end)
+
     it("loads init facade", function()
       local ok, mod = pcall(require, "codediff.ui.explorer")
       assert.is_true(ok, "Failed to require codediff.ui.explorer")

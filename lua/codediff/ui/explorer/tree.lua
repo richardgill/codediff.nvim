@@ -6,6 +6,7 @@ local Tree = require("codediff.ui.lib.tree")
 local config = require("codediff.config")
 local filter = require("codediff.ui.explorer.filter")
 local nodes = require("codediff.ui.explorer.nodes")
+local line_stats = require("codediff.ui.explorer.line_stats")
 
 -- Filter files based on explorer.file_filter config
 -- Returns files that should be shown (not ignored)
@@ -15,6 +16,19 @@ local function filter_files(files)
   local ignore_patterns = file_filter.ignore or {}
 
   return filter.apply(files, ignore_patterns)
+end
+
+local function format_group_label(label, files)
+  local line_stats_options = config.options.explorer.line_stats
+  if not line_stats_options.enabled or not line_stats_options.group_totals then
+    return string.format("%s (%d)", label, #files)
+  end
+
+  local stats = line_stats.text(line_stats.sum_text_stats(files), line_stats_options)
+  if stats == "" then
+    return string.format("%s (%d)", label, #files)
+  end
+  return string.format("%s (%d · %s)", label, #files, stats)
 end
 
 -- Create tree data structure from git status result
@@ -37,7 +51,7 @@ function M.create_tree_data(status_result, git_root, base_revision, is_dir_mode,
     -- Dir or revision mode: single group showing all changes
     return {
       Tree.Node({
-        text = string.format("Changes (%d)", #unstaged),
+        text = format_group_label("Changes", unstaged),
         data = { type = "group", name = "unstaged" },
       }, unstaged_nodes),
     }
@@ -50,7 +64,7 @@ function M.create_tree_data(status_result, git_root, base_revision, is_dir_mode,
       table.insert(
         tree_nodes,
         Tree.Node({
-          text = string.format("Merge Changes (%d)", #conflicts),
+          text = format_group_label("Merge Changes", conflicts),
           data = { type = "group", name = "conflicts" },
         }, conflict_nodes)
       )
@@ -61,7 +75,7 @@ function M.create_tree_data(status_result, git_root, base_revision, is_dir_mode,
       table.insert(
         tree_nodes,
         Tree.Node({
-          text = string.format("Changes (%d)", #unstaged),
+          text = format_group_label("Changes", unstaged),
           data = { type = "group", name = "unstaged" },
         }, unstaged_nodes)
       )
@@ -72,7 +86,7 @@ function M.create_tree_data(status_result, git_root, base_revision, is_dir_mode,
       table.insert(
         tree_nodes,
         Tree.Node({
-          text = string.format("Staged Changes (%d)", #staged),
+          text = format_group_label("Staged Changes", staged),
           data = { type = "group", name = "staged" },
         }, staged_nodes)
       )

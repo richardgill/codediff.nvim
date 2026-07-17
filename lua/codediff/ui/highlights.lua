@@ -198,6 +198,10 @@ function M.setup()
   vim.api.nvim_set_hl(0, "CodeDiffStatusRenamed", { link = "DiagnosticInfo", default = true })
   vim.api.nvim_set_hl(0, "CodeDiffStatusUntracked", { link = "DiagnosticInfo", default = true })
   vim.api.nvim_set_hl(0, "CodeDiffStatusConflict", { link = "DiagnosticError", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStat", { link = "NonText", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatInsertions", { link = "DiagnosticOk", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatDeletions", { link = "DiagnosticError", default = true })
+  vim.api.nvim_set_hl(0, "CodeDiffExplorerStatBinary", { link = "NonText", default = true })
 
   -- Helper to check if a highlight group exists and has foreground color
   local function hl_exists(name)

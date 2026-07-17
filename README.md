@@ -126,6 +126,13 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       focus_on_select = false,  -- Jump to modified pane after selecting a file (default: stay in explorer)
       auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
       status_right_margin = 1,  -- Trailing cells between status symbol (M/A/D) and right edge; increase if Nerd Font icons clip it
+      line_stats = {
+        enabled = false,         -- Show +insertions/-deletions per file (requires extra Git queries)
+        group_totals = true,     -- Include aggregate stats in group headings
+        count_untracked = false,         -- Show untracked file lines as insertions
+        max_untracked_bytes = 1024 * 1024, -- Skip untracked files larger than this limit
+        format = nil,                    -- Optional function(stats) -> string; nil uses "+12 -4" / "bin"
+      },
       visible_groups = {       -- Which groups to show (can be toggled at runtime)
         staged = true,
         unstaged = true,
@@ -219,6 +226,21 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
   },
 }
 ```
+
+Explorer line statistics are disabled by default because they require extra Git queries and consume space in the default 40-column explorer. Set `explorer.line_stats.enabled = true` to show Git numstat counts. Untracked files have no stats unless `count_untracked = true`; files larger than `max_untracked_bytes` are not read (1 MiB by default).
+
+Set `format` to customize the text for both file stats and group totals:
+
+```lua
+format = function(stats)
+  if stats.binary then
+    return "binary"
+  end
+  return string.format("%d added, %d removed", stats.insertions, stats.deletions)
+end
+```
+
+The formatter receives `{ insertions: number, deletions: number, binary: boolean }`. The default formatter hides zero counts, uses `+12 -4` for text files, and `bin` for binary files.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 
