@@ -130,6 +130,14 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       focus_on_select = false,  -- Jump to modified pane after selecting a file (default: stay in explorer)
       auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
       status_right_margin = 1,  -- Trailing cells between status symbol (M/A/D) and right edge; increase if Nerd Font icons clip it
+      line_stats = {
+        enabled = false,         -- Show +insertions/-deletions per file (requires extra Git queries)
+        group_totals = true,     -- Include aggregate stats in group headings
+        count_untracked = false,         -- Show untracked file lines as insertions
+        max_untracked_bytes = 1024 * 1024, -- Skip untracked files larger than this limit
+        file_format = nil,               -- Optional function(file_stats) -> semantic text segments
+        group_format = nil,              -- Optional function(group_stats) -> semantic text segments
+      },
       visible_groups = {       -- Which groups to show (can be toggled at runtime)
         staged = true,
         unstaged = true,
@@ -252,6 +260,38 @@ The setting accepts a callback only, not a static options table. The callback re
 It runs only for panes displaying diff content. Explorer, history, welcome, placeholder, and non-CodeDiff windows are excluded. It is re-evaluated after pane creation, file selection, role or layout changes, conflict-result creation, and lifecycle events that may reset window options. Because it can run repeatedly, keep it idempotent and free of side effects. Return a table of window-local options, or `nil`/an empty table for no overrides. Options omitted by a later invocation are restored, and overrides are restored if CodeDiff releases a surviving window.
 
 The callback is a power-user escape hatch. Overriding CodeDiff-managed options such as `wrap`, `scrollbind`, or `winbar` can break alignment, synchronized scrolling, or conflict UI. Different `signcolumn` widths across side-by-side panes can also produce unequal text viewports. Invalid callback results and invalid options are reported and skipped. In particular, `signcolumn = "no"` hides every sign in that pane, including diagnostics, gitsigns, DAP signs, and CodeDiff's own move and conflict signs.
+
+Explorer line statistics are disabled by default because they require extra Git queries and consume space in the default 40-column explorer. Set `explorer.line_stats.enabled = true` to show Git numstat counts. Untracked files have no stats unless `count_untracked = true`; files larger than `max_untracked_bytes` are not read (1 MiB by default).
+
+Files use `+12 -4` (`bin` for binary files); group headings use `Changes (3 · +42 -8)`.
+
+Customize files with `file_format` and headings with `group_format`:
+
+```lua
+file_format = function(stats)
+  if stats.binary then
+    return { { text = "binary", kind = "binary" } }
+  end
+  return {
+    { text = stats.insertions .. " added", kind = "insertions" },
+    { text = ", " },
+    { text = stats.deletions .. " removed", kind = "deletions" },
+  }
+end,
+group_format = function(stats)
+  return {
+    { text = stats.files_changed .. " files", kind = "files" },
+    { text = ": " },
+    { text = "+" .. stats.insertions, kind = "insertions" },
+    { text = " " },
+    { text = "-" .. stats.deletions, kind = "deletions" },
+  }
+end
+```
+
+File stats contain `insertions`, `deletions`, and `binary`; group stats also contain `files_changed`. Formatters return `{ text, kind? }` segments, where `kind` is `text`, `files`, `insertions`, `deletions`, or `binary`. Segments without a kind inherit the surrounding highlight.
+
+Group totals include all displayed files but exclude unavailable and binary line counts.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 

@@ -5,6 +5,7 @@ local M = {}
 local Tree = require("codediff.ui.lib.tree")
 local Line = require("codediff.ui.lib.line")
 local config = require("codediff.config")
+local line_stats = require("codediff.ui.explorer.line_stats")
 
 -- Merge artifact patterns (created by git mergetool)
 local MERGE_ARTIFACT_PATTERNS = {
@@ -48,6 +49,29 @@ local function is_merge_artifact(path)
     end
   end
   return false
+end
+
+local function truncate_to_width(text, max_width)
+  if max_width <= 0 then
+    return ""
+  end
+  if vim.fn.strdisplaywidth(text) <= max_width then
+    return text
+  end
+
+  local ellipsis = string.rep(".", math.min(3, max_width))
+  local prefix_width = max_width - #ellipsis
+  local prefix = {}
+  local width = 0
+  for char in vim.gsplit(text, "") do
+    local char_width = vim.fn.strdisplaywidth(char)
+    if width + char_width > prefix_width then
+      return table.concat(prefix) .. ellipsis
+    end
+    prefix[#prefix + 1] = char
+    width = width + char_width
+  end
+  return text
 end
 
 -- Filter out merge artifacts from file list
@@ -106,6 +130,7 @@ function M.create_file_nodes(files, git_root, group)
         status_color = status_info.color,
         git_root = git_root,
         group = group,
+        line_stats = file.line_stats,
       },
     })
   end
@@ -271,6 +296,7 @@ function M.create_tree_file_nodes(files, git_root, group, flattenable_paths)
             git_root = git_root,
             group = group,
             indent_state = node_indent_state,
+            line_stats = file.line_stats,
           },
         })
       end
@@ -323,7 +349,14 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
   if data.type == "group" then
     -- Group header
     line:append(" ", "CodeDiffExplorerTreeGroup")
-    line:append(node.text, "CodeDiffExplorerTreeGroup")
+    line:append(data.label, "CodeDiffExplorerTreeGroup")
+    if #data.stat_segments > 0 then
+      line:append(" (", "CodeDiffExplorerTreeGroup")
+      for _, segment in ipairs(data.stat_segments) do
+        line:append(segment.text, segment.hl)
+      end
+      line:append(")", "CodeDiffExplorerTreeGroup")
+    end
   elseif data.type == "directory" then
     -- Directory node (tree view mode) - with indent markers
     local indent = build_indent_markers(data.indent_state)
@@ -386,6 +419,14 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     -- Status symbol at the end (e.g., "M", "D", "??")
     local status_symbol = data.status_symbol or ""
 
+    -- calculate width of stats
+    local line_stats_options = explorer_config.line_stats or {}
+    local stat_segments = line_stats_options.enabled and line_stats.build_file_segments(data.line_stats, line_stats_options) or {}
+    local stats_width = 0
+    for _, segment in ipairs(stat_segments) do
+      stats_width = stats_width + vim.fn.strdisplaywidth(segment.text)
+    end
+
     -- Split path into filename and directory
     local full_path = data.path or node.text
     local filename = full_path:match("([^/]+)$") or full_path
@@ -395,39 +436,24 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     -- Calculate how much width we've used and reserve for status
     local status_margin = config.options.explorer.status_right_margin or 1
     local used_width = vim.fn.strdisplaywidth(indent) + vim.fn.strdisplaywidth(icon_part)
+    local stats_reserve = stats_width > 0 and stats_width + 1 or 0
     -- Reserve = symbol + 2 cells of minimum gap from content + configurable trailing margin
     local status_reserve = vim.fn.strdisplaywidth(status_symbol) + 2 + status_margin
-    local available_for_content = max_width - used_width - status_reserve
+    local available_for_content = max_width - used_width - stats_reserve - status_reserve
 
-    -- Show: filename + full directory path, truncate directory from left if needed
+    -- Show: filename + full directory path within the space reserved for content
     local filename_len = vim.fn.strdisplaywidth(filename)
     local directory_len = vim.fn.strdisplaywidth(directory)
     local space_len = (directory_len > 0) and 1 or 0
 
-    if filename_len + space_len + directory_len > available_for_content then
-      -- Truncate directory from the right (keep the start)
+    if filename_len > available_for_content then
+      filename = truncate_to_width(filename, available_for_content)
+      directory = ""
+      space_len = 0
+    elseif filename_len + space_len + directory_len > available_for_content then
       local available_for_dir = available_for_content - filename_len - space_len
-      if available_for_dir > 3 then
-        local ellipsis = "..."
-        local chars_to_keep = available_for_dir - vim.fn.strdisplaywidth(ellipsis)
-
-        -- Truncate directory by display width, not byte index
-        local byte_pos = 0
-        local accumulated_width = 0
-        for char in vim.gsplit(directory, "") do
-          local char_width = vim.fn.strdisplaywidth(char)
-          if accumulated_width + char_width > chars_to_keep then
-            break
-          end
-          accumulated_width = accumulated_width + char_width
-          byte_pos = byte_pos + #char
-        end
-        directory = directory:sub(1, byte_pos) .. ellipsis
-      else
-        -- Not enough space for directory, just show filename
-        directory = ""
-        space_len = 0
-      end
+      directory = available_for_dir > 3 and truncate_to_width(directory, available_for_dir) or ""
+      space_len = directory ~= "" and 1 or 0
     end
 
     -- Append filename (normal weight) and directory (dimmed)
@@ -441,6 +467,15 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
     local content_len = vim.fn.strdisplaywidth(filename) + space_len + vim.fn.strdisplaywidth(directory)
     local padding_needed = math.max(2, available_for_content - content_len + 2)
     line:append(string.rep(" ", padding_needed), get_hl("Normal"))
+
+    -- render stats
+    for _, segment in ipairs(stat_segments) do
+      line:append(segment.text, get_hl(segment.hl))
+    end
+    if stats_width > 0 then
+      line:append(" ", get_hl("Normal"))
+    end
+
     line:append(status_symbol, get_hl(data.status_color))
     if status_margin > 0 then
       line:append(string.rep(" ", status_margin), get_hl("Normal"))
