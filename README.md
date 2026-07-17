@@ -238,7 +238,7 @@ gutter_signs = {
   unchanged_priority = nil,
 }
 
--- Hide signs below priority 99 on unchanged lines.
+-- Hide other signs with lower priorities.
 gutter_signs = {
   changed_priority = 100,
   unchanged_priority = 7,
