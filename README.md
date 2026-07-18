@@ -404,7 +404,7 @@ The callback receives the selected Explorer row as `ctx.entry`:
 
 Directory and group `files` use the normalized `{ path, old_path, group, status, stats }` shape. `stats` is `nil` when line statistics are disabled. `ctx.redraw()` renders the existing tree again without rebuilding nodes, changing selection or fold state, or running Git. `ctx.refresh()` starts the normal asynchronous Explorer refresh. Both functions become no-ops after the Explorer closes. Custom mappings override matching built-ins, appear in the `g?` keymap help, and are restored or removed with the Explorer lifecycle.
 
-The C library will be downloaded automatically on first use. No `build` step needed!
+The C library is built locally and cached automatically on first use.
 
 ### Native gutter signs
 
