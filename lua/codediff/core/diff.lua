@@ -19,26 +19,22 @@ else
 end
 
 -- Build versioned library filename
-local path_util = require("codediff.core.path")
-local plugin_root = path_util.get_plugin_root()
+local local_builder = require("codediff.core.local_builder")
+local plugin_root = local_builder.get_install_dir()
 local lib_name = string.format("libvscode_diff_%s.%s", VERSION, lib_ext)
 local lib_path = plugin_root .. "/" .. lib_name
 
 -- Check if library exists or needs update, if so, install/update it
 -- Skip auto-installation if explicitly disabled (e.g., in tests where library is already built)
-local installer = require("codediff.core.installer")
+local installer = local_builder
 if not vim.env.VSCODE_DIFF_NO_AUTO_INSTALL and installer.needs_update() then
   local success, err = installer.install({ silent = false })
   if not success then
     error(
       string.format(
-        "libvscode-diff not found and automatic installation failed: %s\n"
-          .. "Troubleshooting:\n"
-          .. "1. Check that curl or wget is installed\n"
-          .. "2. Verify internet connectivity to github.com\n"
-          .. "3. Try manual install: :CodeDiff install!\n"
-          .. "4. Or build from source: run 'make' (Unix) or 'build.cmd' (Windows)\n"
-          .. "5. Download manually from: https://github.com/esmuellert/vscode-diff.nvim/releases",
+        "libvscode-diff not found and automatic local build failed: %s\n"
+          .. "Install a supported C compiler and retry :CodeDiff install.\n"
+          .. "Linux/macOS: cc, GCC, or Clang. Windows: MSVC, Clang, or MinGW-w64.",
         err or "unknown error"
       )
     )
