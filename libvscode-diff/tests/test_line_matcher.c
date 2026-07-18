@@ -90,6 +90,34 @@ static bool test_threshold_boundary(void) {
   return true;
 }
 
+static bool test_high_entropy_boundary(void) {
+  unsigned char left[256];
+  unsigned char right[256];
+  for (int index = 0; index < 255; index++) {
+    left[index] = (unsigned char)(index + 1);
+    right[index] = (unsigned char)(index < 254 ? index + 1 : 1);
+  }
+  left[255] = '\0';
+  right[255] = '\0';
+  const char *left_lines[] = {(const char *)left};
+  const char *right_lines[] = {(const char *)right};
+  MatchCase cases[] = {
+      {"high entropy right sparse", LINE_MATCHER_SIMILARITY, left_lines, 1,
+       right_lines, 1, 508.0 / 510.0, 1},
+      {"high entropy left sparse", LINE_MATCHER_SIMILARITY, right_lines, 1,
+       left_lines, 1, 508.0 / 510.0, 1},
+  };
+  for (int index = 0; index < 2; index++) {
+    bool hit_timeout = false;
+    SequenceDiffArray *matches = run_case(&cases[index], &hit_timeout);
+    ASSERT(matches != NULL, cases[index].name);
+    ASSERT(!hit_timeout, cases[index].name);
+    ASSERT(matches->count == cases[index].expected_count, cases[index].name);
+    sequence_diff_array_free(matches);
+  }
+  return true;
+}
+
 static bool test_tie_order(void) {
   const char *original[] = {"same", "same"};
   const char *modified[] = {"same", "same"};
@@ -141,6 +169,7 @@ static bool test_timeout(void) {
 
 int main(void) {
   bool passed = test_strategies() && test_threshold_boundary() &&
-                test_tie_order() && test_timeout();
+                test_high_entropy_boundary() && test_tie_order() &&
+                test_timeout();
   return passed ? 0 : 1;
 }

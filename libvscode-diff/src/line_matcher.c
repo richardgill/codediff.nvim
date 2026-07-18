@@ -7,6 +7,9 @@ typedef struct {
   const unsigned char *text;
   int length;
   int frequency[256];
+  // Each distinct byte is recorded once so overlap can scan only the sparser line.
+  unsigned char frequency_bytes[256];
+  int frequency_count;
 } LineMetadata;
 
 typedef struct {
@@ -78,7 +81,10 @@ static LineMetadata *create_metadata(const char **lines, int start, int end) {
     metadata[index].text = text;
     metadata[index].length = (int)strlen((const char *)text);
     for (int offset = 0; offset < metadata[index].length; offset++) {
-      metadata[index].frequency[text[offset]]++;
+      unsigned char byte = text[offset];
+      if (metadata[index].frequency[byte]++ == 0) {
+        metadata[index].frequency_bytes[metadata[index].frequency_count++] = byte;
+      }
     }
   }
   return metadata;
@@ -86,8 +92,12 @@ static LineMetadata *create_metadata(const char **lines, int start, int end) {
 
 static int frequency_overlap(const LineMetadata *left,
                              const LineMetadata *right) {
+  const LineMetadata *sparse = left->frequency_count < right->frequency_count
+                                   ? left
+                                   : right;
   int overlap = 0;
-  for (int byte = 0; byte < 256; byte++) {
+  for (int index = 0; index < sparse->frequency_count; index++) {
+    unsigned char byte = sparse->frequency_bytes[index];
     overlap += left->frequency[byte] < right->frequency[byte]
                    ? left->frequency[byte]
                    : right->frequency[byte];
