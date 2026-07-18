@@ -8,17 +8,38 @@ local highlights = require("codediff.ui.highlights")
 
 local function reset_codediff()
   -- Wipe any cached CodeDiff highlights so each test starts clean
-  pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineInsert", {})
-  pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineChange", {})
-  pcall(vim.api.nvim_set_hl, 0, "CodeDiffLineDelete", {})
-  pcall(vim.api.nvim_set_hl, 0, "CodeDiffCharInsert", {})
-  pcall(vim.api.nvim_set_hl, 0, "CodeDiffCharDelete", {})
+  local groups = {
+    "CodeDiffLineInsert",
+    "CodeDiffLineChange",
+    "CodeDiffLineDelete",
+    "CodeDiffCharInsert",
+    "CodeDiffCharDelete",
+    "CodeDiffExplorerStat",
+    "CodeDiffExplorerStatFiles",
+    "CodeDiffExplorerStatInsertions",
+    "CodeDiffExplorerStatDeletions",
+    "CodeDiffExplorerStatBinary",
+  }
+  for _, group in ipairs(groups) do
+    pcall(vim.api.nvim_set_hl, 0, group, {})
+  end
   config.options = vim.deepcopy(config.defaults)
   require("codediff").setup({})
 end
 
 describe("highlights.lua color derivation", function()
   before_each(reset_codediff)
+
+  it("links explorer stats to semantic foreground highlights", function()
+    highlights.setup()
+
+    local expected_insertions = vim.api.nvim_get_hl(0, { name = "Added", link = false }).fg and "Added" or "DiagnosticOk"
+    local expected_deletions = vim.api.nvim_get_hl(0, { name = "Removed", link = false }).fg and "Removed" or "DiagnosticError"
+    assert.equals("Number", vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerStatFiles", link = true }).link)
+    assert.equals(expected_insertions, vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerStatInsertions", link = true }).link)
+    assert.equals(expected_deletions, vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerStatDeletions", link = true }).link)
+    assert.equals("NonText", vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerStatBinary", link = true }).link)
+  end)
 
   it("reads bg directly for colorschemes that use bg-based diff highlights", function()
     -- Mimic the default convention: DiffAdd uses bg + (optional) fg, no reverse
@@ -46,12 +67,9 @@ describe("highlights.lua color derivation", function()
     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
     local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
-    assert.are.equal(0x00af5f, insert.bg,
-      "Insert bg should come from DiffAdd.fg when reverse=true")
-    assert.are.equal(0x005faf, change.bg,
-      "Change bg should come from DiffChange.fg when reverse=true")
-    assert.are.equal(0xd70000, delete.bg,
-      "Delete bg should come from DiffDelete.fg when reverse=true")
+    assert.are.equal(0x00af5f, insert.bg, "Insert bg should come from DiffAdd.fg when reverse=true")
+    assert.are.equal(0x005faf, change.bg, "Change bg should come from DiffChange.fg when reverse=true")
+    assert.are.equal(0xd70000, delete.bg, "Delete bg should come from DiffDelete.fg when reverse=true")
   end)
 
   it("honors configured line_change colors", function()
