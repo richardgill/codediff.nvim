@@ -129,6 +129,19 @@ function M.equal_line_count(context)
   return mappings
 end
 
+function M.vscode(context)
+  if #context.original_lines == 0 and #context.modified_lines == 0 then
+    return {}
+  end
+
+  return {
+    {
+      original = { start_index = 1, end_index = #context.original_lines + 1 },
+      modified = { start_index = 1, end_index = #context.modified_lines + 1 },
+    },
+  }
+end
+
 function M.none(_context)
   return {}
 end

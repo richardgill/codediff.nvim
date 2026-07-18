@@ -191,36 +191,96 @@ end
 -- Step 3: Filler Line Calculation
 -- ============================================================================
 
-local function append_filler(fillers, original_start, original_end, modified_start, modified_end)
-  local original_count = original_end - original_start
-  local modified_count = modified_end - modified_start
+local function append_filler_counts(fillers, original_count, modified_count, original_after_line, modified_after_line)
   if original_count > modified_count then
     fillers[#fillers + 1] = {
       buffer = "modified",
-      after_line = modified_end - 1,
+      after_line = modified_after_line,
       count = original_count - modified_count,
     }
   elseif modified_count > original_count then
     fillers[#fillers + 1] = {
       buffer = "original",
-      after_line = original_end - 1,
+      after_line = original_after_line,
       count = modified_count - original_count,
     }
   end
 end
 
-local function calculate_fillers(mapping)
+local function append_filler(fillers, original_start, original_end, modified_start, modified_end)
+  append_filler_counts(fillers, original_end - original_start, modified_end - modified_start, original_end - 1, modified_end - 1)
+end
+
+local function mappings_cover_change(mapping)
+  local original_line = mapping.original.start_line
+  local modified_line = mapping.modified.start_line
+  for _, line_mapping in ipairs(mapping.line_mappings) do
+    if line_mapping.original.start_line ~= original_line or line_mapping.modified.start_line ~= modified_line then
+      return false
+    end
+    original_line = line_mapping.original.end_line
+    modified_line = line_mapping.modified.end_line
+  end
+  return original_line == mapping.original.end_line and modified_line == mapping.modified.end_line
+end
+
+local function append_inner_alignment(fillers, state, original_end, modified_end)
+  if original_end < state.original_line or modified_end < state.modified_line then
+    return
+  end
+  if not state.first and (original_end == state.original_line or modified_end == state.modified_line) then
+    return
+  end
+
+  state.first = false
+  append_filler(fillers, state.original_line, original_end, state.modified_line, modified_end)
+  state.original_line = original_end
+  state.modified_line = modified_end
+end
+
+local function calculate_inner_change_fillers(mapping, original_lines)
+  local original_count = mapping.original.end_line - mapping.original.start_line
+  local modified_count = mapping.modified.end_line - mapping.modified.start_line
+  if #mapping.inner_changes == 0 then
+    local fillers = {}
+    append_filler_counts(fillers, original_count, modified_count, mapping.original.start_line - 1, mapping.modified.start_line - 1)
+    return fillers
+  end
+
+  local fillers = {}
+  local state = {
+    original_line = mapping.original.start_line,
+    modified_line = mapping.modified.start_line,
+    first = true,
+  }
+  for _, inner in ipairs(mapping.inner_changes) do
+    if inner.original.start_col > 1 and inner.modified.start_col > 1 then
+      append_inner_alignment(fillers, state, inner.original.start_line, inner.modified.start_line)
+    end
+
+    local original_line_length = original_lines[inner.original.end_line] and #original_lines[inner.original.end_line] or 0
+    if inner.original.end_col <= original_line_length then
+      append_inner_alignment(fillers, state, inner.original.end_line, inner.modified.end_line)
+    end
+  end
+  append_inner_alignment(fillers, state, mapping.original.end_line, mapping.modified.end_line)
+  return fillers
+end
+
+local function calculate_fillers(mapping, original_lines)
+  if mappings_cover_change(mapping) then
+    return calculate_inner_change_fillers(mapping, original_lines)
+  end
+
   local fillers = {}
   local original_line = mapping.original.start_line
   local modified_line = mapping.modified.start_line
-
   for _, line_mapping in ipairs(mapping.line_mappings) do
     append_filler(fillers, original_line, line_mapping.original.start_line, modified_line, line_mapping.modified.start_line)
     append_filler(fillers, line_mapping.original.start_line, line_mapping.original.end_line, line_mapping.modified.start_line, line_mapping.modified.end_line)
     original_line = line_mapping.original.end_line
     modified_line = line_mapping.modified.end_line
   end
-
   append_filler(fillers, original_line, mapping.original.end_line, modified_line, mapping.modified.end_line)
   return fillers
 end
@@ -265,7 +325,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
       end
     end
 
-    local fillers = calculate_fillers(mapping)
+    local fillers = calculate_fillers(mapping, original_lines)
 
     for _, filler in ipairs(fillers) do
       if filler.buffer == "original" then

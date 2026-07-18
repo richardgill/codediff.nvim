@@ -49,6 +49,50 @@ describe("Line matchers", function()
     end)
   end
 
+  local vscode_cases = {
+    {
+      name = "maps an entire mixed block",
+      context = { original_lines = { "one", "two" }, modified_lines = { "ONE" } },
+      expected = {
+        {
+          original = { start_index = 1, end_index = 3 },
+          modified = { start_index = 1, end_index = 2 },
+        },
+      },
+    },
+    {
+      name = "maps an entire pure insertion",
+      context = { original_lines = {}, modified_lines = { "one", "two" } },
+      expected = {
+        {
+          original = { start_index = 1, end_index = 1 },
+          modified = { start_index = 1, end_index = 3 },
+        },
+      },
+    },
+    {
+      name = "maps an entire pure deletion",
+      context = { original_lines = { "one", "two" }, modified_lines = {} },
+      expected = {
+        {
+          original = { start_index = 1, end_index = 3 },
+          modified = { start_index = 1, end_index = 1 },
+        },
+      },
+    },
+    {
+      name = "returns no mapping for an empty block",
+      context = { original_lines = {}, modified_lines = {} },
+      expected = {},
+    },
+  }
+
+  for _, test_case in ipairs(vscode_cases) do
+    it(test_case.name, function()
+      assert.same(test_case.expected, line_matchers.vscode(test_case.context))
+    end)
+  end
+
   it("uses a configurable similarity threshold", function()
     local similar_context = {
       original_lines = { "cat" },
@@ -173,6 +217,19 @@ describe("Line matchers", function()
       assert.same(test_case.expected_modified, result.changes[1].line_mappings[1].modified)
     end)
   end
+
+  it("preserves VS Code character mappings for pure changes", function()
+    local result = diff.compute_diff({ "before", "after" }, { "before", "added", "after" }, {
+      line_matcher = line_matchers.vscode,
+    })
+
+    assert.same({
+      {
+        original = { start_line = 2, start_col = 1, end_line = 2, end_col = 1 },
+        modified = { start_line = 2, start_col = 1, end_line = 3, end_col = 1 },
+      },
+    }, result.changes[1].inner_changes)
+  end)
 
   it("omits character changes when matching is disabled", function()
     local result = diff.compute_diff({ "old value" }, { "new value" }, {

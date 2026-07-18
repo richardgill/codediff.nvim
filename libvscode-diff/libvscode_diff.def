@@ -3,5 +3,7 @@ EXPORTS
     compute_diff
     compute_line_alignments
     free_lines_diff
+    free_range_mapping_array
     free_sequence_diff_array
+    refine_diff_char_level
     get_version

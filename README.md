@@ -268,6 +268,16 @@ require("codediff").setup({
 })
 ```
 
+For VS Code-style matching, refine whole changed blocks, including splits and merges:
+
+```lua
+require("codediff").setup({
+  diff = {
+    line_matcher = line_matchers.vscode,
+  },
+})
+```
+
 Custom callbacks receive one changed block and return ordered, non-overlapping line range mappings. Indices are 1-based within the callback arrays and end indices are exclusive:
 
 ```lua

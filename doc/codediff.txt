@@ -161,6 +161,7 @@ Other built-ins:
 >lua
   line_matchers.equal_line_count  -- GitHub-style: pair positionally only for equal counts
   line_matchers.none              -- Disable character-level matching
+  line_matchers.vscode            -- VS Code-style: refine whole blocks, including splits and merges
 <
 
 A custom matcher receives `original_lines`, `modified_lines`,

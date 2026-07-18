@@ -97,6 +97,18 @@ ffi.cdef([[
   } RangeMapping;
 
   typedef struct {
+    RangeMapping* mappings;
+    int count;
+    int capacity;
+  } RangeMappingArray;
+
+  typedef struct {
+    bool consider_whitespace_changes;
+    bool extend_to_subwords;
+    int timeout_ms;
+  } CharLevelOptions;
+
+  typedef struct {
     LineRange original;
     LineRange modified;
     RangeMapping* inner_changes;
@@ -153,7 +165,18 @@ ffi.cdef([[
     bool* hit_timeout
   );
 
+  RangeMappingArray* refine_diff_char_level(
+    const SequenceDiff* line_diff,
+    const char** original_lines,
+    int original_count,
+    const char** modified_lines,
+    int modified_count,
+    const CharLevelOptions* options,
+    bool* hit_timeout
+  );
+
   void free_lines_diff(LinesDiff* diff);
+  void free_range_mapping_array(RangeMappingArray* mappings);
   void free_sequence_diff_array(SequenceDiffArray* diff);
   const char* get_version(void);
 ]])
@@ -279,10 +302,15 @@ local function compute_native_diff(original_lines, modified_lines, options)
 end
 
 local function append_change(changes, original_start, original_end, modified_start, modified_end)
+  local line_block = {
+    original = { start_line = original_start, end_line = original_end },
+    modified = { start_line = modified_start, end_line = modified_end },
+  }
   local previous = changes[#changes]
   if previous and previous.original.end_line >= original_start and previous.modified.end_line >= modified_start then
     previous.original.end_line = math.max(previous.original.end_line, original_end)
     previous.modified.end_line = math.max(previous.modified.end_line, modified_end)
+    previous.line_blocks[#previous.line_blocks + 1] = line_block
     return
   end
 
@@ -291,6 +319,7 @@ local function append_change(changes, original_start, original_end, modified_sta
     modified = { start_line = modified_start, end_line = modified_end },
     inner_changes = {},
     line_mappings = {},
+    line_blocks = { line_block },
   }
 end
 
@@ -350,15 +379,6 @@ local function slice_lines(lines, start_index, end_index)
   return result
 end
 
-local function offset_char_range(range, line_offset)
-  return {
-    start_line = range.start_line + line_offset,
-    start_col = range.start_col,
-    end_line = range.end_line + line_offset,
-    end_col = range.end_col,
-  }
-end
-
 local function validate_line_range(range, line_count, label)
   if type(range) ~= "table" then
     error(label .. " must be a table")
@@ -408,38 +428,42 @@ local function absolute_line_range(range, start_line)
   }
 end
 
--- Compute character changes for a line-range mapping and translate them to absolute file positions.
-local function compute_mapping_char_changes(context, mapping, absolute, options)
-  local mapping_diff = compute_native_diff(
-    slice_lines(context.original_lines, mapping.original.start_index, mapping.original.end_index),
-    slice_lines(context.modified_lines, mapping.modified.start_index, mapping.modified.end_index),
-    {
-      ignore_trim_whitespace = options.ignore_trim_whitespace,
-      max_computation_time_ms = options.max_computation_time_ms,
-      extend_to_subwords = options.extend_to_subwords,
-      compute_moves = false,
-    }
-  )
-  local inner_changes = {}
+-- Compute absolute character changes for one line-range mapping.
+local function compute_mapping_char_changes(original_lines, modified_lines, mapping, options)
+  local c_orig, orig_count = lua_to_c_strings(original_lines)
+  local c_mod, mod_count = lua_to_c_strings(modified_lines)
+  local c_mapping = ffi.new("SequenceDiff")
+  c_mapping.seq1_start = mapping.original.start_line - 1
+  c_mapping.seq1_end = mapping.original.end_line - 1
+  c_mapping.seq2_start = mapping.modified.start_line - 1
+  c_mapping.seq2_end = mapping.modified.end_line - 1
 
-  for _, change in ipairs(mapping_diff.changes) do
-    for _, inner in ipairs(change.inner_changes) do
-      inner_changes[#inner_changes + 1] = {
-        original = offset_char_range(inner.original, absolute.original.start_line - 1),
-        modified = offset_char_range(inner.modified, absolute.modified.start_line - 1),
-      }
-    end
+  local c_options = ffi.new("CharLevelOptions")
+  c_options.consider_whitespace_changes = not options.ignore_trim_whitespace
+  c_options.extend_to_subwords = options.extend_to_subwords or false
+  c_options.timeout_ms = options.max_computation_time_ms or 5000
+
+  local hit_timeout = ffi.new("bool[1]")
+  local c_mappings = lib.refine_diff_char_level(c_mapping, c_orig, orig_count, c_mod, mod_count, c_options, hit_timeout)
+  if c_mappings == nil then
+    error("refine_diff_char_level returned NULL")
   end
 
-  return inner_changes, mapping_diff.hit_timeout
+  local inner_changes = {}
+  for index = 0, c_mappings.count - 1 do
+    inner_changes[#inner_changes + 1] = range_mapping_to_lua(c_mappings.mappings[index])
+  end
+
+  lib.free_range_mapping_array(c_mappings)
+  return inner_changes, hit_timeout[0]
 end
 
-local function apply_line_matcher(change, original_lines, modified_lines, matcher, options)
+local function apply_line_matcher(change, line_block, original_lines, modified_lines, matcher, options)
   local context = {
-    original_lines = slice_lines(original_lines, change.original.start_line, change.original.end_line),
-    modified_lines = slice_lines(modified_lines, change.modified.start_line, change.modified.end_line),
-    original_start_line = change.original.start_line,
-    modified_start_line = change.modified.start_line,
+    original_lines = slice_lines(original_lines, line_block.original.start_line, line_block.original.end_line),
+    modified_lines = slice_lines(modified_lines, line_block.modified.start_line, line_block.modified.end_line),
+    original_start_line = line_block.original.start_line,
+    modified_start_line = line_block.modified.start_line,
   }
   local mappings = matcher(context)
   validate_line_mappings(mappings, context)
@@ -447,10 +471,10 @@ local function apply_line_matcher(change, original_lines, modified_lines, matche
   local hit_timeout = false
   for _, mapping in ipairs(mappings) do
     local refined_mapping = {
-      original = absolute_line_range(mapping.original, change.original.start_line),
-      modified = absolute_line_range(mapping.modified, change.modified.start_line),
+      original = absolute_line_range(mapping.original, line_block.original.start_line),
+      modified = absolute_line_range(mapping.modified, line_block.modified.start_line),
     }
-    local inner_changes, mapping_hit_timeout = compute_mapping_char_changes(context, mapping, refined_mapping, options)
+    local inner_changes, mapping_hit_timeout = compute_mapping_char_changes(original_lines, modified_lines, refined_mapping, options)
     refined_mapping.inner_changes = inner_changes
     change.line_mappings[#change.line_mappings + 1] = refined_mapping
     vim.list_extend(change.inner_changes, inner_changes)
@@ -471,7 +495,10 @@ function M.compute_diff(original_lines, modified_lines, options)
   end
 
   for _, change in ipairs(changes) do
-    hit_timeout = apply_line_matcher(change, original_lines, modified_lines, matcher, options) or hit_timeout
+    for _, line_block in ipairs(change.line_blocks) do
+      hit_timeout = apply_line_matcher(change, line_block, original_lines, modified_lines, matcher, options) or hit_timeout
+    end
+    change.line_blocks = nil
   end
 
   local moves = {}
@@ -487,6 +514,8 @@ function M.compute_diff(original_lines, modified_lines, options)
     hit_timeout = hit_timeout,
   }
 end
+
+M._compute_native_diff = compute_native_diff
 
 -- Get library version
 function M.get_version()
