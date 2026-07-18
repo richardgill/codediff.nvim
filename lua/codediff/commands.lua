@@ -774,7 +774,7 @@ function M.vscode_diff(opts)
     -- :CodeDiff install or :CodeDiff install!
     -- Handle both :CodeDiff! install and :CodeDiff install!
     local force = opts.bang or subcommand == "install!"
-    local installer = require("codediff.core.installer")
+    local installer = require("codediff.core.local_builder")
 
     if force then
       vim.notify("Reinstalling libvscode-diff...", vim.log.levels.INFO)
