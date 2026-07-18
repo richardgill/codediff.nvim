@@ -1,5 +1,4 @@
-vim.opt.runtimepath:prepend(vim.fn.getcwd())
-vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
+dofile("benchmarks/bootstrap.lua")
 
 vim.cmd("runtime plugin/codediff.lua")
 require("codediff").setup({

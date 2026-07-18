@@ -1,20 +1,24 @@
-vim.opt.runtimepath:prepend(vim.fn.getcwd())
-vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
+dofile("benchmarks/bootstrap.lua")
 
 local diff = require("codediff.core.diff")
 local fixture_data = dofile("benchmarks/fixtures.lua")
 local harness = dofile("benchmarks/harness.lua")
+local normalize = dofile("benchmarks/normalize.lua")
 
 local validate = function(case, result)
   assert(type(result) == "table", case.name .. ": compute_diff returned no result")
   assert(result.hit_timeout == false, case.name .. ": compute_diff timed out")
   assert(type(result.changes) == "table", case.name .. ": changes are missing")
   assert(type(result.moves) == "table" and #result.moves == 0, case.name .. ": unexpected moves")
-  assert(#result.changes == case.expected_changes, case.name .. ": unexpected change count")
+  assert(#result.changes == case.expected_changes, string.format("%s: expected %d changes, got %d", case.name, case.expected_changes, #result.changes))
 end
 
 local run = function(case)
   return diff.compute_diff(case.original, case.modified, fixture_data.diff_options)
+end
+
+local hash_result = function(_, result)
+  return normalize.hash_lines_diff(result)
 end
 
 local print_result = function(case, stats)
@@ -35,6 +39,7 @@ local main = function()
     cases = fixture_data.cases,
     run = run,
     validate = validate,
+    hash_result = hash_result,
     print_result = print_result,
   })
 end
