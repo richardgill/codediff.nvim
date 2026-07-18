@@ -133,6 +133,16 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       focus_on_select = false,  -- Jump to modified pane after selecting a file (default: stay in explorer)
       auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
       status_right_margin = 1,  -- Trailing cells between status symbol (M/A/D) and right edge; increase if Nerd Font icons clip it
+      line_stats = {
+        enabled = false,         -- Fetch and show Git line statistics
+        count_untracked = false, -- Count untracked file lines as insertions
+        max_untracked_bytes = 1024 * 1024, -- Skip larger untracked files
+      },
+      formatters = {
+        file = nil,   -- Optional function(ctx) -> line layout; nil uses the built-in formatter
+        folder = nil, -- Optional function(ctx) -> line layout; nil uses the built-in formatter
+        group = nil,  -- Optional function(ctx) -> line layout; nil uses the built-in formatter
+      },
       visible_groups = {       -- Which groups to show (can be toggled at runtime)
         staged = true,
         unstaged = true,
@@ -183,6 +193,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
         restore = "X",      -- Discard changes (restore file)
         toggle_changes = "gu",  -- Toggle Changes (unstaged) group visibility
         toggle_staged = "gs",   -- Toggle Staged Changes group visibility
+        custom = {}, -- Additional { key, desc, callback } explorer keymaps
         -- Fold keymaps (Vim-style)
         fold_open = "zo",           -- Open fold (expand current node)
         fold_open_recursive = "zO", -- Open fold recursively (expand all descendants)
@@ -228,6 +239,98 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 ```
 
 `diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
+Explorer line statistics are disabled by default because they require extra Git queries and consume space in the default 40-column explorer. Set `explorer.line_stats.enabled = true` to show Git numstat counts. Untracked files have no stats unless `count_untracked = true`; files larger than `max_untracked_bytes` are not read (1 MiB by default).
+
+Files use `+12 -4` (`bin` for binary files); group headings use `Changes (3 · +42 -8)`. Aggregate folder and group stats contain `files_changed`, `insertions`, `deletions`, `binary_files`, and `unavailable_files`. Binary and unavailable files count toward `files_changed` but not line totals.
+
+#### Explorer line formatters
+
+`explorer.formatters.file`, `folder`, and `group` can replace the complete corresponding explorer line. Each receives a context and returns a layout:
+
+```lua
+{
+  left = {
+    {
+      segments = { { text = "name.lua", hl = "Normal" } },
+      truncate_priority = 2,
+    },
+  },
+  right = {
+    {
+      segments = { { text = "M", hl = "CodeDiffStatusModified" } },
+    },
+  },
+  min_gap = 2,
+}
+```
+
+A region contains styled `segments`. A numeric `truncate_priority` makes it truncatable; regions without one stay fixed unless the fixed content itself cannot fit. Lower priorities truncate first. The renderer measures display cells, truncates regions with `...`, right-aligns `right`, and preserves at least `min_gap` cells when space permits. The built-in file formatter truncates directory, filename, then stats; status remains fixed. Folder names and group summaries are also truncatable.
+
+Each segment is `{ text = string, hl? = highlight }`. `hl` accepts a Neovim highlight group, a `#RGB`/`#RRGGBB` foreground color, or a highlight definition such as `{ fg = "#3fb950", bold = true }`. Omitted `hl` uses `Normal`; selected file lines retain their selection background.
+
+All contexts include `file_count` and `stats`; `stats` is `nil` when line statistics are disabled. File contexts add `path`, `filename`, `directory`, `old_path`, `group`, `status`, `status_code`, `status_hl`, `status_right_margin`, `indent`, `indent_hl`, `icon`, and `icon_hl`. Folder contexts add `name`, `path`, `group`, `files`, `indent`, `indent_hl`, `icon`, `icon_hl`, and `expanded`. Group contexts add `name`, `label`, `files`, and `expanded`.
+
+Folder and group `files` contain one entry for each file, using the consistent `{ path, old_path, group, status, stats }` shape. This lets formatters derive external state across all files represented by the line without CodeDiff owning that state.
+
+See the [built-in formatter implementations](./lua/codediff/ui/explorer/formatters.lua) for complete file, folder, and group examples. The module intentionally exports `file`, `folder`, and `group`; each returns a fresh layout that users can assign directly or wrap:
+
+```lua
+local defaults = require("codediff.ui.explorer.formatters")
+local layout = defaults.folder(ctx)
+```
+
+A formatter can replace only the line type it needs:
+
+```lua
+require("codediff").setup({
+  explorer = {
+    line_stats = { enabled = true },
+    formatters = {
+      group = function(ctx)
+        local stats = ctx.stats
+        local summary = stats and string.format("%d · +%d -%d", ctx.file_count, stats.insertions, stats.deletions)
+          or tostring(ctx.file_count)
+        return {
+          left = {
+            {
+              segments = { { text = " " .. ctx.label, hl = "CodeDiffExplorerTreeGroup" } },
+              truncate_priority = 1,
+            },
+          },
+          right = {
+            {
+              segments = { { text = summary, hl = "#6cb6ff" } },
+            },
+          },
+          min_gap = 2,
+        }
+      end,
+    },
+  },
+})
+```
+
+#### Custom explorer keymaps
+
+`keymaps.explorer.custom` adds keymaps without requiring CodeDiff to understand their state or semantics. Each keymap has `key`, `desc`, and `callback`. The callback receives:
+
+```lua
+{
+  entry = {
+    kind = "file", -- "file", "directory", or "group"
+    path = "lua/codediff/init.lua",
+    old_path = nil,
+    group = "unstaged", -- "unstaged", "staged", or "conflicts"
+    status = "M",
+    stats = { insertions = 4, deletions = 2, binary = false },
+    files = nil, -- normalized file entries for directories and groups
+  },
+  redraw = function() end,
+  refresh = function() end,
+}
+```
+
+`redraw()` only reruns the configured formatters against the existing tree. It does not replace nodes or change selection or fold state, and runs no Git commands. `refresh()` performs the normal asynchronous Git refresh and rebuilds the explorer. Both safely become no-ops after the explorer closes. Custom mappings are installed after built-in mappings, so the same key replaces the built-in mapping.
 
 ### Native line matching
 
