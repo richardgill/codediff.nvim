@@ -1,10 +1,10 @@
-From 15c5dff50c35eebc067ebe022b91a3c74b7f49ce Mon Sep 17 00:00:00 2001
+From 58f85668378bfb47daf8b32c798345e0d76e5941 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 07:49:52 +0100
 Subject: [PATCH] feat: add configurable line pairing for intraline highlights
 
 ---
- README.md                           |  85 ++++++++++++
+ README.md                           |  86 +++++++++++++
  doc/codediff.txt                    |  46 +++++++
  doc/tags                            |   1 +
  libvscode-diff/libvscode_diff.def   |  12 +-
@@ -15,18 +15,18 @@ Subject: [PATCH] feat: add configurable line pairing for intraline highlights
  lua/codediff/ui/merge_alignment.lua |   4 +-
  tests/core/line_matchers_spec.lua   |  89 +++++++++++++
  tests/ui/inline_spec.lua            |   4 +-
- 11 files changed, 585 insertions(+), 128 deletions(-)
+ 11 files changed, 586 insertions(+), 128 deletions(-)
  create mode 100644 lua/codediff/line_matchers.lua
  create mode 100644 tests/core/line_matchers_spec.lua
 
 diff --git a/README.md b/README.md
-index 9bc5452..dc1672c 100644
+index 8768b9d..3b22526 100644
 --- a/README.md
 +++ b/README.md
-@@ -327,6 +327,91 @@ require("codediff").setup({
- ```
+@@ -225,6 +225,92 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
  
- `redraw()` only reruns the configured formatters against the existing tree. It does not replace nodes or change selection or fold state, and runs no Git commands. `refresh()` performs the normal asynchronous Git refresh and rebuilds the explorer. Both safely become no-ops after the explorer closes. Custom mappings are installed after built-in mappings, so the same key replaces the built-in mapping.
+ `diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
+ 
 +### Intraline line matching
 +
 +CodeDiff uses a callback to pair original and modified lines within each changed block. Paired lines use `CodeDiffLineDelete`/`CodeDiffLineInsert`, with changed text additionally using `CodeDiffCharDelete`/`CodeDiffCharInsert`. Unpaired lines use only `CodeDiffLineDelete` or `CodeDiffLineInsert`. Similarity matching with a `0.75` threshold is the default:
@@ -112,11 +112,12 @@ index 9bc5452..dc1672c 100644
 +Each line may appear in at most one pair. Omitted lines remain unpaired. Paired lines retain `CodeDiffLineInsert` or `CodeDiffLineDelete` and receive `CodeDiffCharInsert` or `CodeDiffCharDelete` over changed characters. Unpaired lines receive only their line-level highlight. Pure insertions and deletions do not invoke the matcher.
 +
 +Matchers run synchronously during rendering and automatic refreshes. Custom callbacks should avoid I/O and return quickly. `diff.max_computation_time_ms` cannot interrupt custom Lua code.
- 
++
  The C library will be downloaded automatically on first use. No `build` step needed!
  
+ ### Managing Library Installation
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 8eaabfa..3db2048 100644
+index 578bfab..fa5426e 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -149,6 +149,51 @@ the alignment rows blank:
@@ -180,10 +181,10 @@ index 8eaabfa..3db2048 100644
        conflict_result_position = "bottom",
        conflict_result_height = 30,
 diff --git a/doc/tags b/doc/tags
-index 54349e1..cadc6be 100644
+index 5ee5d4c..bf45c88 100644
 --- a/doc/tags
 +++ b/doc/tags
-@@ -12,6 +12,7 @@ codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
+@@ -10,6 +10,7 @@ codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
  codediff-history	codediff.txt	/*codediff-history*
  codediff-history-line-range	codediff.txt	/*codediff-history-line-range*
  codediff-layout	codediff.txt	/*codediff-layout*
@@ -209,19 +210,19 @@ index b253cee..c7e11f8 100644
 +    free_sequence_diff_array
 +    get_version
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 741fda7..212e32c 100644
+index 06d777b..3e2c01a 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
-@@ -2,6 +2,8 @@
+@@ -1,6 +1,8 @@
+ -- Configuration module
  local M = {}
- local explorer_formatters = require("codediff.ui.explorer.formatters")
  
 +local line_matchers = require("codediff.line_matchers")
 +
  M.defaults = {
    -- Highlight configuration
    highlights = {
-@@ -36,6 +38,7 @@ M.defaults = {
+@@ -35,6 +37,7 @@ M.defaults = {
      disable_inlay_hints = true, -- Disable inlay hints in diff windows for cleaner view
      max_computation_time_ms = 5000, -- Maximum time for diff computation (5 seconds, VSCode default)
      ignore_trim_whitespace = false, -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)

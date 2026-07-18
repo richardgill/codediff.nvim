@@ -1,4 +1,4 @@
-From fee3301329dfbfde90025d3f949b9cf9ef326bb0 Mon Sep 17 00:00:00 2001
+From fb2ee03abff6d6d6549ffed83e1a02c726458d58 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 07:25:57 +0100
 Subject: [PATCH] feat(explorer): add optional line change statistics
@@ -34,10 +34,10 @@ Subject: [PATCH] feat(explorer): add optional line change statistics
  create mode 100644 tests/ui/explorer/line_stats_spec.lua
 
 diff --git a/README.md b/README.md
-index 8768b9d..9bc5452 100644
+index 838041a..218bc8a 100644
 --- a/README.md
 +++ b/README.md
-@@ -129,6 +129,16 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -130,6 +130,16 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
        focus_on_select = false,  -- Jump to modified pane after selecting a file (default: stay in explorer)
        auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
        status_right_margin = 1,  -- Trailing cells between status symbol (M/A/D) and right edge; increase if Nerd Font icons clip it
@@ -54,7 +54,7 @@ index 8768b9d..9bc5452 100644
        visible_groups = {       -- Which groups to show (can be toggled at runtime)
          staged = true,
          unstaged = true,
-@@ -179,6 +189,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -180,6 +190,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
          restore = "X",      -- Discard changes (restore file)
          toggle_changes = "gu",  -- Toggle Changes (unstaged) group visibility
          toggle_staged = "gs",   -- Toggle Staged Changes group visibility
@@ -62,7 +62,7 @@ index 8768b9d..9bc5452 100644
          -- Fold keymaps (Vim-style)
          fold_open = "zo",           -- Open fold (expand current node)
          fold_open_recursive = "zO", -- Open fold recursively (expand all descendants)
-@@ -224,6 +235,98 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -225,6 +236,98 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
  ```
  
  `diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
@@ -159,13 +159,13 @@ index 8768b9d..9bc5452 100644
 +
 +`redraw()` only reruns the configured formatters against the existing tree. It does not replace nodes or change selection or fold state, and runs no Git commands. `refresh()` performs the normal asynchronous Git refresh and rebuilds the explorer. Both safely become no-ops after the explorer closes. Custom mappings are installed after built-in mappings, so the same key replaces the built-in mapping.
  
- The C library will be downloaded automatically on first use. No `build` step needed!
+ ### Intraline line matching
  
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 578bfab..8eaabfa 100644
+index 7e0f6db..9535989 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
-@@ -240,6 +240,16 @@ Setup entry point:
+@@ -287,6 +287,16 @@ Setup entry point:
          ignore = { ".git/**", ".jj/**" },
        },
        status_right_margin = 1,
@@ -182,7 +182,7 @@ index 578bfab..8eaabfa 100644
        visible_groups = {
          staged = true,
          unstaged = true,
-@@ -276,6 +286,7 @@ Setup entry point:
+@@ -323,6 +333,7 @@ Setup entry point:
          restore = "X",
          toggle_changes = "gu",
          toggle_staged = "gs",
@@ -190,7 +190,7 @@ index 578bfab..8eaabfa 100644
          fold_open = "zo",
          fold_open_recursive = "zO",
          fold_close = "zc",
-@@ -311,6 +322,134 @@ Setup entry point:
+@@ -358,6 +369,134 @@ Setup entry point:
    })
  <
  
@@ -323,9 +323,9 @@ index 578bfab..8eaabfa 100644
 +
 +
  ==============================================================================
- HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
+ NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
  
-@@ -366,6 +505,11 @@ Explorer & history git status highlights (customizable):
+@@ -466,6 +605,11 @@ Explorer & history git status highlights (customizable):
  - CodeDiffStatusUntracked   Untracked files (links to DiagnosticInfo)
  - CodeDiffStatusConflict    Conflicting files (links to DiagnosticError)
  - CodeDiffExplorerSelected  Selected file background (links to Visual)
@@ -338,18 +338,18 @@ index 578bfab..8eaabfa 100644
  Override in your config or colorscheme:
  >lua
 diff --git a/doc/tags b/doc/tags
-index 5ee5d4c..54349e1 100644
+index 037ac9d..0878792 100644
 --- a/doc/tags
 +++ b/doc/tags
-@@ -6,6 +6,8 @@ codediff-commands	codediff.txt	/*codediff-commands*
+@@ -5,6 +5,8 @@ codediff	codediff.txt	/*codediff*
+ codediff-commands	codediff.txt	/*codediff-commands*
  codediff-configuration	codediff.txt	/*codediff-configuration*
  codediff-events	codediff.txt	/*codediff-events*
- codediff-filler-text	codediff.txt	/*codediff-filler-text*
 +codediff-explorer-custom-keymaps	codediff.txt	/*codediff-explorer-custom-keymaps*
 +codediff-explorer-line-formatters	codediff.txt	/*codediff-explorer-line-formatters*
+ codediff-filler-text	codediff.txt	/*codediff-filler-text*
+ codediff-gutter-signs	codediff.txt	/*codediff-gutter-signs*
  codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
- codediff-history	codediff.txt	/*codediff-history*
- codediff-history-line-range	codediff.txt	/*codediff-history-line-range*
 diff --git a/lua/codediff/commands.lua b/lua/codediff/commands.lua
 index 8f69583..5a73b3c 100644
 --- a/lua/codediff/commands.lua
@@ -380,7 +380,7 @@ index 8f69583..5a73b3c 100644
          process_status(err_status, status_result, nil, nil)
        end)
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 06d777b..741fda7 100644
+index bb14171..09ab10d 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -1,5 +1,6 @@
@@ -388,9 +388,9 @@ index 06d777b..741fda7 100644
  local M = {}
 +local explorer_formatters = require("codediff.ui.explorer.formatters")
  
- M.defaults = {
-   -- Highlight configuration
-@@ -73,6 +74,16 @@ M.defaults = {
+ local line_matchers = require("codediff.line_matchers")
+ 
+@@ -77,6 +78,16 @@ M.defaults = {
      auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
      flatten_dirs = true, -- Flatten single-child directory chains in tree view (e.g., src/components/ui/)
      status_right_margin = 1, -- Trailing cells between the status symbol (M/A/D) and the right edge; increase if Nerd Font icons clip it
@@ -407,7 +407,7 @@ index 06d777b..741fda7 100644
      visible_groups = { -- Which groups to show in explorer (can be toggled at runtime)
        staged = true,
        unstaged = true,
-@@ -123,6 +134,7 @@ M.defaults = {
+@@ -127,6 +138,7 @@ M.defaults = {
        restore = "X", -- Discard changes to file (restore to index/HEAD)
        toggle_changes = "gu", -- Toggle Changes (unstaged) group visibility
        toggle_staged = "gs", -- Toggle Staged Changes group visibility
@@ -1536,10 +1536,10 @@ index b097a81..019e336 100644
  
      return tree_nodes
 diff --git a/lua/codediff/ui/highlights.lua b/lua/codediff/ui/highlights.lua
-index a9f9619..b4a884b 100644
+index 88cfd55..2811846 100644
 --- a/lua/codediff/ui/highlights.lua
 +++ b/lua/codediff/ui/highlights.lua
-@@ -240,6 +240,16 @@ function M.setup()
+@@ -245,6 +245,16 @@ function M.setup()
      return ok and hl and (hl.fg or hl.foreground)
    end
  
@@ -2105,7 +2105,7 @@ index 0000000..b7816d0
 +  end)
 +end)
 diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
-index afa9880..6e45fd6 100644
+index c81de0c..acfa318 100644
 --- a/tests/ui/highlights_spec.lua
 +++ b/tests/ui/highlights_spec.lua
 @@ -8,11 +8,21 @@ local highlights = require("codediff.ui.highlights")
@@ -2132,10 +2132,10 @@ index afa9880..6e45fd6 100644
 +  for _, group in ipairs(groups) do
 +    pcall(vim.api.nvim_set_hl, 0, group, {})
 +  end
-   config.options = vim.deepcopy(config.defaults)
-   require("codediff").setup({})
- end
-@@ -20,6 +30,17 @@ end
+   vim.cmd("highlight clear CodeDiffGutterInsert")
+   vim.cmd("highlight clear CodeDiffGutterDelete")
+   vim.cmd("highlight clear CodeDiffGutterInsertNumber")
+@@ -24,6 +34,17 @@ end
  describe("highlights.lua color derivation", function()
    before_each(reset_codediff)
  
@@ -2153,7 +2153,7 @@ index afa9880..6e45fd6 100644
    it("reads bg directly for colorschemes that use bg-based diff highlights", function()
      -- Mimic the default convention: DiffAdd uses bg + (optional) fg, no reverse
      vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x123456 })
-@@ -46,12 +67,9 @@ describe("highlights.lua color derivation", function()
+@@ -50,12 +71,9 @@ describe("highlights.lua color derivation", function()
      local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
      local change = vim.api.nvim_get_hl(0, { name = "CodeDiffLineChange", link = false })
      local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })

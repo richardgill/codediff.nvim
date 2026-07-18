@@ -1,0 +1,942 @@
+From f785b5c4f3ee1ddd272be8d74371a4a650879f48 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Sat, 18 Jul 2026 11:56:21 +0000
+Subject: [PATCH] chore: add local benchmark suites
+
+---
+ CMakeLists.txt           |   7 +-
+ Makefile                 |   7 +-
+ benchmarks/diff.lua      |  47 +++++++
+ benchmarks/fixtures.lua  | 128 +++++++++++++++++
+ benchmarks/harness.lua   | 117 ++++++++++++++++
+ benchmarks/render.lua    | 157 +++++++++++++++++++++
+ benchmarks/workflows.lua | 292 +++++++++++++++++++++++++++++++++++++++
+ docs/BENCHMARKS.md       |  29 ++++
+ docs/README.md           |   1 +
+ scripts/benchmark.sh     |  31 +++++
+ 10 files changed, 812 insertions(+), 4 deletions(-)
+ create mode 100644 benchmarks/diff.lua
+ create mode 100644 benchmarks/fixtures.lua
+ create mode 100644 benchmarks/harness.lua
+ create mode 100644 benchmarks/render.lua
+ create mode 100644 benchmarks/workflows.lua
+ create mode 100644 docs/BENCHMARKS.md
+ create mode 100755 scripts/benchmark.sh
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9b7d9a0..79b167c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -50,7 +50,7 @@ file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/Makefile"
+ # Makefile wrapper for developers (uses CMake underneath)
+ # Users: Use build.sh instead (no CMake required)
+ 
+-.PHONY: all build test test-c test-lua lint format clean help bump-patch bump-minor bump-major bump-prerelease
++.PHONY: all build benchmark test test-c test-lua lint format clean help bump-patch bump-minor bump-major bump-prerelease
+ 
+ all: build
+ 
+@@ -59,6 +59,9 @@ build:
+ \t@cmake --build build
+ \t@echo \"✓ Build successful\"
+ 
++benchmark:
++\t@./scripts/benchmark.sh
++
+ test: test-c test-lua
+ 
+ test-c: build
+@@ -91,7 +94,7 @@ bump-prerelease:
+ \t@node scripts/bump_version.mjs prerelease
+ 
+ help:
+-\t@echo \"Targets: build, test, test-c, test-lua, lint, clean, help\"
++\t@echo \"Targets: build, benchmark, test, test-c, test-lua, lint, clean, help\"
+ \t@echo \"Version: bump-patch, bump-minor, bump-major, bump-prerelease\"
+ ")
+ 
+diff --git a/Makefile b/Makefile
+index 99ec60b..25d7334 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,7 +2,7 @@
+ # Makefile wrapper for developers (uses CMake underneath)
+ # Users: Use build.sh instead (no CMake required)
+ 
+-.PHONY: all build test test-c test-lua lint format clean help bump-patch bump-minor bump-major bump-prerelease
++.PHONY: all build benchmark test test-c test-lua lint format clean help bump-patch bump-minor bump-major bump-prerelease
+ 
+ all: build
+ 
+@@ -11,6 +11,9 @@ build:
+ 	@cmake --build build
+ 	@echo "✓ Build successful"
+ 
++benchmark:
++	@./scripts/benchmark.sh
++
+ test: test-c test-lua
+ 
+ test-c: build
+@@ -43,5 +46,5 @@ bump-prerelease:
+ 	@node scripts/bump_version.mjs prerelease
+ 
+ help:
+-	@echo "Targets: build, test, test-c, test-lua, lint, clean, help"
++	@echo "Targets: build, benchmark, test, test-c, test-lua, lint, clean, help"
+ 	@echo "Version: bump-patch, bump-minor, bump-major, bump-prerelease"
+diff --git a/benchmarks/diff.lua b/benchmarks/diff.lua
+new file mode 100644
+index 0000000..eddd2c4
+--- /dev/null
++++ b/benchmarks/diff.lua
+@@ -0,0 +1,47 @@
++vim.opt.runtimepath:prepend(vim.fn.getcwd())
++vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
++
++local diff = require("codediff.core.diff")
++local fixture_data = dofile("benchmarks/fixtures.lua")
++local harness = dofile("benchmarks/harness.lua")
++
++local validate = function(case, result)
++  assert(type(result) == "table", case.name .. ": compute_diff returned no result")
++  assert(result.hit_timeout == false, case.name .. ": compute_diff timed out")
++  assert(type(result.changes) == "table", case.name .. ": changes are missing")
++  assert(type(result.moves) == "table" and #result.moves == 0, case.name .. ": unexpected moves")
++  assert(#result.changes == case.expected_changes, case.name .. ": unexpected change count")
++end
++
++local run = function(case)
++  return diff.compute_diff(case.original, case.modified, fixture_data.diff_options)
++end
++
++local print_result = function(case, stats)
++  local line_count = string.format("%d -> %d", #case.original, #case.modified)
++  print(
++    string.format("%-18s %13s %8d %8.3fms %8.3fms %8.3fms %8.3f .. %8.3fms", case.name, line_count, case.expected_changes, stats.median, stats.p95, stats.mad, stats.min, stats.max)
++  )
++end
++
++local main = function()
++  harness.run({
++    script = "benchmarks/diff.lua",
++    suite_name = "diff",
++    usage = "usage: scripts/benchmark.sh diff [--list | benchmark-name]",
++    title = "CodeDiff compute_diff benchmarks",
++    description = "Fixtures and validation are outside timed sections. Lower is better.",
++    header = string.format("%-18s %13s %8s %10s %10s %10s %19s", "benchmark", "lines", "changes", "median", "p95", "MAD", "min .. max"),
++    cases = fixture_data.cases,
++    run = run,
++    validate = validate,
++    print_result = print_result,
++  })
++end
++
++local ok, err = pcall(main)
++if not ok then
++  io.stderr:write("Benchmark error: " .. tostring(err) .. "\n")
++  os.exit(1)
++end
++vim.cmd("quit")
+diff --git a/benchmarks/fixtures.lua b/benchmarks/fixtures.lua
+new file mode 100644
+index 0000000..f2731ce
+--- /dev/null
++++ b/benchmarks/fixtures.lua
+@@ -0,0 +1,128 @@
++local M = {}
++
++M.diff_options = {
++  ignore_trim_whitespace = false,
++  max_computation_time_ms = 5000,
++  compute_moves = false,
++  extend_to_subwords = false,
++}
++
++local make_line = function(prefix, index)
++  return string.format("%s line %05d value %08x", prefix, index, (index * 2654435761) % 4294967296)
++end
++
++local make_lines = function(count, prefix, replacement)
++  local lines = {}
++  for index = 1, count do
++    lines[index] = replacement and replacement(index) or make_line(prefix, index)
++  end
++  return lines
++end
++
++local make_long_line = function(index, changed)
++  local left = string.rep(string.char(97 + (index % 20)), 4096)
++  local middle = changed and "CHANGED" or "original"
++  return string.format("%04d %s %s %s", index, left, middle, left)
++end
++
++local make_large_insertion = function()
++  local original = make_lines(6000, "insertion")
++  local modified = {}
++  for index = 1, 3000 do
++    table.insert(modified, original[index])
++  end
++  for index = 1, 1000 do
++    table.insert(modified, make_line("inserted", index))
++  end
++  for index = 3001, #original do
++    table.insert(modified, original[index])
++  end
++  return original, modified
++end
++
++local make_repeated_context = function(changed)
++  local lines = {}
++  for index = 1, 600 do
++    local value = changed and index % 100 == 0 and "changed" or "value"
++    vim.list_extend(lines, {
++      string.format("local function item_%04d()", index),
++      "  if ready then",
++      "    return " .. value,
++      "  end",
++      "end",
++    })
++  end
++  return lines
++end
++
++local insertion_original, insertion_modified = make_large_insertion()
++M.cases = {
++  {
++    name = "unchanged-large",
++    original = make_lines(10000, "stable"),
++    expected_changes = 0,
++  },
++  {
++    name = "sparse-edits",
++    original = make_lines(8000, "sparse"),
++    modified = make_lines(8000, "sparse", function(index)
++      return index % 800 == 0 and make_line("sparse replacement", index) or make_line("sparse", index)
++    end),
++    expected_changes = 10,
++  },
++  {
++    name = "large-insertion",
++    original = insertion_original,
++    modified = insertion_modified,
++    expected_changes = 1,
++  },
++  {
++    name = "repeated-context",
++    original = make_repeated_context(false),
++    modified = make_repeated_context(true),
++    expected_changes = 6,
++  },
++  {
++    name = "dense-edits",
++    original = make_lines(3000, "dense"),
++    modified = make_lines(3000, "dense", function(index)
++      return index % 2 == 0 and make_line("dense replacement", index) or make_line("dense", index)
++    end),
++    expected_changes = 1500,
++  },
++  {
++    name = "long-lines",
++    original = make_lines(240, "long", function(index)
++      return make_long_line(index, false)
++    end),
++    modified = make_lines(240, "long", function(index)
++      return make_long_line(index, index % 20 == 0)
++    end),
++    expected_changes = 12,
++  },
++  {
++    name = "unicode",
++    original = make_lines(3000, "unicode", function(index)
++      return string.format("行 %05d — café Ελληνικά 🚀", index)
++    end),
++    modified = make_lines(3000, "unicode", function(index)
++      local suffix = index % 100 == 0 and "変更 🐍" or "café Ελληνικά 🚀"
++      return string.format("行 %05d — %s", index, suffix)
++    end),
++    expected_changes = 30,
++  },
++  {
++    name = "full-rewrite",
++    original = make_lines(1000, "before"),
++    modified = make_lines(1000, "after"),
++    expected_changes = 1,
++  },
++}
++
++M.cases[1].modified = M.cases[1].original
++M.by_name = {}
++for _, case in ipairs(M.cases) do
++  M.by_name[case.name] = case
++end
++
++return M
+diff --git a/benchmarks/harness.lua b/benchmarks/harness.lua
+new file mode 100644
+index 0000000..855666f
+--- /dev/null
++++ b/benchmarks/harness.lua
+@@ -0,0 +1,117 @@
++local M = {}
++local WARMUP_COUNT = 3
++local SAMPLE_COUNT = 20
++local NS_PER_MS = 1000000
++
++local median = function(sorted)
++  local middle = math.floor(#sorted / 2)
++  if #sorted % 2 == 1 then
++    return sorted[middle + 1]
++  end
++  return (sorted[middle] + sorted[middle + 1]) / 2
++end
++
++local summarize = function(samples)
++  table.sort(samples)
++  local deviations = {}
++  local sample_median = median(samples)
++  for index, sample in ipairs(samples) do
++    deviations[index] = math.abs(sample - sample_median)
++  end
++  table.sort(deviations)
++  return {
++    median = sample_median,
++    p95 = samples[math.ceil(#samples * 0.95)],
++    mad = median(deviations),
++    min = samples[1],
++    max = samples[#samples],
++  }
++end
++
++local run_once = function(config, case)
++  local context
++  if case.setup then
++    context = case.setup()
++  elseif config.setup_case then
++    context = config.setup_case(case)
++  end
++  collectgarbage("collect")
++  local started_at = vim.uv.hrtime()
++  local result
++  if case.run then
++    result = case.run(context)
++  else
++    result = config.run(case, context)
++  end
++  local elapsed = vim.uv.hrtime() - started_at
++  if case.validate then
++    case.validate(result, context)
++  else
++    config.validate(case, result, context)
++  end
++  return elapsed / NS_PER_MS
++end
++
++local benchmark = function(config, case)
++  for _ = 1, WARMUP_COUNT do
++    run_once(config, case)
++  end
++
++  local samples = {}
++  for index = 1, SAMPLE_COUNT do
++    samples[index] = run_once(config, case)
++  end
++  return summarize(samples)
++end
++
++local get_arguments = function(script)
++  local arguments = {}
++  local found_script = false
++  for _, argument in ipairs(vim.v.argv) do
++    if found_script then
++      table.insert(arguments, argument)
++    elseif argument:sub(-#script) == script then
++      found_script = true
++    end
++  end
++  return arguments
++end
++
++local select_cases = function(cases, name, suite_name)
++  if not name then
++    return cases
++  end
++  for _, case in ipairs(cases) do
++    if case.name == name then
++      return { case }
++    end
++  end
++  error(string.format("unknown %s benchmark %q", suite_name, name))
++end
++
++function M.run(config)
++  local arguments = get_arguments(config.script)
++  if arguments[1] == "--list" then
++    for _, case in ipairs(config.cases) do
++      print(case.name)
++    end
++    return
++  end
++  if #arguments > 1 then
++    error(config.usage)
++  end
++
++  if config.setup then
++    config.setup()
++  end
++
++  print(string.format("%s (%d warmups, %d samples)", config.title, WARMUP_COUNT, SAMPLE_COUNT))
++  print(config.description)
++  print(config.header)
++
++  for _, case in ipairs(select_cases(config.cases, arguments[1], config.suite_name)) do
++    config.print_result(case, benchmark(config, case))
++  end
++end
++
++return M
+diff --git a/benchmarks/render.lua b/benchmarks/render.lua
+new file mode 100644
+index 0000000..8ff9c5b
+--- /dev/null
++++ b/benchmarks/render.lua
+@@ -0,0 +1,157 @@
++vim.opt.runtimepath:prepend(vim.fn.getcwd())
++vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
++
++local core = require("codediff.ui.core")
++local diff = require("codediff.core.diff")
++local fixture_data = dofile("benchmarks/fixtures.lua")
++local harness = dofile("benchmarks/harness.lua")
++local highlights = require("codediff.ui.highlights")
++local fixtures = {
++  sparse = fixture_data.by_name["sparse-edits"],
++  dense = fixture_data.by_name["dense-edits"],
++  full_rewrite = fixture_data.by_name["full-rewrite"],
++  large_insertion = fixture_data.by_name["large-insertion"],
++}
++
++local count_extmarks = function(fixture)
++  local buffers = { fixture.original_buf, fixture.modified_buf }
++  local namespaces = { highlights.ns_highlight, highlights.ns_filler }
++  local count = 0
++  for _, bufnr in ipairs(buffers) do
++    for _, namespace in ipairs(namespaces) do
++      count = count + #vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
++    end
++  end
++  return count
++end
++
++local clear_render = function(fixture)
++  for _, bufnr in ipairs({ fixture.original_buf, fixture.modified_buf }) do
++    vim.api.nvim_buf_clear_namespace(bufnr, highlights.ns_highlight, 0, -1)
++    vim.api.nvim_buf_clear_namespace(bufnr, highlights.ns_filler, 0, -1)
++  end
++end
++
++local render = function(fixture)
++  return core.render_diff(fixture.original_buf, fixture.modified_buf, fixture.original, fixture.modified, fixture.lines_diff)
++end
++
++local prepare_fixture = function(fixture)
++  fixture.original_buf = vim.api.nvim_create_buf(false, true)
++  fixture.modified_buf = vim.api.nvim_create_buf(false, true)
++  vim.api.nvim_buf_set_lines(fixture.original_buf, 0, -1, false, fixture.original)
++  vim.api.nvim_buf_set_lines(fixture.modified_buf, 0, -1, false, fixture.modified)
++  fixture.lines_diff = diff.compute_diff(fixture.original, fixture.modified, fixture_data.diff_options)
++  assert(fixture.lines_diff.hit_timeout == false, "fixture diff timed out")
++  assert(#fixture.lines_diff.changes == fixture.expected_changes, "unexpected fixture change count")
++
++  local result = render(fixture)
++  fixture.expected_extmarks = count_extmarks(fixture)
++  fixture.expected_fillers = result.left_fillers + result.right_fillers
++end
++
++local setup_suite = function()
++  highlights.setup()
++end
++
++local setup_case = function(case)
++  if not case.fixture.lines_diff then
++    prepare_fixture(case.fixture)
++  end
++  clear_render(case.fixture)
++  if case.rerender then
++    render(case.fixture)
++  end
++  return case.fixture
++end
++
++local run = function(_, fixture)
++  return render(fixture)
++end
++
++local validate = function(case, result, fixture)
++  assert(count_extmarks(fixture) == fixture.expected_extmarks, case.name .. ": unexpected extmark count")
++  assert(result.left_fillers + result.right_fillers == fixture.expected_fillers, case.name .. ": unexpected filler count")
++end
++
++local cases = {
++  {
++    name = "sparse-rerender",
++    fixture = fixtures.sparse,
++    rerender = true,
++  },
++  {
++    name = "dense-first-render",
++    fixture = fixtures.dense,
++  },
++  {
++    name = "dense-rerender",
++    fixture = fixtures.dense,
++    rerender = true,
++  },
++  {
++    name = "full-rewrite-rerender",
++    fixture = fixtures.full_rewrite,
++    rerender = true,
++  },
++  {
++    name = "large-insertion-rerender",
++    fixture = fixtures.large_insertion,
++    rerender = true,
++  },
++}
++
++local print_result = function(case, stats)
++  local fixture = case.fixture
++  local line_count = string.format("%d -> %d", #fixture.original, #fixture.modified)
++  print(
++    string.format(
++      "%-26s %13s %8d %9d %8d %8.3fms %8.3fms %8.3fms %8.3f .. %8.3fms",
++      case.name,
++      line_count,
++      fixture.expected_changes,
++      fixture.expected_extmarks,
++      fixture.expected_fillers,
++      stats.median,
++      stats.p95,
++      stats.mad,
++      stats.min,
++      stats.max
++    )
++  )
++end
++
++local cleanup = function()
++  for _, fixture in pairs(fixtures) do
++    for _, bufnr in ipairs({ fixture.original_buf, fixture.modified_buf }) do
++      if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
++        vim.api.nvim_buf_delete(bufnr, { force = true })
++      end
++    end
++  end
++end
++
++local main = function()
++  harness.run({
++    script = "benchmarks/render.lua",
++    suite_name = "render",
++    usage = "usage: scripts/benchmark.sh render [--list | benchmark-name]",
++    title = "CodeDiff side-by-side rendering benchmarks",
++    description = "Diff computation, buffer setup, and validation are outside timed sections. Lower is better.",
++    header = string.format("%-26s %13s %8s %9s %8s %10s %10s %10s %19s", "benchmark", "lines", "changes", "extmarks", "fillers", "median", "p95", "MAD", "min .. max"),
++    cases = cases,
++    setup = setup_suite,
++    setup_case = setup_case,
++    run = run,
++    validate = validate,
++    print_result = print_result,
++  })
++end
++
++local ok, err = xpcall(main, debug.traceback)
++cleanup()
++if not ok then
++  io.stderr:write("Rendering benchmark error: " .. tostring(err) .. "\n")
++  os.exit(1)
++end
++vim.cmd("quit")
+diff --git a/benchmarks/workflows.lua b/benchmarks/workflows.lua
+new file mode 100644
+index 0000000..87ec842
+--- /dev/null
++++ b/benchmarks/workflows.lua
+@@ -0,0 +1,292 @@
++vim.opt.runtimepath:prepend(vim.fn.getcwd())
++vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
++
++vim.cmd("runtime plugin/codediff.lua")
++require("codediff").setup({
++  diff = {
++    layout = "side-by-side",
++    cycle_hunks_across_files = false,
++  },
++})
++
++local lifecycle = require("codediff.ui.lifecycle")
++local harness = dofile("benchmarks/harness.lua")
++local fixture
++local base_tabpage
++local original_cwd = vim.fn.getcwd()
++
++local git = function(arguments)
++  local command = { "git", "-C", fixture.dir }
++  vim.list_extend(command, arguments)
++  local output = vim.fn.system(command)
++  assert(vim.v.shell_error == 0, table.concat(command, " ") .. " failed: " .. output)
++end
++
++local make_file_lines = function(file_index, changed)
++  local lines = {}
++  for line = 1, 1200 do
++    local value = changed and line % 120 == 0 and "modified" or "original"
++    lines[line] = string.format("file %02d line %04d %s", file_index, line, value)
++  end
++  return lines
++end
++
++local create_fixture = function()
++  fixture = {
++    dir = vim.fn.tempname(),
++    file_count = 8,
++  }
++  vim.fn.mkdir(fixture.dir, "p")
++  git({ "init", "-q" })
++  git({ "config", "user.email", "benchmark@example.com" })
++  git({ "config", "user.name", "CodeDiff Benchmark" })
++
++  for index = 1, fixture.file_count do
++    local path = string.format("%s/file-%02d.txt", fixture.dir, index)
++    vim.fn.writefile(make_file_lines(index, false), path)
++  end
++  vim.fn.writefile({ "neutral" }, fixture.dir .. "/neutral.txt")
++  git({ "add", "." })
++  git({ "commit", "-qm", "initial" })
++
++  for index = 1, fixture.file_count do
++    local path = string.format("%s/file-%02d.txt", fixture.dir, index)
++    vim.fn.writefile(make_file_lines(index, true), path)
++  end
++end
++
++local reset_to_base_tab = function()
++  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
++    if tabpage ~= base_tabpage and vim.api.nvim_tabpage_is_valid(tabpage) then
++      vim.api.nvim_set_current_tabpage(tabpage)
++      vim.cmd("tabclose")
++    end
++  end
++  vim.api.nvim_set_current_tabpage(base_tabpage)
++  vim.cmd("edit " .. vim.fn.fnameescape(fixture.dir .. "/file-01.txt"))
++  vim.fn.chdir(fixture.dir)
++end
++
++local get_ready_view = function(tabpage, previous_path)
++  local explorer = lifecycle.get_explorer(tabpage)
++  local session = lifecycle.get_session(tabpage)
++  if not explorer or not session or not session.stored_diff_result then
++    return nil
++  end
++  if previous_path and explorer.current_file_path == previous_path then
++    return nil
++  end
++  if not explorer.current_file_path or not session.modified_path then
++    return nil
++  end
++  if not session.modified_path:find(explorer.current_file_path, 1, true) then
++    return nil
++  end
++  if not session.modified_win or not vim.api.nvim_win_is_valid(session.modified_win) then
++    return nil
++  end
++  if not session.stored_diff_result.changes or #session.stored_diff_result.changes == 0 then
++    return nil
++  end
++  return {
++    tabpage = tabpage,
++    explorer = explorer,
++    session = session,
++  }
++end
++
++local wait_for_view = function(tabpage, previous_path)
++  local view
++  local ready = vim.wait(8000, function()
++    if tabpage then
++      view = get_ready_view(tabpage, previous_path)
++      return view ~= nil
++    end
++    for _, candidate in ipairs(vim.api.nvim_list_tabpages()) do
++      view = get_ready_view(candidate, previous_path)
++      if view then
++        return true
++      end
++    end
++    return false
++  end, 1)
++  return {
++    ready = ready,
++    view = view,
++  }
++end
++
++local run_open = function()
++  vim.cmd("CodeDiff")
++  return wait_for_view(nil)
++end
++
++local current_view = function()
++  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
++    local view = get_ready_view(tabpage)
++    if view then
++      return view
++    end
++  end
++
++  reset_to_base_tab()
++  local result = run_open()
++  assert(result.ready and result.view, "CodeDiff did not render")
++  return result.view
++end
++
++local focus_modified = function(view)
++  vim.api.nvim_set_current_tabpage(view.tabpage)
++  assert(
++    vim.wait(2000, function()
++      return lifecycle.is_suspended(view.tabpage) == false
++    end, 1),
++    "CodeDiff view did not resume"
++  )
++  vim.api.nvim_set_current_win(view.session.modified_win)
++end
++
++local get_action = function(bufnr, lhs)
++  local callback = vim.api.nvim_buf_call(bufnr, function()
++    local mapping = vim.fn.maparg(lhs, "n", false, true)
++    return mapping and mapping.callback or nil
++  end)
++  if type(callback) == "function" then
++    return callback
++  end
++  error("missing CodeDiff keymap: " .. lhs)
++end
++
++local validate_rendered_view = function(result)
++  assert(result.ready and result.view, "CodeDiff view did not render")
++end
++
++local setup_next_file = function()
++  local view = current_view()
++  focus_modified(view)
++  return {
++    action = get_action(view.session.modified_bufnr, "]f"),
++    tabpage = view.tabpage,
++    previous_path = view.explorer.current_file_path,
++  }
++end
++
++local run_next_file = function(context)
++  context.action()
++  return wait_for_view(context.tabpage, context.previous_path)
++end
++
++local setup_gf = function()
++  local view = current_view()
++  local base_window = vim.api.nvim_tabpage_get_win(base_tabpage)
++  vim.api.nvim_win_call(base_window, function()
++    vim.cmd("edit " .. vim.fn.fnameescape(fixture.dir .. "/neutral.txt"))
++  end)
++  focus_modified(view)
++  vim.api.nvim_win_set_cursor(view.session.modified_win, { 600, 0 })
++  return {
++    action = get_action(view.session.modified_bufnr, "gf"),
++    diff_tabpage = view.tabpage,
++    expected_line = 600,
++    target_path = fixture.dir .. "/" .. view.explorer.current_file_path,
++  }
++end
++
++local run_gf = function(context)
++  context.action()
++  return {
++    line = vim.api.nvim_win_get_cursor(0)[1],
++    path = vim.api.nvim_buf_get_name(0),
++    tabpage = vim.api.nvim_get_current_tabpage(),
++  }
++end
++
++local validate_gf = function(result, context)
++  assert(result.tabpage ~= context.diff_tabpage, "gf did not leave the diff tab")
++  assert(result.path == context.target_path, "gf did not open the working-tree file")
++  assert(result.line == context.expected_line, "gf did not preserve the cursor")
++end
++
++local setup_next_hunk = function()
++  local view = current_view()
++  focus_modified(view)
++  local changes = view.session.stored_diff_result.changes
++  vim.api.nvim_win_set_cursor(view.session.modified_win, { 1, 0 })
++  return {
++    action = get_action(view.session.modified_bufnr, "]c"),
++    expected_line = changes[1].modified.start_line,
++  }
++end
++
++local run_next_hunk = function(context)
++  context.action()
++  return vim.api.nvim_win_get_cursor(0)[1]
++end
++
++local validate_next_hunk = function(result, context)
++  assert(result == context.expected_line, "next hunk did not move the cursor")
++end
++
++local cases = {
++  {
++    name = "open-to-render",
++    setup = reset_to_base_tab,
++    run = run_open,
++    validate = validate_rendered_view,
++  },
++  {
++    name = "next-file-to-render",
++    setup = setup_next_file,
++    run = run_next_file,
++    validate = validate_rendered_view,
++  },
++  {
++    name = "gf-to-buffer",
++    setup = setup_gf,
++    run = run_gf,
++    validate = validate_gf,
++  },
++  {
++    name = "next-hunk-to-cursor",
++    setup = setup_next_hunk,
++    run = run_next_hunk,
++    validate = validate_next_hunk,
++  },
++}
++
++local setup_suite = function()
++  create_fixture()
++  vim.fn.chdir(fixture.dir)
++  vim.cmd("edit " .. vim.fn.fnameescape(fixture.dir .. "/file-01.txt"))
++  base_tabpage = vim.api.nvim_get_current_tabpage()
++end
++
++local print_result = function(case, stats)
++  print(string.format("%-22s %8.3fms %8.3fms %8.3fms %8.3f .. %8.3fms", case.name, stats.median, stats.p95, stats.mad, stats.min, stats.max))
++end
++
++local main = function()
++  harness.run({
++    script = "benchmarks/workflows.lua",
++    suite_name = "workflow",
++    usage = "usage: scripts/benchmark.sh workflows [--list | benchmark-name]",
++    title = "CodeDiff workflow benchmarks",
++    description = "Neovim is already running. Fixture setup and validation are outside timed sections.",
++    header = string.format("%-22s %10s %10s %10s %19s", "benchmark", "median", "p95", "MAD", "min .. max"),
++    cases = cases,
++    setup = setup_suite,
++    print_result = print_result,
++  })
++end
++
++local ok, err = xpcall(main, debug.traceback)
++pcall(lifecycle.cleanup_all)
++if fixture then
++  vim.fn.chdir(original_cwd)
++  vim.fn.delete(fixture.dir, "rf")
++end
++if not ok then
++  io.stderr:write("Workflow benchmark error: " .. tostring(err) .. "\n")
++  os.exit(1)
++end
++vim.cmd("qall!")
+diff --git a/docs/BENCHMARKS.md b/docs/BENCHMARKS.md
+new file mode 100644
+index 0000000..0552ed5
+--- /dev/null
++++ b/docs/BENCHMARKS.md
+@@ -0,0 +1,29 @@
++# Local benchmarks
++
++CodeDiff includes warmed `compute_diff()` microbenchmarks, side-by-side rendering benchmarks, and workflow benchmarks for opening a diff, switching files, `gf`, and hunk navigation. They use deterministic generated inputs, exclude fixture setup and validation from timing, and build the native library in Release mode. Each case performs 3 warmups followed by 20 measured samples timed with `vim.uv.hrtime()` and reported in milliseconds.
++
++## Run benchmarks
++
++Run every case:
++
++```bash
++./scripts/benchmark.sh
++# or
++make benchmark
++```
++
++List case names, run one suite, or run one case:
++
++```bash
++./scripts/benchmark.sh --list
++./scripts/benchmark.sh diff
++./scripts/benchmark.sh diff sparse-edits
++./scripts/benchmark.sh render
++./scripts/benchmark.sh render dense-rerender
++./scripts/benchmark.sh workflows
++./scripts/benchmark.sh workflows open-to-render
++```
++
++Rendering timings precompute the diff and measure only clearing and applying side-by-side highlights and filler lines to buffers. They cover both first-render and rerender states, but not terminal or GUI drawing because Neovim runs headlessly.
++
++Workflow timings run inside an already-started headless Neovim. Opening and file switching include Git operations, diff computation, and rendering; they do not include Neovim process startup. Run benchmarks on an otherwise idle machine and compare results from the same machine and configuration.
+diff --git a/docs/README.md b/docs/README.md
+index e5e3c4f..3875b42 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -8,6 +8,7 @@
+ ## Building & Contributing
+ 
+ - **[BUILD.md](BUILD.md)** — Build system guide: CMake, Makefile targets, standalone scripts for users without CMake
++- **[BENCHMARKS.md](BENCHMARKS.md)** — Run and compare local microbenchmarks and workflow benchmarks
+ - **[VERSION_MANAGEMENT.md](VERSION_MANAGEMENT.md)** — Semantic versioning workflow and automated version bumping
+ - **[dependency-distribution.md](dependency-distribution.md)** — How OpenMP/libgomp is bundled so users don't need system packages
+ 
+diff --git a/scripts/benchmark.sh b/scripts/benchmark.sh
+new file mode 100755
+index 0000000..c64f4ee
+--- /dev/null
++++ b/scripts/benchmark.sh
+@@ -0,0 +1,31 @@
++#!/usr/bin/env bash
++
++set -euo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++
++cd "$PROJECT_ROOT"
++cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
++cmake --build build --config Release --target vscode_diff
++
++run_suite() {
++    local suite="$1"
++    shift
++    VSCODE_DIFF_NO_AUTO_INSTALL=1 nvim --headless --clean -u NONE -l "benchmarks/$suite.lua" "$@" 2>&1 | grep -Ev '^Hunk [0-9]+ of [0-9]+$'
++}
++
++if [ $# -eq 0 ]; then
++    run_suite diff
++    run_suite render
++    run_suite workflows
++elif [ "$1" = "--list" ]; then
++    run_suite diff --list
++    run_suite render --list
++    run_suite workflows --list
++elif [ "$1" = "diff" ] || [ "$1" = "render" ] || [ "$1" = "workflows" ]; then
++    run_suite "$@"
++else
++    printf 'Usage: %s [--list | diff [benchmark] | render [benchmark] | workflows [benchmark]]\n' "$0" >&2
++    exit 1
++fi
