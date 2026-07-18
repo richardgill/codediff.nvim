@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 70c7f696d580a0920b883c871019ff2e2462e44f
-expectedTree = aee1bb5739c1724ac0a74e08661ca5f9b525ffdb
+expectedHead = 01e15f0d46552cfdc908f5054d94b1ce8410f32c
+expectedTree = c9149575f3a4044c22fb7e7b900c6ff8dfd546ca
 testCommand = make test
 publishRemote = upstream
 publishBranch = main
@@ -73,7 +73,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 
 [patch "pure-line-char-highlights"]
 file = patches/012-pure-line-char-highlights.patch
-originCommit = 5b0c0e84288abe8b7607986bc08f105659d1c482
+originCommit = f266b3703b0d3c67664739983621a933b2b3e7b3
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/450
 
 [patch "native-gutter-signs"]
