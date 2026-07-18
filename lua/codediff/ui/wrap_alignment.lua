@@ -131,7 +131,7 @@ local handle_winscrolled = function(args)
     return
   end
 
-  M.schedule_sync_from(group.tabpage, win)
+  M.sync_from_scroll(group.tabpage, win)
 end
 
 local handle_winresized = function()
@@ -423,6 +423,11 @@ function M.sync_from(tabpage, source_win)
     return
   end
   view_sync.sync(group, source_win)
+end
+
+function M.sync_from_scroll(tabpage, source_win)
+  M.sync_from(tabpage, source_win)
+  M.schedule_sync_from(tabpage, source_win)
 end
 
 function M.schedule_sync_from(tabpage, source_win)

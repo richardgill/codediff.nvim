@@ -143,6 +143,35 @@ describe("wrapped smooth scrolling", function()
     wrap_alignment.release_session(tabpage)
   end)
 
+  it("synchronizes immediately before deferred scroll reconciliation", function()
+    if not wrap_alignment.is_supported() then
+      pending("wrapped alignment is unavailable")
+      return
+    end
+
+    local lines = {}
+    for index = 1, 200 do
+      lines[index] = string.format("line %03d %s", index, string.rep("wrapped content ", index % 6))
+    end
+    local tabpage, original_win, modified_win, original_buf, modified_buf = create_panes(lines, lines)
+
+    wrap_alignment.apply({
+      original_win = original_win,
+      modified_win = modified_win,
+      original_buf = original_buf,
+      modified_buf = modified_buf,
+      lines_diff = { changes = {}, moves = {} },
+    })
+
+    vim.api.nvim_win_call(modified_win, function()
+      vim.fn.winrestview({ topline = 150 })
+    end)
+    wrap_alignment.sync_from_scroll(tabpage, modified_win)
+
+    assert.is_true(get_offset(modified_win) > 0)
+    assert.equal(get_offset(modified_win), get_offset(original_win))
+  end)
+
   it("defers window-scroll synchronization until the source view settles", function()
     if not wrap_alignment.is_supported() then
       pending("wrapped alignment is unavailable")
