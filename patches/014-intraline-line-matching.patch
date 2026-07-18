@@ -1,4 +1,4 @@
-From f56a9329f64013452d9a79f8354d6fec71cae9a4 Mon Sep 17 00:00:00 2001
+From 2fad90d87104e2ed395af21da103a27e8f4dee1f Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:25:25 +0100
 Subject: [PATCH] Added native line matcher implementation and tests
@@ -12,8 +12,8 @@ Subject: [PATCH] Added native line matcher implementation and tests
  libvscode-diff/default_lines_diff_computer.c | 1122 +++++++-----------
  libvscode-diff/include/line_matcher.h        |   14 +
  libvscode-diff/include/types.h               |   16 +
- libvscode-diff/src/line_matcher.c            |  370 ++++++
- libvscode-diff/tests/test_line_matcher.c     |  146 +++
+ libvscode-diff/src/line_matcher.c            |  380 ++++++
+ libvscode-diff/tests/test_line_matcher.c     |  175 +++
  lua/codediff/config.lua                      |   48 +-
  lua/codediff/core/diff.lua                   |   40 +-
  lua/codediff/ui/core.lua                     |  174 ++-
@@ -21,7 +21,7 @@ Subject: [PATCH] Added native line matcher implementation and tests
  tests/core/line_matcher_spec.lua             |  195 +++
  tests/ui/core_spec.lua                       |   23 +
  tests/ui/inline_spec.lua                     |    4 +-
- 17 files changed, 1489 insertions(+), 806 deletions(-)
+ 17 files changed, 1528 insertions(+), 806 deletions(-)
  create mode 100644 libvscode-diff/include/line_matcher.h
  create mode 100644 libvscode-diff/src/line_matcher.c
  create mode 100644 libvscode-diff/tests/test_line_matcher.c
@@ -1535,10 +1535,10 @@ index e7fbf98..fa8a46b 100644
  /**
 diff --git a/libvscode-diff/src/line_matcher.c b/libvscode-diff/src/line_matcher.c
 new file mode 100644
-index 0000000..9185653
+index 0000000..57bd063
 --- /dev/null
 +++ b/libvscode-diff/src/line_matcher.c
-@@ -0,0 +1,370 @@
+@@ -0,0 +1,380 @@
 +#include "line_matcher.h"
 +#include "utils.h"
 +#include <stdlib.h>
@@ -1548,6 +1548,9 @@ index 0000000..9185653
 +  const unsigned char *text;
 +  int length;
 +  int frequency[256];
++  // Each distinct byte is recorded once so overlap can scan only the sparser line.
++  unsigned char frequency_bytes[256];
++  int frequency_count;
 +} LineMetadata;
 +
 +typedef struct {
@@ -1619,7 +1622,10 @@ index 0000000..9185653
 +    metadata[index].text = text;
 +    metadata[index].length = (int)strlen((const char *)text);
 +    for (int offset = 0; offset < metadata[index].length; offset++) {
-+      metadata[index].frequency[text[offset]]++;
++      unsigned char byte = text[offset];
++      if (metadata[index].frequency[byte]++ == 0) {
++        metadata[index].frequency_bytes[metadata[index].frequency_count++] = byte;
++      }
 +    }
 +  }
 +  return metadata;
@@ -1627,8 +1633,12 @@ index 0000000..9185653
 +
 +static int frequency_overlap(const LineMetadata *left,
 +                             const LineMetadata *right) {
++  const LineMetadata *sparse = left->frequency_count < right->frequency_count
++                                   ? left
++                                   : right;
 +  int overlap = 0;
-+  for (int byte = 0; byte < 256; byte++) {
++  for (int index = 0; index < sparse->frequency_count; index++) {
++    unsigned char byte = sparse->frequency_bytes[index];
 +    overlap += left->frequency[byte] < right->frequency[byte]
 +                   ? left->frequency[byte]
 +                   : right->frequency[byte];
@@ -1911,10 +1921,10 @@ index 0000000..9185653
 +}
 diff --git a/libvscode-diff/tests/test_line_matcher.c b/libvscode-diff/tests/test_line_matcher.c
 new file mode 100644
-index 0000000..7974941
+index 0000000..f4ced82
 --- /dev/null
 +++ b/libvscode-diff/tests/test_line_matcher.c
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,175 @@
 +#include "line_matcher.h"
 +#include "utils.h"
 +#include <stdbool.h>
@@ -2007,6 +2017,34 @@ index 0000000..7974941
 +  return true;
 +}
 +
++static bool test_high_entropy_boundary(void) {
++  unsigned char left[256];
++  unsigned char right[256];
++  for (int index = 0; index < 255; index++) {
++    left[index] = (unsigned char)(index + 1);
++    right[index] = (unsigned char)(index < 254 ? index + 1 : 1);
++  }
++  left[255] = '\0';
++  right[255] = '\0';
++  const char *left_lines[] = {(const char *)left};
++  const char *right_lines[] = {(const char *)right};
++  MatchCase cases[] = {
++      {"high entropy right sparse", LINE_MATCHER_SIMILARITY, left_lines, 1,
++       right_lines, 1, 508.0 / 510.0, 1},
++      {"high entropy left sparse", LINE_MATCHER_SIMILARITY, right_lines, 1,
++       left_lines, 1, 508.0 / 510.0, 1},
++  };
++  for (int index = 0; index < 2; index++) {
++    bool hit_timeout = false;
++    SequenceDiffArray *matches = run_case(&cases[index], &hit_timeout);
++    ASSERT(matches != NULL, cases[index].name);
++    ASSERT(!hit_timeout, cases[index].name);
++    ASSERT(matches->count == cases[index].expected_count, cases[index].name);
++    sequence_diff_array_free(matches);
++  }
++  return true;
++}
++
 +static bool test_tie_order(void) {
 +  const char *original[] = {"same", "same"};
 +  const char *modified[] = {"same", "same"};
@@ -2058,7 +2096,8 @@ index 0000000..7974941
 +
 +int main(void) {
 +  bool passed = test_strategies() && test_threshold_boundary() &&
-+                test_tie_order() && test_timeout();
++                test_high_entropy_boundary() && test_tie_order() &&
++                test_timeout();
 +  return passed ? 0 : 1;
 +}
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
@@ -2225,10 +2264,10 @@ index b2fbe1f..a89289d 100644
    -- Call C function
    local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
 diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
-index 30eab5a..26d32c2 100644
+index bbe8927..dd1a69a 100644
 --- a/lua/codediff/ui/core.lua
 +++ b/lua/codediff/ui/core.lua
-@@ -166,118 +166,98 @@ end
+@@ -159,118 +159,98 @@ end
  -- Step 3: Filler Line Calculation
  -- ============================================================================
  
@@ -2420,7 +2459,7 @@ index 30eab5a..26d32c2 100644
  end
  
  -- ============================================================================
-@@ -296,9 +276,6 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -289,9 +269,6 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
    local total_left_fillers = 0
    local total_right_fillers = 0
  
@@ -2430,7 +2469,7 @@ index 30eab5a..26d32c2 100644
    for _, mapping in ipairs(lines_diff.changes) do
      local orig_is_empty = (mapping.original.end_line <= mapping.original.start_line)
      local mod_is_empty = (mapping.modified.end_line <= mapping.modified.start_line)
-@@ -323,10 +300,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -316,10 +293,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
        end
      end
  
@@ -2659,10 +2698,10 @@ index 0000000..b919b77
 +  end)
 +end)
 diff --git a/tests/ui/core_spec.lua b/tests/ui/core_spec.lua
-index 30f2d43..5847838 100644
+index 4c7d700..43cfaec 100644
 --- a/tests/ui/core_spec.lua
 +++ b/tests/ui/core_spec.lua
-@@ -110,6 +110,29 @@ describe("Render Core", function()
+@@ -127,6 +127,29 @@ describe("Render Core", function()
      vim.api.nvim_buf_delete(right_buf, {force = true})
    end)
  

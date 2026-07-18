@@ -1,4 +1,4 @@
-From 249c3a57f5ae936171fc16e490687ccc1faa888d Mon Sep 17 00:00:00 2001
+From 90ba74d591f43bb412c480df4f8a1fa818102d40 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 20:05:38 +0100
 Subject: [PATCH] feat: highlight added and deleted single-file views
@@ -7,16 +7,16 @@ Subject: [PATCH] feat: highlight added and deleted single-file views
  README.md                              |  3 ++
  doc/codediff.txt                       |  4 ++
  lua/codediff/config.lua                |  1 +
- lua/codediff/ui/core.lua               | 35 +++++++++++++
+ lua/codediff/ui/core.lua               | 35 ++++++++++++++
  lua/codediff/ui/lifecycle/session.lua  |  2 +
  lua/codediff/ui/lifecycle/state.lua    |  8 +++
  lua/codediff/ui/view/inline_view.lua   | 36 +++++++-------
  lua/codediff/ui/view/side_by_side.lua  | 22 ++++++---
- tests/ui/core_spec.lua                 | 68 ++++++++++++++++++++++++++
- tests/ui/layout_spec.lua               | 27 +++++-----
+ tests/ui/core_spec.lua                 | 67 ++++++++++++++++++++++++++
+ tests/ui/layout_spec.lua               | 27 +++++------
  tests/ui/lifecycle/lifecycle_spec.lua  |  1 +
  tests/ui/view/inline_explorer_spec.lua | 48 +++++++++++++++++-
- 12 files changed, 213 insertions(+), 42 deletions(-)
+ 12 files changed, 212 insertions(+), 42 deletions(-)
 
 diff --git a/README.md b/README.md
 index 20c581f..fee4fac 100644
@@ -74,10 +74,10 @@ index 63c10e6..1eec55c 100644
      compute_moves = false, -- Detect moved code blocks (opt-in, may increase diff computation time)
      compact_context_lines = 3, -- Number of context lines around hunks in compact mode
 diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
-index 71b46f6..82baedb 100644
+index d129fd0..d00f854 100644
 --- a/lua/codediff/ui/core.lua
 +++ b/lua/codediff/ui/core.lua
-@@ -380,6 +380,41 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -373,6 +373,41 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
    }
  end
  
@@ -328,17 +328,12 @@ index fb1ff87..e71b12e 100644
    })
  end
 diff --git a/tests/ui/core_spec.lua b/tests/ui/core_spec.lua
-index 914350e..30f2d43 100644
+index 14d18f8..4c7d700 100644
 --- a/tests/ui/core_spec.lua
 +++ b/tests/ui/core_spec.lua
-@@ -1,12 +1,21 @@
- -- Test: render/core.lua - Core diff rendering logic
- -- Critical tests for the heart of diff visualization
- 
-+local config = require("codediff.config")
- local core = require("codediff.ui.core")
- local highlights = require("codediff.ui.highlights")
- local diff = require('codediff.core.diff')
+@@ -23,8 +23,16 @@ local function assert_ranged_line_highlight(bufnr, expected)
+   assert.equal(config.options.diff.highlight_priority, line_marks[1][4].priority)
+ end
  
 +local function assert_whole_file_highlight(bufnr, expected_group)
 +  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
@@ -353,7 +348,7 @@ index 914350e..30f2d43 100644
      highlights.setup()
    end)
  
-@@ -493,4 +502,63 @@ describe("Render Core", function()
+@@ -517,4 +525,63 @@ describe("Render Core", function()
  
      vim.api.nvim_buf_delete(buf, {force = true})
    end)

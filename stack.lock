@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 3a9f425a352995cb48d6ab771812e9b7f30c9209
-expectedTree = 0ed69a0b29edce1f3c2904ff307720ed5e51c004
+expectedHead = e617953a6a4639963ffea7b069a59c5c0b444108
+expectedTree = 7a1be8aab8a9acde2310e47b1af9286b194f829f
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -15,6 +15,7 @@ patches =
     initial-explorer-selection
     zero-hunk-navigation
     safe-last-diff-close
+    ranged-line-highlights
     hide-native-tabline
     special-file-highlights
     preserve-explorer-state
@@ -68,57 +69,63 @@ file = patches/007-safe-last-diff-close.patch
 originCommit = 2b2f488fab0b5c3b6dbc9c11ea19d2936cd03841
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/440
 
+[patch "ranged-line-highlights"]
+description = perf(ui): use ranged extmarks for line highlights
+file = patches/008-ranged-line-highlights.patch
+originCommit = fdf59b6ee648c2c5f6183c4742b1e467a91c837e
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/461
+
 [patch "hide-native-tabline"]
 description = fix(ui): hide the native tabline in CodeDiff views
-file = patches/008-hide-native-tabline.patch
+file = patches/009-hide-native-tabline.patch
 originCommit = aa4964f8757aa5f5c4bec411846c7862b83c059b
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/441
 
 [patch "special-file-highlights"]
 description = feat: highlight added and deleted single-file views
-file = patches/009-special-file-highlights.patch
+file = patches/010-special-file-highlights.patch
 originCommit = 5d90f3ffb5d95cabfe4c447384c64a4cf704c4bf
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/442
 
 [patch "preserve-explorer-state"]
 description = fix(explorer): preserve tree state across refreshes
-file = patches/010-preserve-explorer-state.patch
+file = patches/011-preserve-explorer-state.patch
 originCommit = 9e94576bf1ea2966a890ce03fbe45355b85ba423
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/443
 
 [patch "configurable-fillers"]
 description = feat: make filler text configurable
-file = patches/011-configurable-fillers.patch
+file = patches/012-configurable-fillers.patch
 originCommit = c3acc612c6bff51a7a6ed3ff3fc47923e676d940
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/444
 
 [patch "highlight-attributes"]
 description = fix(highlights): preserve character group attributes
-file = patches/012-highlight-attributes.patch
+file = patches/013-highlight-attributes.patch
 originCommit = 496deed42da874892a2c6daa911432fda9aa7d64
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/447
 
 [patch "explorer-line-statistics"]
 description = feat(explorer): add optional line change statistics
-file = patches/015-explorer-line-statistics.patch
+file = patches/016-explorer-line-statistics.patch
 originCommit = 1c53d1d58fa3bd701859babb03a4680e495cc0ce
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 
 [patch "intraline-line-matching"]
 description = feat: add native line matching strategies
-file = patches/013-intraline-line-matching.patch
-originCommit = 950ef020dffdf1ec5acc242a96228ea33a4d77cf
+file = patches/014-intraline-line-matching.patch
+originCommit = d3d3d9aa0183bc468a74cc1127933cdfdf98374c
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/459
 
 [patch "native-gutter-signs"]
 description = Added native gutter signs support
-file = patches/014-native-gutter-signs.patch
+file = patches/015-native-gutter-signs.patch
 originCommit = 5655f16e1dc839f1743bf6f4187dd3319ae777d1
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 
 [patch "local-native-build"]
 description = fix: build fork native library locally
-file = patches/016-local-native-build.patch
+file = patches/017-local-native-build.patch
 
 [patch "fork-notice"]
-file = patches/016-fork-notice.patch
+file = patches/018-fork-notice.patch

@@ -1,4 +1,4 @@
-From fab256aed0ff8bfa64f2a3e95a631003766b6ed2 Mon Sep 17 00:00:00 2001
+From b42ab799fe21716db871cddfc377a477469b8f05 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 20:57:49 +0100
 Subject: [PATCH] feat: make filler text configurable
@@ -119,7 +119,7 @@ index 1eec55c..106aeaf 100644
      max_computation_time_ms = 5000, -- Maximum time for diff computation (5 seconds, VSCode default)
      ignore_trim_whitespace = false, -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
 diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
-index 82baedb..30eab5a 100644
+index d00f854..bbe8927 100644
 --- a/lua/codediff/ui/core.lua
 +++ b/lua/codediff/ui/core.lua
 @@ -3,6 +3,7 @@ local M = {}
@@ -163,7 +163,7 @@ index 82baedb..30eab5a 100644
  -- ============================================================================
  -- Step 1: Line-Level Highlights
  -- ============================================================================
-@@ -355,10 +330,10 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -348,10 +323,10 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
  
      for _, filler in ipairs(fillers) do
        if filler.buffer == "original" then
@@ -176,7 +176,7 @@ index 82baedb..30eab5a 100644
          total_right_fillers = total_right_fillers + filler.count
        end
      end
-@@ -543,12 +518,12 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+@@ -536,12 +511,12 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
    local total_right_fillers = 0
  
    for _, filler in ipairs(left_fillers) do
