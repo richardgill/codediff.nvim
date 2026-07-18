@@ -143,13 +143,14 @@ def fork_notice(config, names, code_head):
         "> This is a generated downstream build containing pending improvements to",
         "> [upstream codediff.nvim](https://github.com/esmuellert/codediff.nvim). Install an",
         "> immutable snapshot rather than the repository's moving default branch.",
-        ">",
+        "",
         (
-            f"> [Install the latest immutable snapshot]({repo_url}/releases/latest) · "
+            f"[Install the latest immutable snapshot]({repo_url}/releases/latest) · "
             f"[See list of old versions]({repo_url}/releases)"
         ),
+        "",
         (
-            f"> [View README.md diff]({readme_diff_url}) · "
+            f"[View README.md diff]({readme_diff_url}) · "
             f"[View all downstream changes]({compare_url})"
         ),
         "",
@@ -159,34 +160,6 @@ def fork_notice(config, names, code_head):
         "",
         *request_lines,
         "",
-        "## Install this fork",
-        "",
-        (
-            f"[Install the latest immutable snapshot]({repo_url}/releases/latest), or choose an older "
-            f"snapshot from [the releases list]({repo_url}/releases). Replace `<snapshot-sha>` below "
-            "with its commit SHA. Each release also contains ready-to-copy installation snippets."
-        ),
-        "",
-        "### lazy.nvim",
-        "",
-        "```lua",
-        "{",
-        f'  "{repository}",',
-        '  commit = "<snapshot-sha>",',
-        '  cmd = "CodeDiff",',
-        "}",
-        "```",
-        "",
-        "### vim.pack (Neovim 0.12+)",
-        "",
-        "```lua",
-        "vim.pack.add({",
-        "  {",
-        f'    src = "{repo_url}",',
-        '    version = "<snapshot-sha>",',
-        "  },",
-        "})",
-        "```",
     ]
     return "\n".join(lines)
 
