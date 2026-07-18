@@ -1,4 +1,4 @@
-From 212ff13fef476716e3d06ff994451598a44db3e7 Mon Sep 17 00:00:00 2001
+From b864b8220d53db3817291ed5eefa3d96c9a5d7fe Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 20:05:38 +0100
 Subject: [PATCH] feat: highlight added and deleted single-file views
@@ -159,7 +159,7 @@ index 3e4314c..f0baa3d 100644
    local original_tick_changed = vim.api.nvim_buf_get_changedtick(diff.original_bufnr) ~= diff.changedtick.original
    local modified_tick_changed = vim.api.nvim_buf_get_changedtick(diff.modified_bufnr) ~= diff.changedtick.modified
 diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
-index 8cb1b80..e3333b5 100644
+index 69f6019..38a67fe 100644
 --- a/lua/codediff/ui/view/inline_view.lua
 +++ b/lua/codediff/ui/view/inline_view.lua
 @@ -5,6 +5,7 @@ local M = {}
@@ -186,7 +186,7 @@ index 8cb1b80..e3333b5 100644
  -- ============================================================================
  -- Compute diff and render inline highlights
  -- ============================================================================
-@@ -347,19 +357,15 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
+@@ -339,19 +349,15 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
      return false
    end
  
@@ -208,7 +208,7 @@ index 8cb1b80..e3333b5 100644
    lifecycle.update_diff_result(tabpage, nil)
  
    local original_is_virtual = is_virtual_revision(session_config.original_revision)
-@@ -539,7 +545,7 @@ end
+@@ -531,7 +537,7 @@ end
  --- Used for untracked (??), added (A), and deleted (D) files in explorer/history.
  ---@param tabpage number
  ---@param file_path string Path to load (absolute for real files)
@@ -217,7 +217,7 @@ index 8cb1b80..e3333b5 100644
  function M.show_single_file(tabpage, file_path, opts)
    opts = opts or {}
    local session = lifecycle.get_session(tabpage)
-@@ -555,14 +561,8 @@ function M.show_single_file(tabpage, file_path, opts)
+@@ -547,14 +553,8 @@ function M.show_single_file(tabpage, file_path, opts)
    end
  
    -- Clear old inline decorations
@@ -233,7 +233,7 @@ index 8cb1b80..e3333b5 100644
  
    -- Load the file
    local file_bufnr
-@@ -602,6 +602,8 @@ function M.show_single_file(tabpage, file_path, opts)
+@@ -594,6 +594,8 @@ function M.show_single_file(tabpage, file_path, opts)
    lifecycle.update_paths(tabpage, original_path, modified_path)
    lifecycle.update_revisions(tabpage, original_revision, modified_revision)
    lifecycle.update_diff_result(tabpage, { changes = {}, moves = {} })
@@ -242,7 +242,7 @@ index 8cb1b80..e3333b5 100644
  
    local view_keymaps = require("codediff.ui.view.keymaps")
    view_keymaps.setup_all_keymaps(tabpage, orig_bufnr, mod_bufnr, session.mode == "explorer")
-@@ -624,10 +626,8 @@ function M.show_welcome(tabpage, load_bufnr)
+@@ -616,10 +618,8 @@ function M.show_welcome(tabpage, load_bufnr)
      return
    end
  
@@ -256,7 +256,7 @@ index 8cb1b80..e3333b5 100644
    vim.api.nvim_win_set_buf(mod_win, load_bufnr)
    welcome_window.sync(mod_win)
 diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
-index 4ec0c64..ff0821c 100644
+index fb1ff87..e71b12e 100644
 --- a/lua/codediff/ui/view/side_by_side.lua
 +++ b/lua/codediff/ui/view/side_by_side.lua
 @@ -6,6 +6,7 @@ local lifecycle = require("codediff.ui.lifecycle")
@@ -267,7 +267,7 @@ index 4ec0c64..ff0821c 100644
  
  -- Eagerly load explorer and history to avoid lazy require failures
  -- when CWD changes in vim.schedule callbacks
-@@ -406,6 +407,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
+@@ -402,6 +403,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
    if not session then
      return false
    end
@@ -275,7 +275,7 @@ index 4ec0c64..ff0821c 100644
  
    -- Get existing buffers and windows
    local old_original_buf, old_modified_buf = lifecycle.get_buffers(tabpage)
-@@ -698,7 +700,7 @@ end
+@@ -694,7 +696,7 @@ end
  --- Core implementation for showing a single file without diff.
  --- Closes the empty pane and loads the file into the remaining pane.
  ---@param tabpage number
@@ -284,7 +284,7 @@ index 4ec0c64..ff0821c 100644
  local function show_single_file(tabpage, opts)
    local session = lifecycle.get_session(tabpage)
    if not session then
-@@ -707,17 +709,16 @@ local function show_single_file(tabpage, opts)
+@@ -703,17 +705,16 @@ local function show_single_file(tabpage, opts)
  
    lifecycle.update_layout(tabpage, "side-by-side")
    local orig_win, mod_win = lifecycle.get_windows(tabpage)
@@ -308,7 +308,7 @@ index 4ec0c64..ff0821c 100644
    end
  
    -- Mark single-pane BEFORE closing window (prevents cleanup trigger)
-@@ -769,6 +770,10 @@ local function show_single_file(tabpage, opts)
+@@ -765,6 +766,10 @@ local function show_single_file(tabpage, opts)
      lifecycle.update_paths(tabpage, opts.original_path or "", opts.modified_path or "")
      lifecycle.update_revisions(tabpage, opts.original_revision, opts.modified_revision)
      lifecycle.update_diff_result(tabpage, { changes = {}, moves = {} })
@@ -319,7 +319,7 @@ index 4ec0c64..ff0821c 100644
  
      local view_keymaps = require("codediff.ui.view.keymaps")
      view_keymaps.setup_all_keymaps(tabpage, orig_bufnr, mod_bufnr, session.mode == "explorer")
-@@ -853,6 +858,7 @@ end
+@@ -849,6 +854,7 @@ end
  function M.show_welcome(tabpage, load_bufnr)
    show_single_file(tabpage, {
      keep = "modified",

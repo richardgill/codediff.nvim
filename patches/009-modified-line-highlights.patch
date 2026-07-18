@@ -1,4 +1,4 @@
-From b01a5edd0e942303de02c17fd13566eace3595d7 Mon Sep 17 00:00:00 2001
+From 77c7dac37aa1a7c6a85e396158548d1df77d45ea Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 20:48:31 +0100
 Subject: [PATCH] fix: distinguish modified lines from insertions

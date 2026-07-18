@@ -1,13 +1,15 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 3ac2074cb9ca9d3bc5cdf61a67815d2402642ecb
-expectedTree = c75fcc77c7b3a721d927ac18b52bf3dbc5118a17
+expectedHead = 93b888fa4a123c80adb099ddc9d8f903d51ad39e
+expectedTree = d2eb015d474ad92facc4c50084b630e2fcaec404
 testCommand = make test
 publishRemote = origin
 publishBranch = main
 repository = richardgill/codediff.nvim
 noticePatch = fork-notice
 patches =
+    manual-build-libgomp
+    move-keymap-scrolloff
     explorer-gf
     zero-hunk-navigation
     safe-last-diff-close
@@ -19,74 +21,92 @@ patches =
     highlight-attributes
     explorer-line-statistics
     intraline-line-matching
-    pure-line-char-highlights
     native-gutter-signs
     fork-notice
 
+[patch "manual-build-libgomp"]
+description = fix: trust manual builds before checking libgomp
+file = patches/001-manual-build-libgomp.patch
+originCommit = 1c5deaad57e1728f48236e6ed3ab0856e40dbdbd
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/437
+
+[patch "move-keymap-scrolloff"]
+description = fix(keymaps): align moved blocks with nonzero scrolloff
+file = patches/002-move-keymap-scrolloff.patch
+originCommit = afa41e605639a1d25eec7182e09a3c533abcf978
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/457
+
 [patch "explorer-gf"]
-file = patches/001-explorer-gf.patch
-originCommit = 5cea7a6fac09650f47e4d4a9a529f0f1470e24d7
+description = fix: "gf" shortcut should open selected explorer file in previous tab
+file = patches/003-explorer-gf.patch
+originCommit = 3de993a58d1ccafc7ad382cd2910c7375caf51ef
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/321
 
 [patch "zero-hunk-navigation"]
-file = patches/002-zero-hunk-navigation.patch
+description = fix(navigation): include zero-hunk files in cross-file cycling
+file = patches/004-zero-hunk-navigation.patch
 originCommit = ee9443aaf3bede9722f2d91db80f444d727f9f8f
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/438
 
 [patch "safe-last-diff-close"]
-file = patches/003-safe-last-diff-close.patch
+description = fix: keep Neovim open when closing the last diff tab
+file = patches/005-safe-last-diff-close.patch
 originCommit = 2b2f488fab0b5c3b6dbc9c11ea19d2936cd03841
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/440
 
 [patch "hide-native-tabline"]
-file = patches/004-hide-native-tabline.patch
+description = fix(ui): hide the native tabline in CodeDiff views
+file = patches/006-hide-native-tabline.patch
 originCommit = aa4964f8757aa5f5c4bec411846c7862b83c059b
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/441
 
 [patch "special-file-highlights"]
-file = patches/005-special-file-highlights.patch
+description = feat: highlight added and deleted single-file views
+file = patches/007-special-file-highlights.patch
 originCommit = 5d90f3ffb5d95cabfe4c447384c64a4cf704c4bf
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/442
 
 [patch "preserve-explorer-state"]
-file = patches/006-preserve-explorer-state.patch
+description = fix(explorer): preserve tree state across refreshes
+file = patches/008-preserve-explorer-state.patch
 originCommit = 9e94576bf1ea2966a890ce03fbe45355b85ba423
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/443
 
 [patch "modified-line-highlights"]
-file = patches/007-modified-line-highlights.patch
+description = fix: distinguish modified lines from insertions
+file = patches/009-modified-line-highlights.patch
 originCommit = 353297da211fb949f26df671a3ad9de401e2475b
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/324
 
 [patch "configurable-fillers"]
-file = patches/008-configurable-fillers.patch
+description = feat: make filler text configurable
+file = patches/010-configurable-fillers.patch
 originCommit = c3acc612c6bff51a7a6ed3ff3fc47923e676d940
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/444
 
 [patch "highlight-attributes"]
-file = patches/010-highlight-attributes.patch
+description = fix(highlights): preserve character group attributes
+file = patches/011-highlight-attributes.patch
 originCommit = 496deed42da874892a2c6daa911432fda9aa7d64
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/447
 
 [patch "explorer-line-statistics"]
-file = patches/011-explorer-line-statistics.patch
+description = feat(explorer): add optional line change statistics
+file = patches/012-explorer-line-statistics.patch
 originCommit = 1c53d1d58fa3bd701859babb03a4680e495cc0ce
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 
 [patch "intraline-line-matching"]
-file = patches/015-intraline-line-matching.patch
+description = feat: add configurable line pairing for intraline highlights
+file = patches/013-intraline-line-matching.patch
 originCommit = 40841009068cbae524e37a1dd0a2f1950d35af25
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/452
 
-[patch "pure-line-char-highlights"]
-file = patches/012-pure-line-char-highlights.patch
-originCommit = f266b3703b0d3c67664739983621a933b2b3e7b3
-pullRequest = https://github.com/esmuellert/codediff.nvim/pull/450
-
 [patch "native-gutter-signs"]
+description = Added native gutter signs support
 file = patches/014-native-gutter-signs.patch
 originCommit = 7b6aafbadb98fd772828f28f9264e4346b5ecd89
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 
 [patch "fork-notice"]
-file = patches/013-fork-notice.patch
+file = patches/015-fork-notice.patch

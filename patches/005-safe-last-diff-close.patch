@@ -1,4 +1,4 @@
-From c5e2c343c90d3721908d8dcaf74290a5e22ffee4 Mon Sep 17 00:00:00 2001
+From 4d9ef1a3ebc667a242af7ab765df754808e02170 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 15:35:41 +0100
 Subject: [PATCH] fix: keep Neovim open when closing the last diff tab
@@ -247,7 +247,7 @@ index ae8dc28..9b95035 100644
  ---@field history_data table? For history mode: { commits, range, file_path, line_range }
  ---@field line_range table? For history line-range mode: { start_line, end_line }
 diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
-index 8a9ac0e..8cb1b80 100644
+index 936eb7f..69f6019 100644
 --- a/lua/codediff/ui/view/inline_view.lua
 +++ b/lua/codediff/ui/view/inline_view.lua
 @@ -145,7 +145,8 @@ function M.create(session_config, filetype, on_ready)
@@ -260,7 +260,7 @@ index 8a9ac0e..8cb1b80 100644
      )
  
      mark_inline(tabpage)
-@@ -246,7 +247,8 @@ function M.create(session_config, filetype, on_ready)
+@@ -242,7 +243,8 @@ function M.create(session_config, filetype, on_ready)
            if mb then
              setup_keymaps(tabpage, original_info.bufnr, mb)
            end
@@ -271,7 +271,7 @@ index 8a9ac0e..8cb1b80 100644
  
        mark_inline(tabpage)
 diff --git a/lua/codediff/ui/view/keymaps.lua b/lua/codediff/ui/view/keymaps.lua
-index fe2e46f..acec507 100644
+index 4e68f4a..a30eba8 100644
 --- a/lua/codediff/ui/view/keymaps.lua
 +++ b/lua/codediff/ui/view/keymaps.lua
 @@ -34,22 +34,6 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
@@ -309,7 +309,7 @@ index fe2e46f..acec507 100644
  
    -- Hunk navigation (]c, [c)
 diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
-index 9515899..4ec0c64 100644
+index 59fd80a..fb1ff87 100644
 --- a/lua/codediff/ui/view/side_by_side.lua
 +++ b/lua/codediff/ui/view/side_by_side.lua
 @@ -155,7 +155,8 @@ function M.create(session_config, filetype, on_ready)

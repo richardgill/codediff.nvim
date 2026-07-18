@@ -52,7 +52,7 @@ def git_output(args, cwd=ROOT):
 
 
 def load_stack():
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(interpolation=None)
     config.optionxform = str
     with LOCK_PATH.open() as lock_file:
         config.read_file(lock_file)
@@ -115,11 +115,10 @@ def pull_requests(config, names):
         url = patch.get("pullRequest")
         if not url:
             continue
-        path = ROOT / patch["file"]
-        match = re.search(r"^Subject: (?:\[PATCH[^]]*\] )?(.+)$", path.read_text(), re.MULTILINE)
-        if not match:
-            raise RuntimeError(f"Missing patch subject in {path}")
-        requests.append((url.rsplit("/", 1)[-1], match.group(1), url, patch["originCommit"]))
+        description = patch.get("description")
+        if not description:
+            raise RuntimeError(f'Missing description for PR-backed patch "{name}"')
+        requests.append((url.rsplit("/", 1)[-1], description, url, patch["originCommit"]))
     return requests
 
 
@@ -128,8 +127,8 @@ def fork_notice(config, names, code_head):
     repository = stack["repository"]
     repo_url = f"https://github.com/{repository}"
     request_lines = [
-        f"- [PR #{number} — {subject}]({url})"
-        for number, subject, url, _ in pull_requests(config, names)
+        f"- [PR #{number} — {description}]({url})"
+        for number, description, url, _ in pull_requests(config, names)
     ]
     lines = [
         "> [!NOTE]",
@@ -401,8 +400,8 @@ def release_notes(config, names, head):
         "",
     ]
     lines.extend(
-        f"- [PR #{number} — {subject}]({url}) (`{origin_commit}`)"
-        for number, subject, url, origin_commit in pull_requests(config, names)
+        f"- [PR #{number} — {description}]({url}) (`{origin_commit}`)"
+        for number, description, url, origin_commit in pull_requests(config, names)
     )
     return "\n".join(lines) + "\n"
 

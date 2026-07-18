@@ -1,4 +1,4 @@
-From 84022ee4d7d97b17e8cace566bfbe93378c5da6e Mon Sep 17 00:00:00 2001
+From 40ab885bb3fdd4d04a53426b42682606fa4a8470 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 12:36:09 +0100
 Subject: [PATCH] fix: include zero-hunk files in cross-file cycling

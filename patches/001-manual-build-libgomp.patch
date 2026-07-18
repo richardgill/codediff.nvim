@@ -1,0 +1,37 @@
+From 39717e2af1fa1616a2cf38cae468ff4990a795dd Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Thu, 16 Jul 2026 07:22:04 +0100
+Subject: [PATCH] fix: trust manual builds before checking libgomp
+
+---
+ lua/codediff/core/installer.lua | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/lua/codediff/core/installer.lua b/lua/codediff/core/installer.lua
+index beb25af..9f7fcd9 100644
+--- a/lua/codediff/core/installer.lua
++++ b/lua/codediff/core/installer.lua
+@@ -536,11 +536,6 @@ end
+ 
+ -- Check if library needs update
+ function M.needs_update()
+-  -- Check libgomp first - if missing, we need to run installer regardless of main library status
+-  if not check_system_libgomp() then
+-    return true
+-  end
+-
+   local plugin_root = get_plugin_root()
+ 
+   -- Check unversioned first - assume manual build is always up to date
+@@ -549,6 +544,11 @@ function M.needs_update()
+     return false
+   end
+ 
++  -- Check libgomp - if missing, we need to run installer regardless of main library status
++  if not check_system_libgomp() then
++    return true
++  end
++
+   local current_version = get_current_version()
+   if not current_version then
+     return true

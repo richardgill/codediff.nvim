@@ -1,4 +1,4 @@
-From 1eaadcb34229fe6616d7793188c2033424cd1c6e Mon Sep 17 00:00:00 2001
+From e6a2668e2fa955c6ac1f5a37471b31c75e6152f8 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 20:57:49 +0100
 Subject: [PATCH] feat: make filler text configurable
