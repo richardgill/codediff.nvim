@@ -66,6 +66,19 @@ end
 ffi.cdef([[
   // Basic range types
   typedef struct {
+    int seq1_start;
+    int seq1_end;
+    int seq2_start;
+    int seq2_end;
+  } SequenceDiff;
+
+  typedef struct {
+    SequenceDiff* diffs;
+    int count;
+    int capacity;
+  } SequenceDiffArray;
+
+  typedef struct {
     int start_line;  // 1-based, inclusive
     int end_line;    // 1-based, EXCLUSIVE
   } LineRange;
@@ -131,7 +144,17 @@ ffi.cdef([[
     const DiffOptions* options
   );
 
+  SequenceDiffArray* compute_line_alignments(
+    const char** original_lines,
+    int original_count,
+    const char** modified_lines,
+    int modified_count,
+    int timeout_ms,
+    bool* hit_timeout
+  );
+
   void free_lines_diff(LinesDiff* diff);
+  void free_sequence_diff_array(SequenceDiffArray* diff);
   const char* get_version(void);
 ]])
 
@@ -227,11 +250,7 @@ local function lines_diff_to_lua(c_diff)
   }
 end
 
--- Main API: Compute diff between two sets of lines
--- Returns Lua table representation of LinesDiff
-function M.compute_diff(original_lines, modified_lines, options)
-  options = options or {}
-
+local function compute_native_diff(original_lines, modified_lines, options)
   -- Convert Lua lines to C arrays
   local c_orig, orig_count = lua_to_c_strings(original_lines)
   local c_mod, mod_count = lua_to_c_strings(modified_lines)
@@ -247,7 +266,6 @@ function M.compute_diff(original_lines, modified_lines, options)
 
   -- Call C function
   local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
-
   if c_diff == nil then
     error("compute_diff returned NULL")
   end
@@ -257,8 +275,169 @@ function M.compute_diff(original_lines, modified_lines, options)
 
   -- Free C memory
   lib.free_lines_diff(c_diff)
-
   return lua_diff
+end
+
+local function append_change(changes, original_start, original_end, modified_start, modified_end)
+  local previous = changes[#changes]
+  if previous and previous.original.end_line >= original_start and previous.modified.end_line >= modified_start then
+    previous.original.end_line = math.max(previous.original.end_line, original_end)
+    previous.modified.end_line = math.max(previous.modified.end_line, modified_end)
+    return
+  end
+
+  changes[#changes + 1] = {
+    original = { start_line = original_start, end_line = original_end },
+    modified = { start_line = modified_start, end_line = modified_end },
+    inner_changes = {},
+    line_pairs = {},
+  }
+end
+
+local function append_whitespace_changes(changes, original_lines, modified_lines, starts, count)
+  for offset = 0, count - 1 do
+    local original_index = starts.original + offset
+    local modified_index = starts.modified + offset
+    if original_lines[original_index] ~= modified_lines[modified_index] then
+      append_change(changes, original_index, original_index + 1, modified_index, modified_index + 1)
+    end
+  end
+end
+
+local function compute_line_changes(original_lines, modified_lines, options)
+  local c_orig, orig_count = lua_to_c_strings(original_lines)
+  local c_mod, mod_count = lua_to_c_strings(modified_lines)
+  local hit_timeout = ffi.new("bool[1]")
+  local c_diffs = lib.compute_line_alignments(c_orig, orig_count, c_mod, mod_count, options.max_computation_time_ms or 5000, hit_timeout)
+  if c_diffs == nil then
+    error("compute_line_alignments returned NULL")
+  end
+
+  local changes = {}
+  local previous_original = 0
+  local previous_modified = 0
+
+  for index = 0, c_diffs.count - 1 do
+    local line_diff = c_diffs.diffs[index]
+    if not options.ignore_trim_whitespace then
+      append_whitespace_changes(changes, original_lines, modified_lines, {
+        original = previous_original + 1,
+        modified = previous_modified + 1,
+      }, line_diff.seq1_start - previous_original)
+    end
+
+    append_change(changes, line_diff.seq1_start + 1, line_diff.seq1_end + 1, line_diff.seq2_start + 1, line_diff.seq2_end + 1)
+    previous_original = line_diff.seq1_end
+    previous_modified = line_diff.seq2_end
+  end
+
+  if not options.ignore_trim_whitespace then
+    append_whitespace_changes(changes, original_lines, modified_lines, {
+      original = previous_original + 1,
+      modified = previous_modified + 1,
+    }, math.min(orig_count - previous_original, mod_count - previous_modified))
+  end
+
+  lib.free_sequence_diff_array(c_diffs)
+  return changes, hit_timeout[0]
+end
+
+local function slice_lines(lines, line_range)
+  local result = {}
+  for line = line_range.start_line, line_range.end_line - 1 do
+    result[#result + 1] = lines[line]
+  end
+  return result
+end
+
+local function offset_char_range(range, line_offset)
+  return {
+    start_line = range.start_line + line_offset,
+    start_col = range.start_col,
+    end_line = range.end_line + line_offset,
+    end_col = range.end_col,
+  }
+end
+
+local function refine_pair(original_line, modified_line, positions, options)
+  local pair_diff = compute_native_diff({ original_line }, { modified_line }, {
+    ignore_trim_whitespace = options.ignore_trim_whitespace,
+    max_computation_time_ms = options.max_computation_time_ms,
+    extend_to_subwords = options.extend_to_subwords,
+    compute_moves = false,
+  })
+  local inner_changes = {}
+
+  for _, change in ipairs(pair_diff.changes) do
+    for _, inner in ipairs(change.inner_changes) do
+      inner_changes[#inner_changes + 1] = {
+        original = offset_char_range(inner.original, positions.original - 1),
+        modified = offset_char_range(inner.modified, positions.modified - 1),
+      }
+    end
+  end
+
+  return inner_changes, pair_diff.hit_timeout
+end
+
+local function apply_line_matcher(change, original_lines, modified_lines, matcher, options)
+  local context = {
+    original_lines = slice_lines(original_lines, change.original),
+    modified_lines = slice_lines(modified_lines, change.modified),
+    original_start_line = change.original.start_line,
+    modified_start_line = change.modified.start_line,
+  }
+
+  if #context.original_lines == 0 or #context.modified_lines == 0 then
+    return false
+  end
+
+  local hit_timeout = false
+  local pairs = matcher(context)
+  for _, pair in ipairs(pairs) do
+    local positions = {
+      original = change.original.start_line + pair.original_index - 1,
+      modified = change.modified.start_line + pair.modified_index - 1,
+    }
+    change.line_pairs[#change.line_pairs + 1] = {
+      original_line = positions.original,
+      modified_line = positions.modified,
+    }
+
+    local inner_changes, pair_hit_timeout = refine_pair(context.original_lines[pair.original_index], context.modified_lines[pair.modified_index], positions, options)
+    vim.list_extend(change.inner_changes, inner_changes)
+    hit_timeout = hit_timeout or pair_hit_timeout
+  end
+
+  return hit_timeout
+end
+
+-- Main API: Compute diff between two sets of lines
+-- Returns Lua table representation of LinesDiff
+function M.compute_diff(original_lines, modified_lines, options)
+  options = options or {}
+  local changes, hit_timeout = compute_line_changes(original_lines, modified_lines, options)
+  local matcher = options.line_matcher
+  if matcher == nil then
+    matcher = require("codediff.config").options.diff.line_matcher
+  end
+
+  for _, change in ipairs(changes) do
+    hit_timeout = apply_line_matcher(change, original_lines, modified_lines, matcher, options) or hit_timeout
+  end
+
+  local moves = {}
+  if options.compute_moves then
+    local move_diff = compute_native_diff(original_lines, modified_lines, options)
+    moves = move_diff.moves
+    hit_timeout = hit_timeout or move_diff.hit_timeout
+  end
+
+  return {
+    changes = changes,
+    moves = moves,
+    hit_timeout = hit_timeout,
+  }
 end
 
 -- Get library version
