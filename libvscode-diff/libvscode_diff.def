@@ -1,5 +1,7 @@
 LIBRARY vscode_diff
 EXPORTS
     compute_diff
+    compute_line_alignments
     free_lines_diff
+    free_sequence_diff_array
     get_version

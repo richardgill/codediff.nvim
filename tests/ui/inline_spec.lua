@@ -106,7 +106,7 @@ describe("Inline Diff Rendering", function()
     local buf = vim.api.nvim_create_buf(false, true)
 
     local original = { "hello world" }
-    local modified = { "hello earth" }
+    local modified = { "hello whirl" }
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
 
@@ -236,7 +236,7 @@ describe("Inline Diff Rendering", function()
     local buf = vim.api.nvim_create_buf(false, true)
 
     local original = { "hello world" }
-    local modified = { "hello earth" }
+    local modified = { "hello whirl" }
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
 
