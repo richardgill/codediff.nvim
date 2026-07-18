@@ -1,14 +1,27 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From a214bad1b90e7f2c93a28a4f3e679ed5b1ff2211 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 16:30:00 +0100
 Subject: [PATCH] fix: build fork native library locally
 
 ---
+ README.md                           |  28 ++--
+ build.cmd                           |  23 ++--
+ build.sh                            |  62 ++++-----
+ libvscode-diff/build.cmd.in         |  23 ++--
+ libvscode-diff/build.sh.in          |  62 ++++-----
+ lua/codediff/commands.lua           |   2 +-
+ lua/codediff/core/diff.lua          |  16 +--
+ lua/codediff/core/local_builder.lua | 191 ++++++++++++++++++++++++++++
+ tests/core/local_builder_spec.lua   |  42 ++++++
+ 9 files changed, 342 insertions(+), 107 deletions(-)
+ create mode 100644 lua/codediff/core/local_builder.lua
+ create mode 100644 tests/core/local_builder_spec.lua
+
 diff --git a/README.md b/README.md
-index d48495f..681d7d3 100644
+index 30edf2b..807b4aa 100644
 --- a/README.md
 +++ b/README.md
-@@ -89,8 +89,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -38,8 +38,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
  
  - Neovim >= 0.7.0 (for Lua FFI support; 0.10+ recommended for vim.system)
  - Git (for git diff features)
@@ -22,7 +35,7 @@ index d48495f..681d7d3 100644
  
  ### Using lazy.nvim
  
-@@ -434,7 +437,7 @@ Three strategies are available:
+@@ -381,7 +384,7 @@ Three strategies are available:
  
  Custom Lua matcher callbacks are not supported.
  
@@ -31,7 +44,7 @@ index d48495f..681d7d3 100644
  
  ### Native gutter signs
  
-@@ -471,25 +474,22 @@ vim.opt.statuscolumn = "%C%=%l %s"
+@@ -418,25 +421,22 @@ vim.opt.statuscolumn = "%C%=%l %s"
  
  ### Managing Library Installation
  
@@ -66,7 +79,7 @@ index d48495f..681d7d3 100644
  
  If you prefer to install manually without a plugin manager:
 diff --git a/build.cmd b/build.cmd
-index fb99b03..23fe830 100644
+index fb99b03..71c243b 100644
 --- a/build.cmd
 +++ b/build.cmd
 @@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
@@ -140,7 +153,7 @@ index fb99b03..23fe830 100644
  cd ..
  endlocal
 diff --git a/build.sh b/build.sh
-index fd09ca3..4e5c4fb 100755
+index fd09ca3..58d9ed0 100755
 --- a/build.sh
 +++ b/build.sh
 @@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
@@ -248,7 +261,7 @@ index fd09ca3..4e5c4fb 100755
 +echo "✓ Build successful: $OUTPUT_PATH"
  cd ..
 diff --git a/libvscode-diff/build.cmd.in b/libvscode-diff/build.cmd.in
-index fb99b03..23fe830 100644
+index fb99b03..71c243b 100644
 --- a/libvscode-diff/build.cmd.in
 +++ b/libvscode-diff/build.cmd.in
 @@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
@@ -322,7 +335,7 @@ index fb99b03..23fe830 100644
  cd ..
  endlocal
 diff --git a/libvscode-diff/build.sh.in b/libvscode-diff/build.sh.in
-index fd09ca3..4e5c4fb 100644
+index fd09ca3..58d9ed0 100644
 --- a/libvscode-diff/build.sh.in
 +++ b/libvscode-diff/build.sh.in
 @@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
@@ -481,7 +494,7 @@ index a89289d..13277ec 100644
      )
 diff --git a/lua/codediff/core/local_builder.lua b/lua/codediff/core/local_builder.lua
 new file mode 100644
-index 0000000..5bff05f
+index 0000000..c0b852b
 --- /dev/null
 +++ b/lua/codediff/core/local_builder.lua
 @@ -0,0 +1,191 @@
@@ -724,5 +737,3 @@ index 0000000..2e36c2a
 +    assert.is_truthy(err:match("retry :CodeDiff install"))
 +  end)
 +end)
--- 
-2.49.2

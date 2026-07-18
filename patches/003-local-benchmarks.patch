@@ -1,4 +1,4 @@
-From 7ea3abb4fed997a7036447cf87408486ea9b6e94 Mon Sep 17 00:00:00 2001
+From 333d1e00a77e2c339076ad973f421f4018377243 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 11:56:21 +0000
 Subject: [PATCH] chore: add local benchmark suites
@@ -8,17 +8,17 @@ Subject: [PATCH] chore: add local benchmark suites
  Makefile                 |   7 +-
  benchmarks/bootstrap.lua |   2 +
  benchmarks/diff.lua      |  52 +++++++
- benchmarks/fixtures.lua  | 207 ++++++++++++++++++++++++++++
- benchmarks/harness.lua   | 179 ++++++++++++++++++++++++
+ benchmarks/fixtures.lua  | 207 +++++++++++++++++++++++++
+ benchmarks/harness.lua   | 179 +++++++++++++++++++++
  benchmarks/normalize.lua |  36 +++++
- benchmarks/render.lua    | 156 +++++++++++++++++++++
- benchmarks/report.lua    | 163 ++++++++++++++++++++++
- benchmarks/timeout.lua   |  97 +++++++++++++
- benchmarks/workflows.lua | 291 +++++++++++++++++++++++++++++++++++++++
- docs/BENCHMARKS.md       |  41 ++++++
+ benchmarks/render.lua    | 156 +++++++++++++++++++
+ benchmarks/report.lua    | 163 +++++++++++++++++++
+ benchmarks/timeout.lua   |  97 ++++++++++++
+ benchmarks/workflows.lua | 327 +++++++++++++++++++++++++++++++++++++++
+ docs/BENCHMARKS.md       |  41 +++++
  docs/README.md           |   1 +
  scripts/benchmark.sh     |  61 ++++++++
- 14 files changed, 1296 insertions(+), 4 deletions(-)
+ 14 files changed, 1332 insertions(+), 4 deletions(-)
  create mode 100644 benchmarks/bootstrap.lua
  create mode 100644 benchmarks/diff.lua
  create mode 100644 benchmarks/fixtures.lua
@@ -1035,10 +1035,10 @@ index 0000000..37fc512
 +vim.cmd("quit")
 diff --git a/benchmarks/workflows.lua b/benchmarks/workflows.lua
 new file mode 100644
-index 0000000..31a431c
+index 0000000..786706b
 --- /dev/null
 +++ b/benchmarks/workflows.lua
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,327 @@
 +dofile("benchmarks/bootstrap.lua")
 +
 +vim.cmd("runtime plugin/codediff.lua")
@@ -1054,6 +1054,7 @@ index 0000000..31a431c
 +local fixture
 +local base_tabpage
 +local original_cwd = vim.fn.getcwd()
++local RAPID_NAVIGATION_COUNT = 15
 +
 +local git = function(arguments)
 +  local command = { "git", "-C", fixture.dir }
@@ -1107,13 +1108,16 @@ index 0000000..31a431c
 +  vim.fn.chdir(fixture.dir)
 +end
 +
-+local get_ready_view = function(tabpage, previous_path)
++local get_ready_view = function(tabpage, previous_path, expected_path)
 +  local explorer = lifecycle.get_explorer(tabpage)
 +  local session = lifecycle.get_session(tabpage)
 +  if not explorer or not session or not session.stored_diff_result then
 +    return nil
 +  end
 +  if previous_path and explorer.current_file_path == previous_path then
++    return nil
++  end
++  if expected_path and explorer.current_file_path ~= expected_path then
 +    return nil
 +  end
 +  if not explorer.current_file_path or not session.modified_path then
@@ -1135,11 +1139,11 @@ index 0000000..31a431c
 +  }
 +end
 +
-+local wait_for_view = function(tabpage, previous_path)
++local wait_for_view = function(tabpage, previous_path, expected_path)
 +  local view
 +  local ready = vim.wait(8000, function()
 +    if tabpage then
-+      view = get_ready_view(tabpage, previous_path)
++      view = get_ready_view(tabpage, previous_path, expected_path)
 +      return view ~= nil
 +    end
 +    for _, candidate in ipairs(vim.api.nvim_list_tabpages()) do
@@ -1216,6 +1220,32 @@ index 0000000..31a431c
 +  return wait_for_view(context.tabpage, context.previous_path)
 +end
 +
++local setup_rapid_next_files = function()
++  local view = current_view()
++  focus_modified(view)
++  local current_index = tonumber(view.explorer.current_file_path:match("file%-(%d+)%.txt"))
++  assert(current_index, "unexpected benchmark fixture path")
++  local expected_index = (current_index - 1 + RAPID_NAVIGATION_COUNT) % fixture.file_count + 1
++  return {
++    action = get_action(view.session.modified_bufnr, "]f"),
++    tabpage = view.tabpage,
++    expected_path = string.format("file-%02d.txt", expected_index),
++  }
++end
++
++local run_rapid_next_files = function(context)
++  for _ = 1, RAPID_NAVIGATION_COUNT do
++    context.action()
++  end
++  return wait_for_view(context.tabpage, nil, context.expected_path)
++end
++
++local validate_rapid_next_files = function(result, context)
++  validate_rendered_view(result)
++  assert(result.view.explorer.current_file_path == context.expected_path, "rapid navigation selected the wrong file")
++  assert(result.view.session.modified_path:find(context.expected_path, 1, true), "rapid navigation rendered the wrong file")
++end
++
 +local setup_gf = function()
 +  local view = current_view()
 +  local base_window = vim.api.nvim_tabpage_get_win(base_tabpage)
@@ -1279,6 +1309,12 @@ index 0000000..31a431c
 +    setup = setup_next_file,
 +    run = run_next_file,
 +    validate = validate_rendered_view,
++  },
++  {
++    name = "rapid-next-files-to-render",
++    setup = setup_rapid_next_files,
++    run = run_rapid_next_files,
++    validate = validate_rapid_next_files,
 +  },
 +  {
 +    name = "gf-to-buffer",

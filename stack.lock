@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 4fad2cb156a64a881ded00a23e39d3e6ce680af0
-expectedTree = a8198fdc6b2a558104dc3c6ad557ebdd0e8e6801
+expectedHead = 3a9f425a352995cb48d6ab771812e9b7f30c9209
+expectedTree = 0ed69a0b29edce1f3c2904ff307720ed5e51c004
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -41,7 +41,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/457
 [patch "local-benchmarks"]
 description = Add local performance benchmarks
 file = patches/003-local-benchmarks.patch
-originCommit = 332e56b020c32cb56df267d9529da1bb12d77d3c
+originCommit = eddaa68268c29694e754747bd888a0f38fef6097
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/458
 
 [patch "explorer-gf"]
