@@ -144,6 +144,7 @@ function M.toggle_visibility(explorer)
 
     vim.schedule(function()
       layout.arrange(tabpage)
+      require("codediff.ui.wrap_alignment").rebuild(tabpage, nil, "panel")
     end)
   else
     explorer.split:hide()
@@ -151,6 +152,7 @@ function M.toggle_visibility(explorer)
 
     vim.schedule(function()
       layout.arrange(tabpage)
+      require("codediff.ui.wrap_alignment").rebuild(tabpage, nil, "panel")
     end)
   end
 end

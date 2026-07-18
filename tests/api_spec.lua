@@ -26,6 +26,10 @@ describe("Public API", function()
     it("exports prev_file function", function()
       assert.is_function(codediff.prev_file)
     end)
+
+    it("exports invalidate_alignment function", function()
+      assert.is_function(codediff.invalidate_alignment)
+    end)
   end)
 
   describe("navigation functions", function()
@@ -46,6 +50,11 @@ describe("Public API", function()
 
     it("prev_file returns false when no explorer/history", function()
       local result = codediff.prev_file()
+      assert.is_false(result)
+    end)
+
+    it("invalidate_alignment returns false when wrapping is inactive", function()
+      local result = codediff.invalidate_alignment()
       assert.is_false(result)
     end)
   end)

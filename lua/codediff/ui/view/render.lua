@@ -54,6 +54,54 @@ function M.establish_scrollbind(orig_win, mod_win, orig_buf, mod_buf, lines_diff
   end
 end
 
+function M.render_two_pane(opts)
+  local wrap_alignment = require("codediff.ui.wrap_alignment")
+  local has_windows = opts.original_win and opts.modified_win and vim.api.nvim_win_is_valid(opts.original_win) and vim.api.nvim_win_is_valid(opts.modified_win)
+  local wrap_enabled = opts.wrap_enabled
+  if wrap_enabled == nil then
+    wrap_enabled = wrap_alignment.is_enabled() and has_windows
+  else
+    wrap_enabled = wrap_enabled and has_windows
+  end
+  local saved_views = opts.saved_views or (wrap_enabled and wrap_alignment.capture_views({ opts.original_win, opts.modified_win }))
+
+  if wrap_enabled then
+    vim.wo[opts.original_win].wrap = true
+    vim.wo[opts.modified_win].wrap = true
+  end
+
+  -- Render diff highlights
+  core.render_diff(opts.original_buf, opts.modified_buf, opts.original_lines, opts.modified_lines, opts.lines_diff, {
+    skip_fillers = wrap_enabled,
+  })
+
+  -- Apply semantic tokens for virtual buffers
+  if opts.original_is_virtual then
+    semantic.apply_semantic_tokens(opts.original_buf, opts.modified_buf)
+  end
+  if opts.modified_is_virtual then
+    semantic.apply_semantic_tokens(opts.modified_buf, opts.original_buf)
+  end
+
+  if wrap_enabled then
+    wrap_alignment.finish_two_pane({
+      tabpage = opts.tabpage or vim.api.nvim_win_get_tabpage(opts.modified_win),
+      original_win = opts.original_win,
+      modified_win = opts.modified_win,
+      original_buf = opts.original_buf,
+      modified_buf = opts.modified_buf,
+      lines_diff = opts.lines_diff,
+      saved_views = saved_views,
+      defer_sync = opts.defer_sync,
+      reason = opts.reason,
+    })
+  else
+    wrap_alignment.clear_window(opts.original_win)
+    wrap_alignment.clear_window(opts.modified_win)
+  end
+  return wrap_enabled
+end
+
 -- Common logic: Compute diff and render highlights
 -- @param auto_scroll_to_first_hunk boolean: Whether to auto-scroll to first change (default true)
 -- @param line_range table?: Optional {start_line, end_line} to scroll to instead of first hunk
@@ -81,16 +129,19 @@ function M.compute_and_render(
     return nil
   end
 
-  -- Render diff highlights
-  core.render_diff(original_buf, modified_buf, original_lines, modified_lines, lines_diff)
-
-  -- Apply semantic tokens for virtual buffers
-  if original_is_virtual then
-    semantic.apply_semantic_tokens(original_buf, modified_buf)
-  end
-  if modified_is_virtual then
-    semantic.apply_semantic_tokens(modified_buf, original_buf)
-  end
+  local wrap_enabled = M.render_two_pane({
+    original_buf = original_buf,
+    modified_buf = modified_buf,
+    original_lines = original_lines,
+    modified_lines = modified_lines,
+    lines_diff = lines_diff,
+    original_is_virtual = original_is_virtual,
+    modified_is_virtual = modified_is_virtual,
+    original_win = original_win,
+    modified_win = modified_win,
+    defer_sync = true,
+    reason = "render",
+  })
 
   -- Setup scrollbind synchronization (only if windows provided)
   if original_win and modified_win and vim.api.nvim_win_is_valid(original_win) and vim.api.nvim_win_is_valid(modified_win) then
@@ -103,8 +154,8 @@ function M.compute_and_render(
     -- Step 1: Disable scrollbind while repositioning cursors
     vim.wo[original_win].scrollbind = false
     vim.wo[modified_win].scrollbind = false
-    vim.wo[original_win].wrap = false
-    vim.wo[modified_win].wrap = false
+    vim.wo[original_win].wrap = wrap_enabled
+    vim.wo[modified_win].wrap = wrap_enabled
 
     -- Step 2: Determine target cursor positions.
     -- The two panes show different content, so original/modified line
@@ -121,11 +172,12 @@ function M.compute_and_render(
       -- this render in the file-switch path) or current tabpage (this code
       -- can run from a scheduled callback on a different tab).
       local lifecycle = require("codediff.ui.lifecycle")
-      local tabpage = (modified_win and vim.api.nvim_win_is_valid(modified_win))
-        and vim.api.nvim_win_get_tabpage(modified_win) or nil
+      local tabpage = (modified_win and vim.api.nvim_win_is_valid(modified_win)) and vim.api.nvim_win_get_tabpage(modified_win) or nil
       local session = tabpage and lifecycle.get_session(tabpage) or nil
       local landing = session and session.pending_cursor_landing
-      if session then session.pending_cursor_landing = nil end
+      if session then
+        session.pending_cursor_landing = nil
+      end
 
       if line_range then
         -- Range mode: find the first hunk overlapping the line range, then
@@ -147,9 +199,7 @@ function M.compute_and_render(
         orig_cursor = { target_line, 0 }
         mod_cursor = { target_line, 0 }
       else
-        local hunk = landing == "last"
-          and lines_diff.changes[#lines_diff.changes]
-          or lines_diff.changes[1]
+        local hunk = landing == "last" and lines_diff.changes[#lines_diff.changes] or lines_diff.changes[1]
         orig_cursor = { hunk.original.start_line, 0 }
         mod_cursor = { hunk.modified.start_line, 0 }
       end
@@ -162,7 +212,12 @@ function M.compute_and_render(
     end
 
     -- Step 3: Establish scrollbind with anchor technique, then restore cursors
-    M.establish_scrollbind(original_win, modified_win, original_buf, modified_buf, lines_diff, orig_cursor, mod_cursor)
+    if wrap_enabled then
+      pcall(vim.api.nvim_win_set_cursor, original_win, orig_cursor)
+      pcall(vim.api.nvim_win_set_cursor, modified_win, mod_cursor)
+    else
+      M.establish_scrollbind(original_win, modified_win, original_buf, modified_buf, lines_diff, orig_cursor, mod_cursor)
+    end
 
     -- Step 4: Center view on first hunk for initial open
     if auto_scroll_to_first_hunk and #lines_diff.changes > 0 then
@@ -171,9 +226,30 @@ function M.compute_and_render(
         vim.cmd("normal! zz")
       end
     end
+    if wrap_enabled then
+      local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
+      require("codediff.ui.wrap_alignment").sync_from(tabpage, modified_win)
+    end
   end
 
   return lines_diff
+end
+
+function M.render_conflict_inputs(opts)
+  local render_result = core.render_merge_view(
+    opts.original_buf,
+    opts.modified_buf,
+    opts.base_to_original_diff,
+    opts.base_to_modified_diff,
+    opts.base_lines,
+    opts.original_lines,
+    opts.modified_lines,
+    { skip_fillers = opts.wrap_enabled }
+  )
+  -- Apply semantic tokens (both are virtual buffers in conflict mode)
+  semantic.apply_semantic_tokens(opts.original_buf, opts.modified_buf)
+  semantic.apply_semantic_tokens(opts.modified_buf, opts.original_buf)
+  return render_result
 end
 
 -- Conflict mode rendering: Both buffers show diff against base with alignment
@@ -210,23 +286,30 @@ function M.compute_and_render_conflict(original_buf, modified_buf, base_lines, o
     return nil
   end
 
-  -- Render merge view with alignment and filler lines
-  local render_result = core.render_merge_view(original_buf, modified_buf, base_to_original_diff, base_to_modified_diff, base_lines, original_lines, modified_lines)
+  local wrap_enabled = config.options.diff.wrap == true and require("codediff.ui.wrap_alignment").is_supported()
 
-  -- Apply semantic tokens (both are virtual buffers in conflict mode)
-  semantic.apply_semantic_tokens(original_buf, modified_buf)
-  semantic.apply_semantic_tokens(modified_buf, original_buf)
+  -- Render merge view with alignment and filler lines
+  local render_result = M.render_conflict_inputs({
+    original_buf = original_buf,
+    modified_buf = modified_buf,
+    base_to_original_diff = base_to_original_diff,
+    base_to_modified_diff = base_to_modified_diff,
+    base_lines = base_lines,
+    original_lines = original_lines,
+    modified_lines = modified_lines,
+    wrap_enabled = wrap_enabled,
+  })
 
   -- Setup window options with scrollbind (filler lines enable proper alignment)
   if original_win and modified_win and vim.api.nvim_win_is_valid(original_win) and vim.api.nvim_win_is_valid(modified_win) then
-    vim.wo[original_win].wrap = false
-    vim.wo[modified_win].wrap = false
+    vim.wo[original_win].wrap = wrap_enabled
+    vim.wo[modified_win].wrap = wrap_enabled
 
     -- Reset scroll position and enable scrollbind
     vim.api.nvim_win_set_cursor(original_win, { 1, 0 })
     vim.api.nvim_win_set_cursor(modified_win, { 1, 0 })
-    vim.wo[original_win].scrollbind = true
-    vim.wo[modified_win].scrollbind = true
+    vim.wo[original_win].scrollbind = not wrap_enabled
+    vim.wo[modified_win].scrollbind = not wrap_enabled
 
     -- Scroll to first change in either buffer
     if auto_scroll_to_first_hunk then
@@ -260,7 +343,7 @@ function M.compute_and_render_conflict(original_buf, modified_buf, base_lines, o
 end
 
 -- Common logic: Setup auto-refresh for all diff buffers (real and virtual)
-function M.setup_auto_refresh(original_buf, modified_buf, original_is_virtual, modified_is_virtual)
+function M.setup_auto_refresh(original_buf, modified_buf)
   local auto_refresh = require("codediff.ui.auto_refresh")
   auto_refresh.enable(original_buf)
   auto_refresh.enable(modified_buf)

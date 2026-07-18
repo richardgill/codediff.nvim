@@ -90,15 +90,19 @@ local function suspend_diff(tabpage)
 
   -- Disable auto-refresh (stop watching buffer changes)
   local auto_refresh = require("codediff.ui.auto_refresh")
-  auto_refresh.disable(diff.original_bufnr)
-  auto_refresh.disable(diff.modified_bufnr)
+  auto_refresh.disable(diff.original_bufnr, tabpage)
+  auto_refresh.disable(diff.modified_bufnr, tabpage)
   if diff.result_bufnr then
-    auto_refresh.disable_result(diff.result_bufnr)
+    auto_refresh.disable_result(diff.result_bufnr, tabpage)
   end
 
   -- Clear highlights from both buffers
   clear_buffer_highlights(diff.original_bufnr)
   clear_buffer_highlights(diff.modified_bufnr)
+  local wrap_alignment = require("codediff.ui.wrap_alignment")
+  wrap_alignment.clear_window(diff.original_win)
+  wrap_alignment.clear_window(diff.modified_win)
+  wrap_alignment.clear_window(diff.result_win)
   if diff.result_bufnr then
     clear_buffer_highlights(diff.result_bufnr)
   end
@@ -108,6 +112,43 @@ local function suspend_diff(tabpage)
 end
 
 M.suspend_diff = suspend_diff
+
+local function render_conflict(diff, original_lines, modified_lines, base_to_modified_diff, wrap_enabled)
+  if not diff.merge_base_lines or not diff.result_bufnr or not vim.api.nvim_buf_is_valid(diff.result_bufnr) then
+    return
+  end
+
+  local config = require("codediff.config")
+  local diff_module = require("codediff.core.diff")
+  local diff_options = {
+    max_computation_time_ms = config.options.diff.max_computation_time_ms,
+    ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
+    compute_moves = config.options.diff.compute_moves,
+  }
+  local base_to_original_diff = diff_module.compute_diff(diff.merge_base_lines, original_lines, diff_options)
+  if not base_to_original_diff then
+    return
+  end
+
+  local render = require("codediff.ui.view.render")
+  render.render_conflict_inputs({
+    original_buf = diff.original_bufnr,
+    modified_buf = diff.modified_bufnr,
+    base_to_original_diff = base_to_original_diff,
+    base_to_modified_diff = base_to_modified_diff,
+    base_lines = diff.merge_base_lines,
+    original_lines = original_lines,
+    modified_lines = modified_lines,
+    wrap_enabled = wrap_enabled,
+  })
+
+  local result_lines = vim.api.nvim_buf_get_lines(diff.result_bufnr, 0, -1, false)
+  local result_diff = diff_module.compute_diff(diff.result_base_lines or diff.merge_base_lines, result_lines, diff_options)
+  if result_diff then
+    require("codediff.ui.core").render_single_buffer(diff.result_bufnr, result_diff, "modified")
+  end
+  require("codediff.ui.conflict").refresh_all_conflict_signs(diff)
+end
 
 -- Resume diff view (when entering tab)
 -- @param tabpage number: Tab page ID
@@ -155,7 +196,8 @@ local function resume_diff(tabpage)
     -- Buffer or file changed, recompute diff
     local diff_module = require("codediff.core.diff")
     local config = require("codediff.config")
-    lines_diff = diff_module.compute_diff(original_lines, modified_lines, {
+    local diff_original_lines = (diff.result_bufnr and diff.merge_base_lines) or original_lines
+    lines_diff = diff_module.compute_diff(diff_original_lines, modified_lines, {
       max_computation_time_ms = config.options.diff.max_computation_time_ms,
       ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
       compute_moves = config.options.diff.compute_moves,
@@ -179,18 +221,43 @@ local function resume_diff(tabpage)
 
   -- Render with fresh content and (possibly reused) diff result
   if lines_diff then
+    local wrap_alignment = require("codediff.ui.wrap_alignment")
+    local wrap_enabled = wrap_alignment.is_enabled() and diff.layout == "side-by-side"
+    local saved_views = wrap_enabled and wrap_alignment.capture_views({ diff.original_win, diff.modified_win, diff.result_win }) or nil
     if diff.layout == "inline" then
       local inline_mod = require("codediff.ui.inline")
       inline_mod.render_inline_diff(diff.modified_bufnr, lines_diff, original_lines, modified_lines)
     else
-      local core = require("codediff.ui.core")
-      core.render_diff(diff.original_bufnr, diff.modified_bufnr, original_lines, modified_lines, lines_diff)
+      if diff.result_win then
+        render_conflict(diff, original_lines, modified_lines, lines_diff, wrap_enabled)
+        if wrap_enabled then
+          wrap_alignment.finish_conflict({ tabpage = tabpage, saved_views = saved_views, reason = "resume" })
+        else
+          wrap_alignment.clear_window(diff.original_win)
+          wrap_alignment.clear_window(diff.modified_win)
+        end
+      else
+        require("codediff.ui.view.render").render_two_pane({
+          tabpage = tabpage,
+          original_buf = diff.original_bufnr,
+          modified_buf = diff.modified_bufnr,
+          original_lines = original_lines,
+          modified_lines = modified_lines,
+          lines_diff = lines_diff,
+          original_win = diff.original_win,
+          modified_win = diff.modified_win,
+          wrap_enabled = wrap_enabled,
+          saved_views = saved_views,
+          reason = "resume",
+        })
+      end
     end
 
     -- Re-sync scrollbind ONLY if diff was recomputed and not inline mode
     if
       diff_was_recomputed
       and diff.layout ~= "inline"
+      and not wrap_enabled
       and diff.original_win
       and diff.modified_win
       and vim.api.nvim_win_is_valid(diff.original_win)

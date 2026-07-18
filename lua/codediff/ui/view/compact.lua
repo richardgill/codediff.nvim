@@ -12,6 +12,20 @@ local visible_lines_by_win = {}
 -- bounce back. Set true while a sync is in flight.
 local _syncing = false
 
+local capture_wrap_views = function(session, opts)
+  local wrap_alignment = require("codediff.ui.wrap_alignment")
+  if opts and opts.defer_wrap or not wrap_alignment.is_enabled() then
+    return nil
+  end
+  return wrap_alignment.capture_views({ session.original_win, session.modified_win, session.result_win })
+end
+
+local rebuild_wrap = function(tabpage, opts, saved_views)
+  if config.options.diff.wrap == true and not (opts and opts.defer_wrap) then
+    require("codediff.ui.wrap_alignment").rebuild(tabpage, saved_views, "fold")
+  end
+end
+
 --- Called by Neovim for each line when foldmethod=expr
 --- @return string fold level: "0" for visible lines, "1" for foldable
 function M.foldexpr_eval()
@@ -98,7 +112,17 @@ end
 -- closes folds — navigation keys like zj/zk/]z/[z are excluded since they
 -- don't change fold state).
 local FOLD_KEYS = {
-  "zo", "zO", "zc", "zC", "za", "zA", "zv", "zx", "zX", "zM", "zR",
+  "zo",
+  "zO",
+  "zc",
+  "zC",
+  "za",
+  "zA",
+  "zv",
+  "zx",
+  "zX",
+  "zM",
+  "zR",
 }
 
 --- Install buffer-local keymap wraps that propagate fold-open/close actions
@@ -123,8 +147,7 @@ local function setup_fold_sync(session)
   }
 
   for _, pane in ipairs(panes) do
-    if pane.win and vim.api.nvim_win_is_valid(pane.win)
-        and pane.buf and vim.api.nvim_buf_is_valid(pane.buf) then
+    if pane.win and vim.api.nvim_win_is_valid(pane.win) and pane.buf and vim.api.nvim_buf_is_valid(pane.buf) then
       for _, key in ipairs(FOLD_KEYS) do
         vim.keymap.set("n", key, function()
           local count = vim.v.count > 0 and tostring(vim.v.count) or ""
@@ -150,8 +173,7 @@ local function setup_fold_sync(session)
           _syncing = true
           local ok, err = pcall(function()
             for _, other in ipairs(panes) do
-              if other.win ~= pane.win
-                  and other.win and vim.api.nvim_win_is_valid(other.win) then
+              if other.win ~= pane.win and other.win and vim.api.nvim_win_is_valid(other.win) then
                 local target = M.compute_corresponding_lnum(changes, pane.side, other.side, src_lnum)
                 target = math.max(1, math.min(target, vim.api.nvim_buf_line_count(other.buf)))
                 -- Save & restore cursor so the partner pane doesn't visibly jump.
@@ -168,6 +190,7 @@ local function setup_fold_sync(session)
           if not ok then
             vim.notify("[codediff] synced-fold error: " .. tostring(err), vim.log.levels.DEBUG)
           end
+          rebuild_wrap(vim.api.nvim_get_current_tabpage())
         end, { buffer = pane.buf, silent = true, desc = "codediff: synced fold " .. key })
       end
     end
@@ -212,6 +235,7 @@ function M.enable(tabpage)
   end
 
   local context = config.options.diff.compact_context_lines
+  local saved_views = capture_wrap_views(session)
 
   -- Determine which windows to fold
   local entries = {}
@@ -251,18 +275,20 @@ function M.enable(tabpage)
 
   session.compact_mode = true
   setup_fold_sync(session)
+  rebuild_wrap(tabpage, nil, saved_views)
   return true
 end
 
 --- Disable compact mode for a tabpage
 --- @param tabpage number
 --- @return boolean success
-function M.disable(tabpage)
+function M.disable(tabpage, opts)
   local session = lifecycle.get_session(tabpage)
   if not session or not session.compact_mode then
     return false
   end
 
+  local saved_views = capture_wrap_views(session, opts)
   local saved = session.compact_saved_fold_state or {}
   for win, fold_state in pairs(saved) do
     if vim.api.nvim_win_is_valid(win) then
@@ -280,6 +306,7 @@ function M.disable(tabpage)
 
   session.compact_saved_fold_state = nil
   session.compact_mode = false
+  rebuild_wrap(tabpage, opts, saved_views)
   return true
 end
 
@@ -304,7 +331,7 @@ end
 --- Called after file switches or re-renders where window buffers change
 --- but session.compact_mode should persist.
 --- @param tabpage number
-function M.reapply(tabpage)
+function M.reapply(tabpage, opts)
   local session = lifecycle.get_session(tabpage)
   if not session or not session.compact_mode then
     return
@@ -319,6 +346,7 @@ function M.reapply(tabpage)
   end
 
   local context = config.options.diff.compact_context_lines
+  local saved_views = capture_wrap_views(session, opts)
 
   local entries = {}
   if session.layout == "inline" then
@@ -344,12 +372,13 @@ function M.reapply(tabpage)
   -- Buffers may have changed (file switch in explorer mode). Re-install
   -- the sync keymaps on the current bufnrs.
   setup_fold_sync(session)
+  rebuild_wrap(tabpage, opts, saved_views)
 end
 
 --- Refresh compact mode after diff recomputation.
 --- Re-applies fold settings and forces fold re-evaluation.
 --- @param tabpage number
-function M.refresh(tabpage)
+function M.refresh(tabpage, opts)
   local session = lifecycle.get_session(tabpage)
   if not session or not session.compact_mode then
     return
@@ -357,11 +386,11 @@ function M.refresh(tabpage)
 
   local changes = session.stored_diff_result and session.stored_diff_result.changes
   if not changes or #changes == 0 then
-    M.disable(tabpage)
+    M.disable(tabpage, opts)
     return
   end
 
-  M.reapply(tabpage)
+  M.reapply(tabpage, opts)
 end
 
 return M

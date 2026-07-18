@@ -716,12 +716,14 @@ function M.toggle_visibility(history)
     history.winid = history.split.winid
     vim.schedule(function()
       layout.arrange(tabpage)
+      require("codediff.ui.wrap_alignment").rebuild(tabpage, nil, "panel")
     end)
   else
     history.split:hide()
     history.is_hidden = true
     vim.schedule(function()
       layout.arrange(tabpage)
+      require("codediff.ui.wrap_alignment").rebuild(tabpage, nil, "panel")
     end)
   end
 end

@@ -311,7 +311,9 @@ end
 
 -- Render diff highlights and fillers
 -- Assumes buffer content is already set by caller
-function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, lines_diff)
+function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, lines_diff, opts)
+  opts = opts or {}
+
   -- Clear existing highlights
   vim.api.nvim_buf_clear_namespace(left_bufnr, ns_highlight, 0, -1)
   vim.api.nvim_buf_clear_namespace(right_bufnr, ns_highlight, 0, -1)
@@ -348,18 +350,20 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
       end
     end
 
-    local fillers, new_last_orig, new_last_mod = calculate_fillers(mapping, original_lines, modified_lines, last_orig_line, last_mod_line)
+    if not opts.skip_fillers then
+      local fillers, new_last_orig, new_last_mod = calculate_fillers(mapping, original_lines, modified_lines, last_orig_line, last_mod_line)
 
-    last_orig_line = new_last_orig
-    last_mod_line = new_last_mod
+      last_orig_line = new_last_orig
+      last_mod_line = new_last_mod
 
-    for _, filler in ipairs(fillers) do
-      if filler.buffer == "original" then
-        insert_filler_lines(left_bufnr, filler.after_line - 1, filler.count)
-        total_left_fillers = total_left_fillers + filler.count
-      else
-        insert_filler_lines(right_bufnr, filler.after_line - 1, filler.count)
-        total_right_fillers = total_right_fillers + filler.count
+      for _, filler in ipairs(fillers) do
+        if filler.buffer == "original" then
+          insert_filler_lines(left_bufnr, filler.after_line - 1, filler.count)
+          total_left_fillers = total_left_fillers + filler.count
+        else
+          insert_filler_lines(right_bufnr, filler.after_line - 1, filler.count)
+          total_right_fillers = total_right_fillers + filler.count
+        end
       end
     end
   end
@@ -368,7 +372,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
   if lines_diff.moves and #lines_diff.moves > 0 then
     local ok, move = pcall(require, "codediff.ui.move")
     if ok and move then
-      move.render_moves(left_bufnr, right_bufnr, lines_diff)
+      move.render_moves(left_bufnr, right_bufnr, lines_diff, { skip_fillers = opts.skip_fillers })
     else
       vim.notify_once("[codediff] failed to load codediff.ui.move: " .. tostring(move), vim.log.levels.WARN)
     end
@@ -450,7 +454,8 @@ end
 -- base_lines: array of base content lines
 -- left_lines_content: array of input1 content lines
 -- right_lines_content: array of input2 content lines
-function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to_right_diff, base_lines, left_lines_content, right_lines_content)
+function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to_right_diff, base_lines, left_lines_content, right_lines_content, opts)
+  opts = opts or {}
   local merge_alignment = require("codediff.ui.merge_alignment")
 
   -- Clear existing highlights and fillers
@@ -507,14 +512,16 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
   local total_left_fillers = 0
   local total_right_fillers = 0
 
-  for _, filler in ipairs(left_fillers) do
-    insert_filler_lines(left_bufnr, filler.after_line - 1, filler.count)
-    total_left_fillers = total_left_fillers + filler.count
-  end
+  if not opts.skip_fillers then
+    for _, filler in ipairs(left_fillers) do
+      insert_filler_lines(left_bufnr, filler.after_line - 1, filler.count)
+      total_left_fillers = total_left_fillers + filler.count
+    end
 
-  for _, filler in ipairs(right_fillers) do
-    insert_filler_lines(right_bufnr, filler.after_line - 1, filler.count)
-    total_right_fillers = total_right_fillers + filler.count
+    for _, filler in ipairs(right_fillers) do
+      insert_filler_lines(right_bufnr, filler.after_line - 1, filler.count)
+      total_right_fillers = total_right_fillers + filler.count
+    end
   end
 
   return {

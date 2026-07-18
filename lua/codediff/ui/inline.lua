@@ -10,7 +10,7 @@ local compat = require("codediff.core.compat")
 M.ns_inline = vim.api.nvim_create_namespace("codediff-inline")
 
 -- Allow deleted-line virt_lines to scroll horizontally with the window
-local virt_lines_overflow = vim.fn.has("nvim-0.11") == 1 and "scroll" or nil
+local virt_lines_overflow = vim.fn.has("nvim-0.13") == 1 and "auto" or (vim.fn.has("nvim-0.11") == 1 and "scroll" or nil)
 
 -- Cache for merged highlight groups (syntax fg + diff bg)
 local merged_hl_cache = {}

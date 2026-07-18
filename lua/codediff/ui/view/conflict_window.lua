@@ -106,12 +106,15 @@ function M.setup_conflict_result_window(tabpage, session_config, original_win, m
   vim.bo[result_bufnr].modified = true
 
   -- Set window options for result
-  vim.wo[result_win].wrap = false
+  local wrap_alignment = require("codediff.ui.wrap_alignment")
+  wrap_alignment.capture_window(tabpage, "result", result_win)
+  local wrap_enabled = config.options.diff.wrap == true and wrap_alignment.is_supported()
+  vim.wo[result_win].wrap = wrap_enabled
   vim.wo[result_win].cursorline = true
 
   -- Enable scrollbind for result window
   vim.api.nvim_win_set_cursor(result_win, { 1, 0 })
-  vim.wo[result_win].scrollbind = true
+  vim.wo[result_win].scrollbind = not wrap_enabled
 
   -- Update lifecycle with result buffer/window FIRST
   -- (This must happen before setting winbar so ensure_no_winbar knows we're in conflict mode)
@@ -162,6 +165,9 @@ function M.setup_conflict_result_window(tabpage, session_config, original_win, m
   local session = lifecycle.get_session(tabpage)
   if session then
     conflict.refresh_all_conflict_signs(session)
+  end
+  if wrap_enabled then
+    require("codediff.ui.wrap_alignment").finish_conflict({ tabpage = tabpage, reason = "conflict-render" })
   end
 
   -- Return focus to modified window

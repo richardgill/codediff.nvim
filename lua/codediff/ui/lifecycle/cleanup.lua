@@ -36,14 +36,25 @@ local function cleanup_diff(tabpage)
 
   -- Disable auto-refresh for both buffers
   local auto_refresh = require("codediff.ui.auto_refresh")
-  auto_refresh.disable(diff.original_bufnr)
-  auto_refresh.disable(diff.modified_bufnr)
+  auto_refresh.disable(diff.original_bufnr, tabpage)
+  auto_refresh.disable(diff.modified_bufnr, tabpage)
+  if diff.result_bufnr then
+    auto_refresh.disable_result(diff.result_bufnr, tabpage)
+  end
 
   -- Clear highlights from both buffers
   state.clear_buffer_highlights(diff.original_bufnr)
   state.clear_buffer_highlights(diff.modified_bufnr)
+  local wrap_alignment = require("codediff.ui.wrap_alignment")
+  wrap_alignment.clear_window(diff.original_win)
+  wrap_alignment.clear_window(diff.modified_win)
+  wrap_alignment.clear_window(diff.result_win)
+  wrap_alignment.release_session(tabpage)
 
   -- Restore buffer states
+  if diff.inline_saved_original_bufhidden ~= nil and vim.api.nvim_buf_is_valid(diff.original_bufnr) then
+    vim.bo[diff.original_bufnr].bufhidden = diff.inline_saved_original_bufhidden
+  end
   state.restore_buffer_state(diff.original_bufnr, diff.original_state)
   state.restore_buffer_state(diff.modified_bufnr, diff.modified_state)
 
@@ -158,6 +169,9 @@ function M.setup_autocmds()
         -- Check if the closed window was part of a diff
         local active_diffs = session.get_active_diffs()
         for tabpage, diff in pairs(active_diffs) do
+          if diff.layout_transition then
+            return
+          end
           if diff.original_win == closed_win or diff.modified_win == closed_win then
             -- single_pane/inline mode: we expect only 1 diff window
             local is_single_window = diff.single_pane == true or diff.layout == "inline"
@@ -203,7 +217,7 @@ function M.setup_autocmds()
       local active_diffs = session.get_active_diffs()
       local diff = active_diffs[current_tab]
 
-      if diff then
+      if diff and not diff.layout_transition then
         local diff_win_count = count_diff_windows()
         local is_single_window = diff.single_pane == true or diff.layout == "inline"
         local threshold = is_single_window and 0 or 1
@@ -226,6 +240,9 @@ function M.setup_autocmds()
       end
       for tabpage, _ in pairs(session.get_active_diffs()) do
         pcall(layout.arrange, tabpage)
+        if require("codediff.config").options.diff.wrap == true then
+          pcall(require("codediff.ui.wrap_alignment").rebuild, tabpage)
+        end
       end
     end,
   })

@@ -4,6 +4,8 @@ local M = {}
 local lifecycle = require("codediff.ui.lifecycle")
 local config = require("codediff.config")
 local side_by_side = require("codediff.ui.view.side_by_side")
+local inline_view = require("codediff.ui.view.inline_view")
+local toggle = require("codediff.ui.view.toggle")
 
 -- Once-guard: register lifecycle autocmds on first view creation
 local lifecycle_initialized = false
@@ -47,7 +49,7 @@ function M.create(session_config, filetype, on_ready)
   end
 
   if get_layout(session_config) == "inline" then
-    return require("codediff.ui.view.inline_view").create(session_config, filetype, on_ready)
+    return inline_view.create(session_config, filetype, on_ready)
   end
 
   return side_by_side.create(session_config, filetype, on_ready)
@@ -60,14 +62,14 @@ end
 ---@return boolean success Whether update succeeded
 function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
   if get_layout(session_config, tabpage) == "inline" then
-    return require("codediff.ui.view.inline_view").update(tabpage, session_config, auto_scroll_to_first_hunk)
+    return inline_view.update(tabpage, session_config, auto_scroll_to_first_hunk)
   end
 
   return side_by_side.update(tabpage, session_config, auto_scroll_to_first_hunk)
 end
 
 function M.toggle_layout(tabpage)
-  return require("codediff.ui.view.toggle").toggle(tabpage)
+  return toggle.toggle(tabpage)
 end
 
 function M.get_current_layout(tabpage)

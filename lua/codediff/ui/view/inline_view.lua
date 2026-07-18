@@ -10,11 +10,16 @@ local inline = require("codediff.ui.inline")
 local semantic = require("codediff.ui.semantic_tokens")
 local layout = require("codediff.ui.layout")
 local welcome_window = require("codediff.ui.view.welcome_window")
+local wrap_alignment = require("codediff.ui.wrap_alignment")
 
 local helpers = require("codediff.ui.view.helpers")
 local panel = require("codediff.ui.view.panel")
 local is_virtual_revision = helpers.is_virtual_revision
 local prepare_buffer = helpers.prepare_buffer
+
+local is_wrap_enabled = function()
+  return config.options.diff.wrap == true and vim.fn.has("nvim-0.13") == 1
+end
 
 -- ============================================================================
 -- Compute diff and render inline highlights
@@ -52,21 +57,22 @@ local function compute_and_render_inline(
   end
 
   if modified_win and vim.api.nvim_win_is_valid(modified_win) then
-    vim.wo[modified_win].wrap = false
+    local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
+    wrap_alignment.capture_window(tabpage, "modified", modified_win)
+    vim.wo[modified_win].wrap = is_wrap_enabled()
     if auto_scroll_to_first_hunk and lines_diff.changes and #lines_diff.changes > 0 then
       -- Honor session.pending_cursor_landing (cycle-hunks-across-files
       -- backward direction sets it to "last"; see ui/view/navigation.lua).
       -- Look up the session via the window's tabpage because this code can
       -- run from a scheduled callback on a different tab.
       local lifecycle = require("codediff.ui.lifecycle")
-      local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
       local session = tabpage and lifecycle.get_session(tabpage) or nil
       local landing = session and session.pending_cursor_landing
-      if session then session.pending_cursor_landing = nil end
+      if session then
+        session.pending_cursor_landing = nil
+      end
 
-      local target_line = landing == "last"
-        and lines_diff.changes[#lines_diff.changes].modified.start_line
-        or lines_diff.changes[1].modified.start_line
+      local target_line = landing == "last" and lines_diff.changes[#lines_diff.changes].modified.start_line or lines_diff.changes[1].modified.start_line
       pcall(vim.api.nvim_win_set_cursor, modified_win, { target_line, 0 })
       vim.api.nvim_set_current_win(modified_win)
       vim.cmd("normal! zz")
@@ -124,8 +130,9 @@ function M.create(session_config, filetype, on_ready)
       pcall(vim.api.nvim_buf_delete, initial_buf, { force = true })
     end
 
+    wrap_alignment.capture_window(tabpage, "modified", modified_win)
     vim.wo[modified_win].cursorline = true
-    vim.wo[modified_win].wrap = false
+    vim.wo[modified_win].wrap = is_wrap_enabled()
 
     lifecycle.create_session(
       tabpage,
@@ -200,8 +207,9 @@ function M.create(session_config, filetype, on_ready)
     pcall(vim.api.nvim_buf_delete, initial_buf, { force = true })
   end
 
+  wrap_alignment.capture_window(tabpage, "modified", modified_win)
   vim.wo[modified_win].cursorline = true
-  vim.wo[modified_win].wrap = false
+  vim.wo[modified_win].wrap = is_wrap_enabled()
 
   local render_everything = function()
     if not vim.api.nvim_win_is_valid(modified_win) then
@@ -350,7 +358,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
   -- Disable auto-refresh and clear old highlights from ALL namespaces.
   -- ns_highlight/ns_filler may linger after toggling from side-by-side.
   if old_modified_buf and vim.api.nvim_buf_is_valid(old_modified_buf) then
-    auto_refresh.disable(old_modified_buf)
+    auto_refresh.disable(old_modified_buf, tabpage)
     lifecycle.clear_highlights(old_modified_buf)
   end
 
@@ -555,7 +563,7 @@ function M.show_single_file(tabpage, file_path, opts)
 
   -- Disable old auto-refresh
   if session.modified_bufnr and vim.api.nvim_buf_is_valid(session.modified_bufnr) then
-    auto_refresh.disable(session.modified_bufnr)
+    auto_refresh.disable(session.modified_bufnr, tabpage)
   end
 
   -- Load the file
@@ -620,7 +628,7 @@ function M.show_welcome(tabpage, load_bufnr)
 
   if session.modified_bufnr and vim.api.nvim_buf_is_valid(session.modified_bufnr) then
     inline.clear(session.modified_bufnr)
-    auto_refresh.disable(session.modified_bufnr)
+    auto_refresh.disable(session.modified_bufnr, tabpage)
   end
 
   vim.api.nvim_win_set_buf(mod_win, load_bufnr)

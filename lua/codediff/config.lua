@@ -47,6 +47,7 @@ M.defaults = {
     compute_moves = false, -- Detect moved code blocks (opt-in, may increase diff computation time)
     compact_context_lines = 3, -- Number of context lines around hunks in compact mode
     compact_sync_folds = true, -- Sync fold open/close across panes in compact mode (mirrors Vim diff mode behavior)
+    wrap = false, -- Wrap side-by-side diff panes with display-row alignment (requires Neovim 0.12+)
   },
 
   -- Explorer panel configuration

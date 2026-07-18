@@ -86,12 +86,22 @@ end
 --- Find tabpage containing a buffer
 function M.find_tabpage_by_buffer(bufnr)
   local active_diffs = get_active_diffs()
+  local current_tabpage = vim.api.nvim_get_current_tabpage()
+  local active_tabpage = nil
+  local matching_tabpage = nil
   for tabpage, sess in pairs(active_diffs) do
-    if sess.original_bufnr == bufnr or sess.modified_bufnr == bufnr or sess.result_bufnr == bufnr then
+    local matches = sess.original_bufnr == bufnr or sess.modified_bufnr == bufnr or sess.result_bufnr == bufnr
+    if matches and tabpage == current_tabpage and not sess.suspended then
       return tabpage
     end
+    if matches and not sess.suspended then
+      active_tabpage = active_tabpage or tabpage
+    end
+    if matches then
+      matching_tabpage = matching_tabpage or tabpage
+    end
   end
-  return nil
+  return active_tabpage or matching_tabpage
 end
 
 --- Check if original buffer is virtual

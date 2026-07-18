@@ -12,6 +12,7 @@ local config = require("codediff.config")
 local explorer_module = require("codediff.ui.explorer")
 local history_module = require("codediff.ui.history")
 local layout = require("codediff.ui.layout")
+local wrap_alignment = require("codediff.ui.wrap_alignment")
 
 local helpers = require("codediff.ui.view.helpers")
 local render = require("codediff.ui.view.render")
@@ -119,11 +120,14 @@ function M.create(session_config, filetype, on_ready)
     pcall(vim.api.nvim_buf_delete, initial_buf, { force = true })
   end
 
+  wrap_alignment.capture_window(tabpage, "original", original_win)
+  wrap_alignment.capture_window(tabpage, "modified", modified_win)
+
   -- Window options (scrollbind will be set by compute_and_render)
   -- Note: number and relativenumber are intentionally NOT set to honor user's local config
   local win_opts = {
     cursorline = true,
-    wrap = false,
+    wrap = wrap_alignment.is_enabled(),
     list = false,
   }
 
@@ -291,7 +295,7 @@ function M.create(session_config, filetype, on_ready)
             end
           )
           -- Enable auto-refresh for real file buffers only
-          setup_auto_refresh(original_info.bufnr, modified_info.bufnr, original_is_virtual, modified_is_virtual)
+          setup_auto_refresh(original_info.bufnr, modified_info.bufnr)
 
           -- Setup all keymaps in one place (centralized)
           setup_all_keymaps(tabpage, original_info.bufnr, modified_info.bufnr, false)
@@ -414,8 +418,8 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
   end
 
   -- Disable auto-refresh temporarily
-  auto_refresh.disable(old_original_buf)
-  auto_refresh.disable(old_modified_buf)
+  auto_refresh.disable(old_original_buf, tabpage)
+  auto_refresh.disable(old_modified_buf, tabpage)
 
   -- Clear highlights from old buffers (before they're replaced/deleted)
   lifecycle.clear_highlights(old_original_buf)
@@ -539,7 +543,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
         lifecycle.update_revisions(tabpage, session_config.original_revision, session_config.modified_revision)
         lifecycle.update_diff_result(tabpage, lines_diff)
         lifecycle.update_changedtick(tabpage, vim.api.nvim_buf_get_changedtick(original_info.bufnr), vim.api.nvim_buf_get_changedtick(modified_info.bufnr))
-        setup_auto_refresh(original_info.bufnr, modified_info.bufnr, original_is_virtual, modified_is_virtual)
+        setup_auto_refresh(original_info.bufnr, modified_info.bufnr)
 
         local is_explorer_mode = session.mode == "explorer"
         setup_all_keymaps(tabpage, original_info.bufnr, modified_info.bufnr, is_explorer_mode)
@@ -702,6 +706,8 @@ local function show_single_file(tabpage, opts)
 
   lifecycle.update_layout(tabpage, "side-by-side")
   local orig_win, mod_win = lifecycle.get_windows(tabpage)
+  wrap_alignment.clear_window(orig_win)
+  wrap_alignment.clear_window(mod_win)
   local highlights = require("codediff.ui.highlights")
 
   -- Clear highlights from current session buffers

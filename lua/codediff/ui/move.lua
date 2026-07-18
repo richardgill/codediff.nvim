@@ -159,13 +159,16 @@ end
 -- Annotation Placement
 -- ============================================================================
 
-local function place_annotation(ann_bufnr, filler_bufnr, ann_line, label, change, is_orig_side, changes, filler_line_count)
+local function place_annotation(ann_bufnr, filler_bufnr, ann_line, label, change, is_orig_side, changes, filler_line_count, skip_filler)
   local anchor = math.max(ann_line - 1, 0)
   pcall(vim.api.nvim_buf_set_extmark, ann_bufnr, ns_highlight, anchor, 0, {
     virt_lines = { { { label, "CodeDiffMoveTo" } } },
     virt_lines_above = true,
     priority = 250,
   })
+  if skip_filler then
+    return
+  end
 
   local filler_anchor, filler_above = compute_filler_position(ann_line, change, is_orig_side, changes, filler_line_count)
   pcall(vim.api.nvim_buf_set_extmark, filler_bufnr, ns_filler, filler_anchor, 0, {
@@ -183,7 +186,8 @@ end
 --- @param left_bufnr number original buffer
 --- @param right_bufnr number modified buffer
 --- @param lines_diff table diff result with .moves and .changes
-function M.render_moves(left_bufnr, right_bufnr, lines_diff)
+function M.render_moves(left_bufnr, right_bufnr, lines_diff, opts)
+  opts = opts or {}
   if not lines_diff.moves or #lines_diff.moves == 0 then
     return
   end
@@ -206,12 +210,12 @@ function M.render_moves(left_bufnr, right_bufnr, lines_diff)
 
     if orig_first <= orig_line_count then
       local change = find_change_for_orig(orig_first, lines_diff.changes)
-      place_annotation(left_bufnr, right_bufnr, orig_first, label, change, true, lines_diff.changes, mod_line_count)
+      place_annotation(left_bufnr, right_bufnr, orig_first, label, change, true, lines_diff.changes, mod_line_count, opts.skip_fillers)
     end
 
     if mod_first <= mod_line_count then
       local change = find_change_for_mod(mod_first, lines_diff.changes)
-      place_annotation(right_bufnr, left_bufnr, mod_first, label, change, false, lines_diff.changes, orig_line_count)
+      place_annotation(right_bufnr, left_bufnr, mod_first, label, change, false, lines_diff.changes, orig_line_count, opts.skip_fillers)
     end
   end
 end

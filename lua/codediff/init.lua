@@ -40,4 +40,8 @@ function M.prev_file()
   return navigation.prev_file()
 end
 
+function M.invalidate_alignment(tabpage, reason)
+  return require("codediff.ui.wrap_alignment").invalidate(tabpage, reason)
+end
+
 return M

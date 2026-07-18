@@ -170,7 +170,9 @@ function M.create_session(
       if win == sess.original_win or win == sess.modified_win then
         sync_window_ui(sess, win)
         -- Re-apply critical window options that might get reset by ftplugins/autocmds
-        vim.wo[win].wrap = false
+        local inline_wrap = sess.layout == "inline" and config.options.diff.wrap == true and vim.fn.has("nvim-0.13") == 1
+        local side_wrap = sess.layout == "side-by-side" and require("codediff.ui.wrap_alignment").is_enabled()
+        vim.wo[win].wrap = inline_wrap or side_wrap
         welcome_window.sync(win)
       end
     end,

@@ -100,32 +100,48 @@ local function do_diff_update(bufnr, skip_watcher_check)
     -- Update stored diff result in lifecycle (critical for hunk navigation and do/dp)
     lifecycle.update_diff_result(tabpage, lines_diff)
 
-    -- Refresh compact mode folds if active
-    require("codediff.ui.view.compact").refresh(tabpage)
-
-    -- Check if this is an inline mode session
     local session = lifecycle.get_session(tabpage)
-    if session and session.layout == "inline" then
+    if not session then
+      return
+    end
+
+    local wrap_alignment = require("codediff.ui.wrap_alignment")
+    local wrap_enabled = wrap_alignment.is_enabled() and session.layout == "side-by-side" and not session.result_win
+    local saved_views = wrap_enabled and wrap_alignment.capture_views({ session.original_win, session.modified_win }) or nil
+    require("codediff.ui.view.compact").refresh(tabpage, { defer_wrap = wrap_enabled })
+
+    if session.layout == "inline" then
       local inline_mod = require("codediff.ui.inline")
       inline_mod.render_inline_diff(modified_bufnr, lines_diff, original_lines, modified_lines)
       return
     end
 
-    -- Side-by-side mode: Update decorations on both buffers
-    core.render_diff(original_bufnr, modified_bufnr, original_lines, modified_lines, lines_diff)
+    require("codediff.ui.view.render").render_two_pane({
+      tabpage = tabpage,
+      original_buf = original_bufnr,
+      modified_buf = modified_bufnr,
+      original_lines = original_lines,
+      modified_lines = modified_lines,
+      lines_diff = lines_diff,
+      original_win = session.original_win,
+      modified_win = session.modified_win,
+      wrap_enabled = wrap_enabled,
+      saved_views = saved_views,
+      reason = "edit",
+    })
 
     -- Re-sync scrollbind after filler changes
     -- This ensures all windows stay aligned even if fillers were added/removed
-    local original_win, modified_win, result_win = nil, nil, nil
+    local original_win = session.original_win
+    local modified_win = session.modified_win
+    local result_win = nil
     local _, stored_result_win = lifecycle.get_result(tabpage)
 
-    for _, win in ipairs(vim.api.nvim_list_wins()) do
-      local buf = vim.api.nvim_win_get_buf(win)
-      if buf == original_bufnr then
-        original_win = win
-      elseif buf == modified_bufnr then
-        modified_win = win
-      end
+    if original_win and not vim.api.nvim_win_is_valid(original_win) then
+      original_win = nil
+    end
+    if modified_win and not vim.api.nvim_win_is_valid(modified_win) then
+      modified_win = nil
     end
 
     -- Check if result window is valid
@@ -133,7 +149,7 @@ local function do_diff_update(bufnr, skip_watcher_check)
       result_win = stored_result_win
     end
 
-    if original_win and modified_win then
+    if original_win and modified_win and not wrap_enabled then
       local current_win = vim.api.nvim_get_current_win()
 
       -- Only resync if user is in one of the diff windows
@@ -164,8 +180,8 @@ local function do_diff_update(bufnr, skip_watcher_check)
         if result_win then
           vim.wo[result_win].scrollbind = false
         end
-        vim.wo[original_win].scrollbind = true
-        vim.wo[modified_win].scrollbind = true
+        vim.wo[original_win].scrollbind = not wrap_enabled
+        vim.wo[modified_win].scrollbind = not wrap_enabled
         if result_win then
           vim.wo[result_win].scrollbind = true
         end
@@ -240,8 +256,25 @@ function M.enable(bufnr)
   })
 end
 
+local is_used_by_other_session = function(bufnr, excluded_tabpage, result_only)
+  if not excluded_tabpage then
+    return false
+  end
+  local sessions = require("codediff.ui.lifecycle.session").get_active_diffs()
+  for tabpage, session in pairs(sessions) do
+    local uses_buffer = result_only and session.result_bufnr == bufnr or not result_only and (session.original_bufnr == bufnr or session.modified_bufnr == bufnr)
+    if tabpage ~= excluded_tabpage and not session.suspended and uses_buffer then
+      return true
+    end
+  end
+  return false
+end
+
 -- Disable auto-refresh for a buffer
-function M.disable(bufnr)
+function M.disable(bufnr, excluded_tabpage)
+  if is_used_by_other_session(bufnr, excluded_tabpage) then
+    return
+  end
   cancel_timer(bufnr)
   watched_buffers[bufnr] = nil
 
@@ -270,9 +303,14 @@ local function do_result_diff_update(bufnr)
   end
 
   local base_lines = lifecycle.get_result_base_lines(tabpage)
-  if not base_lines then
+  local session = lifecycle.get_session(tabpage)
+  if not base_lines or not session then
     return
   end
+
+  local wrap_alignment = require("codediff.ui.wrap_alignment")
+  local wrap_enabled = wrap_alignment.is_enabled()
+  local saved_views = wrap_enabled and wrap_alignment.capture_views({ session.original_win, session.modified_win, session.result_win }) or nil
 
   -- Get current result buffer content
   local result_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -291,6 +329,10 @@ local function do_result_diff_update(bufnr)
 
   -- Render highlights on result buffer only (modified side = insertions shown as green)
   core.render_single_buffer(bufnr, lines_diff, "modified")
+  require("codediff.ui.conflict").refresh_all_conflict_signs(session)
+  if wrap_enabled then
+    wrap_alignment.finish_conflict({ tabpage = tabpage, saved_views = saved_views, reason = "result-edit" })
+  end
 end
 
 -- Trigger throttled diff update for result buffer
@@ -337,15 +379,13 @@ function M.enable_for_result(bufnr)
       M.disable_result(bufnr)
     end,
   })
-
-  -- Initial render
-  vim.schedule(function()
-    do_result_diff_update(bufnr)
-  end)
 end
 
 -- Disable auto-refresh for result buffer
-function M.disable_result(bufnr)
+function M.disable_result(bufnr, excluded_tabpage)
+  if is_used_by_other_session(bufnr, excluded_tabpage, true) then
+    return
+  end
   if result_timers[bufnr] then
     vim.fn.timer_stop(result_timers[bufnr])
     result_timers[bufnr] = nil
