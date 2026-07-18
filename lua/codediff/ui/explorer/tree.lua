@@ -28,6 +28,7 @@ local function create_group_node(label, name, files, children)
       label = label,
       file_count = #files,
       stats = line_stats.sum(files),
+      files = files,
     },
   }, children)
 end

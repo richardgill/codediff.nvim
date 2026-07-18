@@ -263,6 +263,7 @@ Setup entry point:
         restore = "X",
         toggle_changes = "gu",
         toggle_staged = "gs",
+        custom = {},
         fold_open = "zo",
         fold_open_recursive = "zO",
         fold_close = "zc",
@@ -347,8 +348,14 @@ All contexts include `file_count` and `stats`; `stats` is nil when line
 statistics are disabled. File contexts add `path`, `filename`, `directory`,
 `old_path`, `group`, `status`, `status_code`, `status_hl`,
 `status_right_margin`, `indent`, `indent_hl`, `icon`, and `icon_hl`. Folder
-contexts add `name`, `path`, `group`, `indent`, `indent_hl`, `icon`, `icon_hl`,
-and `expanded`. Group contexts add `name`, `label`, and `expanded`.
+contexts add `name`, `path`, `group`, `files`, `indent`, `indent_hl`, `icon`,
+`icon_hl`, and `expanded`. Group contexts add `name`, `label`, `files`, and
+`expanded`.
+
+Folder and group `files` contain one entry for each file, using the consistent
+`{ path, old_path, group, status, stats }` shape. Formatters can use these
+entries to derive external state across all files represented by the line
+without CodeDiff owning that state.
 
 Complete defaults for all three line types are in
 `lua/codediff/ui/explorer/formatters.lua`. The module intentionally exports
@@ -389,6 +396,36 @@ A formatter can replace only the line type it needs:
     },
   })
 <
+
+EXPLORER CUSTOM KEYMAPS                        *codediff-explorer-custom-keymaps*
+
+`keymaps.explorer.custom` adds keymaps without requiring CodeDiff to understand
+their state or semantics. Each keymap has `key`, `desc`, and `callback`. The
+callback receives:
+>lua
+  {
+    entry = {
+      kind = "file", -- "file", "directory", or "group"
+      path = "lua/codediff/init.lua",
+      old_path = nil,
+      group = "unstaged", -- "unstaged", "staged", or "conflicts"
+      status = "M",
+      stats = { insertions = 4, deletions = 2, binary = false },
+      files = nil, -- normalized file entries for directories and groups
+    },
+    redraw = function() end,
+    refresh = function() end,
+  }
+<
+
+`redraw()` only reruns the configured formatters against the existing tree. It
+does not replace nodes or change selection or fold state, and runs no Git
+commands.
+`refresh()` performs the normal asynchronous Git refresh and rebuilds the
+explorer. Both safely become no-ops after the explorer closes. Custom mappings
+are installed after built-in mappings, so the same key replaces the built-in
+mapping.
+
 
 ==============================================================================
 HIGHLIGHT GROUPS                                     *codediff-highlight-groups*

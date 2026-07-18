@@ -88,6 +88,24 @@ function M.get_folder_icon(is_open)
   end
 end
 
+local function normalize_file(file, group)
+  return {
+    path = file.path,
+    old_path = file.old_path,
+    group = group or file.group,
+    status = file.status,
+    stats = vim.deepcopy(file.line_stats or file.stats),
+  }
+end
+
+local function normalize_files(files, group)
+  local normalized = {}
+  for _, file in ipairs(files or {}) do
+    normalized[#normalized + 1] = normalize_file(file, group)
+  end
+  return normalized
+end
+
 -- Create flat file nodes (list mode)
 function M.create_file_nodes(files, git_root, group)
   local nodes = {}
@@ -214,6 +232,7 @@ function M.create_tree_file_nodes(files, git_root, group)
             indent_state = node_indent_state,
             file_count = #item._files,
             stats = line_stats.sum(item._files),
+            files = item._files,
           },
         }, children)
       else
@@ -277,6 +296,7 @@ local function group_context(node, data, explorer_config)
     label = data.label,
     file_count = data.file_count,
     stats = explorer_config.line_stats.enabled and data.stats or nil,
+    files = normalize_files(data.files, data.name),
     expanded = node:is_expanded(),
   }
 end
@@ -290,6 +310,7 @@ local function folder_context(node, data, explorer_config)
     group = data.group,
     file_count = data.file_count,
     stats = explorer_config.line_stats.enabled and data.stats or nil,
+    files = normalize_files(data.files, data.group),
     indent = indent,
     indent_hl = indent_hl,
     icon = icon,
@@ -327,6 +348,34 @@ local function selected_background(is_selected)
     return nil
   end
   return vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerSelected", link = false }).bg
+end
+
+-- Build the user-facing entry passed to custom explorer keymap callbacks.
+function M.get_entry(node)
+  local data = node.data or {}
+  if data.type == "group" then
+    return {
+      kind = "group",
+      name = data.name,
+      group = data.name,
+      stats = vim.deepcopy(data.stats),
+      files = normalize_files(data.files, data.name),
+    }
+  end
+  if data.type == "directory" then
+    return {
+      kind = "directory",
+      name = data.name,
+      path = data.dir_path,
+      group = data.group,
+      stats = vim.deepcopy(data.stats),
+      files = normalize_files(data.files, data.group),
+    }
+  end
+
+  local entry = normalize_file(data, data.group)
+  entry.kind = "file"
+  return entry
 end
 
 -- Prepare node for rendering (format display)

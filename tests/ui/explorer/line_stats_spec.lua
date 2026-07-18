@@ -32,6 +32,7 @@ describe("Explorer line formatters", function()
     assert.is_function(options.formatters.file)
     assert.is_function(options.formatters.folder)
     assert.is_function(options.formatters.group)
+    assert.same({}, config.options.keymaps.explorer.custom)
   end)
 
   it("aggregates text, binary, and unavailable file stats", function()
@@ -106,6 +107,13 @@ describe("Explorer line formatters", function()
     assert.equals("one.lua", contexts.file.filename)
     assert.equals("M", contexts.file.status)
     assert.equals(1, contexts.file.file_count)
+    assert.same({
+      path = "src/one.lua",
+      group = "unstaged",
+      status = "M",
+      stats = { insertions = 3, deletions = 2, binary = false },
+    }, contexts.group.files[1])
+    assert.same(contexts.group.files, contexts.folder.files)
 
     config.options.explorer.line_stats.enabled = false
     nodes.prepare_node(root, 40, nil, nil)

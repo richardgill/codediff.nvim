@@ -186,6 +186,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
         restore = "X",      -- Discard changes (restore file)
         toggle_changes = "gu",  -- Toggle Changes (unstaged) group visibility
         toggle_staged = "gs",   -- Toggle Staged Changes group visibility
+        custom = {}, -- Additional { key, desc, callback } explorer keymaps
         -- Fold keymaps (Vim-style)
         fold_open = "zo",           -- Open fold (expand current node)
         fold_open_recursive = "zO", -- Open fold recursively (expand all descendants)
@@ -259,7 +260,9 @@ A region contains styled `segments`. A numeric `truncate_priority` makes it trun
 
 Each segment is `{ text = string, hl? = highlight }`. `hl` accepts a Neovim highlight group, a `#RGB`/`#RRGGBB` foreground color, or a highlight definition such as `{ fg = "#3fb950", bold = true }`. Omitted `hl` uses `Normal`; selected file lines retain their selection background.
 
-All contexts include `file_count` and `stats`; `stats` is `nil` when line statistics are disabled. File contexts add `path`, `filename`, `directory`, `old_path`, `group`, `status`, `status_code`, `status_hl`, `status_right_margin`, `indent`, `indent_hl`, `icon`, and `icon_hl`. Folder contexts add `name`, `path`, `group`, `indent`, `indent_hl`, `icon`, `icon_hl`, and `expanded`. Group contexts add `name`, `label`, and `expanded`.
+All contexts include `file_count` and `stats`; `stats` is `nil` when line statistics are disabled. File contexts add `path`, `filename`, `directory`, `old_path`, `group`, `status`, `status_code`, `status_hl`, `status_right_margin`, `indent`, `indent_hl`, `icon`, and `icon_hl`. Folder contexts add `name`, `path`, `group`, `files`, `indent`, `indent_hl`, `icon`, `icon_hl`, and `expanded`. Group contexts add `name`, `label`, `files`, and `expanded`.
+
+Folder and group `files` contain one entry for each file, using the consistent `{ path, old_path, group, status, stats }` shape. This lets formatters derive external state across all files represented by the line without CodeDiff owning that state.
 
 See the [built-in formatter implementations](./lua/codediff/ui/explorer/formatters.lua) for complete file, folder, and group examples. The module intentionally exports `file`, `folder`, and `group`; each returns a fresh layout that users can assign directly or wrap:
 
@@ -298,6 +301,28 @@ require("codediff").setup({
   },
 })
 ```
+
+#### Custom explorer keymaps
+
+`keymaps.explorer.custom` adds keymaps without requiring CodeDiff to understand their state or semantics. Each keymap has `key`, `desc`, and `callback`. The callback receives:
+
+```lua
+{
+  entry = {
+    kind = "file", -- "file", "directory", or "group"
+    path = "lua/codediff/init.lua",
+    old_path = nil,
+    group = "unstaged", -- "unstaged", "staged", or "conflicts"
+    status = "M",
+    stats = { insertions = 4, deletions = 2, binary = false },
+    files = nil, -- normalized file entries for directories and groups
+  },
+  redraw = function() end,
+  refresh = function() end,
+}
+```
+
+`redraw()` only reruns the configured formatters against the existing tree. It does not replace nodes or change selection or fold state, and runs no Git commands. `refresh()` performs the normal asynchronous Git refresh and rebuilds the explorer. Both safely become no-ops after the explorer closes. Custom mappings are installed after built-in mappings, so the same key replaces the built-in mapping.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 
