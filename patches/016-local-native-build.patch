@@ -1,0 +1,728 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Sat, 18 Jul 2026 16:30:00 +0100
+Subject: [PATCH] fix: build fork native library locally
+
+---
+diff --git a/README.md b/README.md
+index d48495f..681d7d3 100644
+--- a/README.md
++++ b/README.md
+@@ -89,8 +89,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+ 
+ - Neovim >= 0.7.0 (for Lua FFI support; 0.10+ recommended for vim.system)
+ - Git (for git diff features)
+-- `curl` or `wget` (for automatic binary download)
+-**No compiler required!** The plugin automatically downloads pre-built binaries from GitHub releases.
++- A C compiler:
++  - Linux/macOS: `cc`, GCC, or Clang
++  - Windows: Visual Studio Build Tools (MSVC), Clang, or MinGW-w64
++
++This fork builds its C diff engine locally on first use. Build output is cached under Neovim's cache directory, so the plugin installation itself can remain read-only. Updating native sources automatically selects a new cache entry and triggers one rebuild.
+ 
+ ### Using lazy.nvim
+ 
+@@ -434,7 +437,7 @@ Three strategies are available:
+ 
+ Custom Lua matcher callbacks are not supported.
+ 
+-The C library will be downloaded automatically on first use. No `build` step needed!
++The C library is built locally and cached automatically on first use.
+ 
+ ### Native gutter signs
+ 
+@@ -471,25 +474,22 @@ vim.opt.statuscolumn = "%C%=%l %s"
+ 
+ ### Managing Library Installation
+ 
+-The plugin automatically manages the C library installation:
++This fork automatically builds and caches the C library:
+ 
+-**Automatic Updates:**
+-- The library is automatically downloaded on first use
+-- When you update the plugin to a new version, the library is automatically updated to match
+-- No manual intervention required!
++- The first `:CodeDiff` invocation compiles the bundled native sources.
++- The cache key includes the plugin version and native source contents, so native changes trigger a rebuild.
++- The library is stored under `stdpath("cache")/codediff/native/`; the plugin directory is not modified.
++- If no supported compiler is available, CodeDiff reports which toolchain to install.
+ 
+-**Manual Installation Commands:**
++**Manual Build Commands:**
+ ```vim
+-" Install/update the library manually
++" Build the library if it is not cached
+ :CodeDiff install
+ 
+-" Force reinstall (useful for troubleshooting)
++" Force a clean rebuild into the cache
+ :CodeDiff install!
+ ```
+ 
+-**Version Management:**
+-The installer reads the `VERSION` file to download the matching library version from GitHub releases. This ensures compatibility between the Lua code and C library.
+-
+ ### Manual Installation
+ 
+ If you prefer to install manually without a plugin manager:
+diff --git a/build.cmd b/build.cmd
+index fb99b03..23fe830 100644
+--- a/build.cmd
++++ b/build.cmd
+@@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
+ 
+ setlocal enabledelayedexpansion
+ cd /d "%~dp0\libvscode-diff"
++set "OUTPUT_PATH=%~1"
++if not defined OUTPUT_PATH set "OUTPUT_PATH=..\libvscode_diff.dll"
++set "BUILD_DIR=%~2"
++if not defined BUILD_DIR set "BUILD_DIR=build"
+ 
+ REM Create build directory
+-if not exist build mkdir build
+-if not exist build\include mkdir build\include
++if not exist "!BUILD_DIR!" mkdir "!BUILD_DIR!"
++if not exist "!BUILD_DIR!\include" mkdir "!BUILD_DIR!\include"
+ 
+ REM Generate version.h from VERSION file
+ set /p VERSION=<..\VERSION
+-powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content build\include\version.h"
++powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content '!BUILD_DIR!\include\version.h'"
+ 
+ echo Building vscode_diff (standalone mode)...
+ echo Platform: Windows
+@@ -23,6 +27,7 @@ set SOURCES=^
+ default_lines_diff_computer.c ^
+ src\char_level.c ^
+ src\line_level.c ^
++src\line_matcher.c ^
+ src\myers.c ^
+ src\optimize.c ^
+ src\sequence.c ^
+@@ -72,7 +77,7 @@ if !errorlevel! == 0 (
+ ) else (
+     echo OpenMP: disabled
+ )
+-cl.exe /LD /O2 /W3 /std:c11 /DUTF8PROC_STATIC /DBUILDING_DLL !OMP_FLAGS! /Iinclude /Ibuild\include /Ivendor /Fobuild\ /Fdbuild\ /Fe:build\libvscode_diff.dll %SOURCES% /link /DLL /DEF:libvscode_diff.def
++cl.exe /LD /O2 /W3 /std:c11 /DUTF8PROC_STATIC /DBUILDING_DLL !OMP_FLAGS! /Iinclude /I"!BUILD_DIR!\include" /Ivendor /Fo"!BUILD_DIR!\" /Fd"!BUILD_DIR!\" /Fe:"!OUTPUT_PATH!" %SOURCES% /link /DLL /DEF:libvscode_diff.def
+ goto :build_done
+ 
+ :build_clang
+@@ -89,7 +94,7 @@ if !errorlevel! == 0 (
+     echo OpenMP: disabled
+ )
+ del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
+-clang.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -Ibuild\include -Ivendor -o build\libvscode_diff.dll %SOURCES%
++clang.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -I"!BUILD_DIR!\include" -Ivendor -o "!OUTPUT_PATH!" %SOURCES%
+ goto :build_done
+ 
+ :build_gcc
+@@ -106,7 +111,7 @@ if !errorlevel! == 0 (
+     echo OpenMP: disabled
+ )
+ del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
+-gcc.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -Ibuild\include -Ivendor -o build\libvscode_diff.dll %SOURCES%
++gcc.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -I"!BUILD_DIR!\include" -Ivendor -o "!OUTPUT_PATH!" %SOURCES%
+ goto :build_done
+ 
+ :build_done
+@@ -116,11 +121,7 @@ if !errorlevel! neq 0 (
+     exit /b 1
+ )
+ 
+-echo Installing to plugin root...
+-copy /Y build\libvscode_diff.dll ..\libvscode_diff.dll >nul
+-
+ echo.
+-echo [OK] Build successful: libvscode_diff.dll
+-echo     Build artifacts in: libvscode-diff\build\
++echo [OK] Build successful: !OUTPUT_PATH!
+ cd ..
+ endlocal
+diff --git a/build.sh b/build.sh
+index fd09ca3..4e5c4fb 100755
+--- a/build.sh
++++ b/build.sh
+@@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
+     fi
+ fi
+ 
++OUTPUT_PATH="${1:-../libvscode_diff.$LIB_EXT}"
++BUILD_DIR="${2:-build}"
++
+ echo "Building vscode_diff (standalone mode)..."
+ echo "Compiler: $CC"
+ echo "Platform: $PLATFORM"
+ 
+ # Compiler flags
+-CFLAGS="-Wall -Wextra -std=c11 -O2 -DNDEBUG -DUTF8PROC_STATIC -D_POSIX_C_SOURCE=199309L -Iinclude -Ibuild/include -Ivendor -fPIC"
+-LDFLAGS="-shared"
++CFLAGS=(-Wall -Wextra -std=c11 -O2 -DNDEBUG -DUTF8PROC_STATIC -D_POSIX_C_SOURCE=199309L -Iinclude "-I$BUILD_DIR/include" -Ivendor -fPIC)
++LDFLAGS=(-shared)
+ 
+ # Add -lm for math library on Unix
+ if [[ "$PLATFORM" != "Darwin" ]]; then
+-    LDFLAGS="$LDFLAGS -lm"
++    LDFLAGS+=(-lm)
+ fi
+ 
+ # Detect OpenMP support
+@@ -52,18 +55,18 @@ if [[ "$PLATFORM" == "Darwin" ]]; then
+         LIBOMP_PREFIX=$(brew --prefix libomp 2>/dev/null || true)
+         if [ -n "$LIBOMP_PREFIX" ] && [ -f "$LIBOMP_PREFIX/lib/libomp.dylib" ]; then
+             USE_OPENMP=1
+-            CFLAGS="$CFLAGS -Xpreprocessor -fopenmp -I$LIBOMP_PREFIX/include -DUSE_OPENMP"
+-            LDFLAGS="$LDFLAGS -L$LIBOMP_PREFIX/lib -lomp"
++            CFLAGS+=(-Xpreprocessor -fopenmp "-I$LIBOMP_PREFIX/include" -DUSE_OPENMP)
++            LDFLAGS+=("-L$LIBOMP_PREFIX/lib" -lomp)
+             echo "OpenMP: enabled (Homebrew libomp)"
+         fi
+     fi
+ else
+     # Linux: Check if compiler supports OpenMP
+     echo "int main() { return 0; }" > /tmp/omp_test.c
+-    if $CC -fopenmp /tmp/omp_test.c -o /tmp/omp_test 2>/dev/null; then
++    if "$CC" -fopenmp /tmp/omp_test.c -o /tmp/omp_test 2>/dev/null; then
+         USE_OPENMP=1
+-        CFLAGS="$CFLAGS -fopenmp -DUSE_OPENMP"
+-        LDFLAGS="$LDFLAGS -fopenmp"
++        CFLAGS+=(-fopenmp -DUSE_OPENMP)
++        LDFLAGS+=(-fopenmp)
+         echo "OpenMP: enabled"
+     fi
+     rm -f /tmp/omp_test.c /tmp/omp_test
+@@ -74,34 +77,33 @@ if [ "$USE_OPENMP" -eq 0 ]; then
+ fi
+ 
+ # Source files (including bundled utf8proc)
+-SOURCES="\
+-default_lines_diff_computer.c \
+-src/char_level.c \
+-src/line_level.c \
+-src/myers.c \
+-src/optimize.c \
+-src/sequence.c \
+-src/range_mapping.c \
+-src/string_hash_map.c \
+-src/utils.c \
+-src/print_utils.c \
+-src/utf8_utils.c \
+-src/compute_moved_lines.c \
+-vendor/utf8proc.c"
++SOURCES=(
++    default_lines_diff_computer.c
++    src/char_level.c
++    src/line_level.c
++    src/line_matcher.c
++    src/myers.c
++    src/optimize.c
++    src/sequence.c
++    src/range_mapping.c
++    src/string_hash_map.c
++    src/utils.c
++    src/print_utils.c
++    src/utf8_utils.c
++    src/compute_moved_lines.c
++    vendor/utf8proc.c
++)
+ 
+ # Build
+-mkdir -p build
+-mkdir -p build/include
++mkdir -p "$BUILD_DIR/include"
++mkdir -p "$(dirname "$OUTPUT_PATH")"
+ 
+ # Generate version.h
+ VERSION=$(cat ../VERSION | tr -d '[:space:]')
+-sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > build/include/version.h
++sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > "$BUILD_DIR/include/version.h"
+ 
+ echo "Compiling..."
+-$CC $CFLAGS $LDFLAGS -o libvscode_diff.$LIB_EXT $SOURCES
+-
+-echo "Installing to plugin root..."
+-cp libvscode_diff.$LIB_EXT ../libvscode_diff.$LIB_EXT
++"$CC" "${CFLAGS[@]}" "${LDFLAGS[@]}" -o "$OUTPUT_PATH" "${SOURCES[@]}"
+ 
+-echo "✓ Build successful: libvscode_diff.$LIB_EXT"
++echo "✓ Build successful: $OUTPUT_PATH"
+ cd ..
+diff --git a/libvscode-diff/build.cmd.in b/libvscode-diff/build.cmd.in
+index fb99b03..23fe830 100644
+--- a/libvscode-diff/build.cmd.in
++++ b/libvscode-diff/build.cmd.in
+@@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
+ 
+ setlocal enabledelayedexpansion
+ cd /d "%~dp0\libvscode-diff"
++set "OUTPUT_PATH=%~1"
++if not defined OUTPUT_PATH set "OUTPUT_PATH=..\libvscode_diff.dll"
++set "BUILD_DIR=%~2"
++if not defined BUILD_DIR set "BUILD_DIR=build"
+ 
+ REM Create build directory
+-if not exist build mkdir build
+-if not exist build\include mkdir build\include
++if not exist "!BUILD_DIR!" mkdir "!BUILD_DIR!"
++if not exist "!BUILD_DIR!\include" mkdir "!BUILD_DIR!\include"
+ 
+ REM Generate version.h from VERSION file
+ set /p VERSION=<..\VERSION
+-powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content build\include\version.h"
++powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content '!BUILD_DIR!\include\version.h'"
+ 
+ echo Building vscode_diff (standalone mode)...
+ echo Platform: Windows
+@@ -23,6 +27,7 @@ set SOURCES=^
+ default_lines_diff_computer.c ^
+ src\char_level.c ^
+ src\line_level.c ^
++src\line_matcher.c ^
+ src\myers.c ^
+ src\optimize.c ^
+ src\sequence.c ^
+@@ -72,7 +77,7 @@ if !errorlevel! == 0 (
+ ) else (
+     echo OpenMP: disabled
+ )
+-cl.exe /LD /O2 /W3 /std:c11 /DUTF8PROC_STATIC /DBUILDING_DLL !OMP_FLAGS! /Iinclude /Ibuild\include /Ivendor /Fobuild\ /Fdbuild\ /Fe:build\libvscode_diff.dll %SOURCES% /link /DLL /DEF:libvscode_diff.def
++cl.exe /LD /O2 /W3 /std:c11 /DUTF8PROC_STATIC /DBUILDING_DLL !OMP_FLAGS! /Iinclude /I"!BUILD_DIR!\include" /Ivendor /Fo"!BUILD_DIR!\" /Fd"!BUILD_DIR!\" /Fe:"!OUTPUT_PATH!" %SOURCES% /link /DLL /DEF:libvscode_diff.def
+ goto :build_done
+ 
+ :build_clang
+@@ -89,7 +94,7 @@ if !errorlevel! == 0 (
+     echo OpenMP: disabled
+ )
+ del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
+-clang.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -Ibuild\include -Ivendor -o build\libvscode_diff.dll %SOURCES%
++clang.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -I"!BUILD_DIR!\include" -Ivendor -o "!OUTPUT_PATH!" %SOURCES%
+ goto :build_done
+ 
+ :build_gcc
+@@ -106,7 +111,7 @@ if !errorlevel! == 0 (
+     echo OpenMP: disabled
+ )
+ del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
+-gcc.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -Ibuild\include -Ivendor -o build\libvscode_diff.dll %SOURCES%
++gcc.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -I"!BUILD_DIR!\include" -Ivendor -o "!OUTPUT_PATH!" %SOURCES%
+ goto :build_done
+ 
+ :build_done
+@@ -116,11 +121,7 @@ if !errorlevel! neq 0 (
+     exit /b 1
+ )
+ 
+-echo Installing to plugin root...
+-copy /Y build\libvscode_diff.dll ..\libvscode_diff.dll >nul
+-
+ echo.
+-echo [OK] Build successful: libvscode_diff.dll
+-echo     Build artifacts in: libvscode-diff\build\
++echo [OK] Build successful: !OUTPUT_PATH!
+ cd ..
+ endlocal
+diff --git a/libvscode-diff/build.sh.in b/libvscode-diff/build.sh.in
+index fd09ca3..4e5c4fb 100644
+--- a/libvscode-diff/build.sh.in
++++ b/libvscode-diff/build.sh.in
+@@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
+     fi
+ fi
+ 
++OUTPUT_PATH="${1:-../libvscode_diff.$LIB_EXT}"
++BUILD_DIR="${2:-build}"
++
+ echo "Building vscode_diff (standalone mode)..."
+ echo "Compiler: $CC"
+ echo "Platform: $PLATFORM"
+ 
+ # Compiler flags
+-CFLAGS="-Wall -Wextra -std=c11 -O2 -DNDEBUG -DUTF8PROC_STATIC -D_POSIX_C_SOURCE=199309L -Iinclude -Ibuild/include -Ivendor -fPIC"
+-LDFLAGS="-shared"
++CFLAGS=(-Wall -Wextra -std=c11 -O2 -DNDEBUG -DUTF8PROC_STATIC -D_POSIX_C_SOURCE=199309L -Iinclude "-I$BUILD_DIR/include" -Ivendor -fPIC)
++LDFLAGS=(-shared)
+ 
+ # Add -lm for math library on Unix
+ if [[ "$PLATFORM" != "Darwin" ]]; then
+-    LDFLAGS="$LDFLAGS -lm"
++    LDFLAGS+=(-lm)
+ fi
+ 
+ # Detect OpenMP support
+@@ -52,18 +55,18 @@ if [[ "$PLATFORM" == "Darwin" ]]; then
+         LIBOMP_PREFIX=$(brew --prefix libomp 2>/dev/null || true)
+         if [ -n "$LIBOMP_PREFIX" ] && [ -f "$LIBOMP_PREFIX/lib/libomp.dylib" ]; then
+             USE_OPENMP=1
+-            CFLAGS="$CFLAGS -Xpreprocessor -fopenmp -I$LIBOMP_PREFIX/include -DUSE_OPENMP"
+-            LDFLAGS="$LDFLAGS -L$LIBOMP_PREFIX/lib -lomp"
++            CFLAGS+=(-Xpreprocessor -fopenmp "-I$LIBOMP_PREFIX/include" -DUSE_OPENMP)
++            LDFLAGS+=("-L$LIBOMP_PREFIX/lib" -lomp)
+             echo "OpenMP: enabled (Homebrew libomp)"
+         fi
+     fi
+ else
+     # Linux: Check if compiler supports OpenMP
+     echo "int main() { return 0; }" > /tmp/omp_test.c
+-    if $CC -fopenmp /tmp/omp_test.c -o /tmp/omp_test 2>/dev/null; then
++    if "$CC" -fopenmp /tmp/omp_test.c -o /tmp/omp_test 2>/dev/null; then
+         USE_OPENMP=1
+-        CFLAGS="$CFLAGS -fopenmp -DUSE_OPENMP"
+-        LDFLAGS="$LDFLAGS -fopenmp"
++        CFLAGS+=(-fopenmp -DUSE_OPENMP)
++        LDFLAGS+=(-fopenmp)
+         echo "OpenMP: enabled"
+     fi
+     rm -f /tmp/omp_test.c /tmp/omp_test
+@@ -74,34 +77,33 @@ if [ "$USE_OPENMP" -eq 0 ]; then
+ fi
+ 
+ # Source files (including bundled utf8proc)
+-SOURCES="\
+-default_lines_diff_computer.c \
+-src/char_level.c \
+-src/line_level.c \
+-src/myers.c \
+-src/optimize.c \
+-src/sequence.c \
+-src/range_mapping.c \
+-src/string_hash_map.c \
+-src/utils.c \
+-src/print_utils.c \
+-src/utf8_utils.c \
+-src/compute_moved_lines.c \
+-vendor/utf8proc.c"
++SOURCES=(
++    default_lines_diff_computer.c
++    src/char_level.c
++    src/line_level.c
++    src/line_matcher.c
++    src/myers.c
++    src/optimize.c
++    src/sequence.c
++    src/range_mapping.c
++    src/string_hash_map.c
++    src/utils.c
++    src/print_utils.c
++    src/utf8_utils.c
++    src/compute_moved_lines.c
++    vendor/utf8proc.c
++)
+ 
+ # Build
+-mkdir -p build
+-mkdir -p build/include
++mkdir -p "$BUILD_DIR/include"
++mkdir -p "$(dirname "$OUTPUT_PATH")"
+ 
+ # Generate version.h
+ VERSION=$(cat ../VERSION | tr -d '[:space:]')
+-sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > build/include/version.h
++sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > "$BUILD_DIR/include/version.h"
+ 
+ echo "Compiling..."
+-$CC $CFLAGS $LDFLAGS -o libvscode_diff.$LIB_EXT $SOURCES
+-
+-echo "Installing to plugin root..."
+-cp libvscode_diff.$LIB_EXT ../libvscode_diff.$LIB_EXT
++"$CC" "${CFLAGS[@]}" "${LDFLAGS[@]}" -o "$OUTPUT_PATH" "${SOURCES[@]}"
+ 
+-echo "✓ Build successful: libvscode_diff.$LIB_EXT"
++echo "✓ Build successful: $OUTPUT_PATH"
+ cd ..
+diff --git a/lua/codediff/commands.lua b/lua/codediff/commands.lua
+index 5a73b3c..2563bee 100644
+--- a/lua/codediff/commands.lua
++++ b/lua/codediff/commands.lua
+@@ -774,7 +774,7 @@ function M.vscode_diff(opts)
+     -- :CodeDiff install or :CodeDiff install!
+     -- Handle both :CodeDiff! install and :CodeDiff install!
+     local force = opts.bang or subcommand == "install!"
+-    local installer = require("codediff.core.installer")
++    local installer = require("codediff.core.local_builder")
+ 
+     if force then
+       vim.notify("Reinstalling libvscode-diff...", vim.log.levels.INFO)
+diff --git a/lua/codediff/core/diff.lua b/lua/codediff/core/diff.lua
+index a89289d..13277ec 100644
+--- a/lua/codediff/core/diff.lua
++++ b/lua/codediff/core/diff.lua
+@@ -19,26 +19,22 @@ else
+ end
+ 
+ -- Build versioned library filename
+-local path_util = require("codediff.core.path")
+-local plugin_root = path_util.get_plugin_root()
++local local_builder = require("codediff.core.local_builder")
++local plugin_root = local_builder.get_install_dir()
+ local lib_name = string.format("libvscode_diff_%s.%s", VERSION, lib_ext)
+ local lib_path = plugin_root .. "/" .. lib_name
+ 
+ -- Check if library exists or needs update, if so, install/update it
+ -- Skip auto-installation if explicitly disabled (e.g., in tests where library is already built)
+-local installer = require("codediff.core.installer")
++local installer = local_builder
+ if not vim.env.VSCODE_DIFF_NO_AUTO_INSTALL and installer.needs_update() then
+   local success, err = installer.install({ silent = false })
+   if not success then
+     error(
+       string.format(
+-        "libvscode-diff not found and automatic installation failed: %s\n"
+-          .. "Troubleshooting:\n"
+-          .. "1. Check that curl or wget is installed\n"
+-          .. "2. Verify internet connectivity to github.com\n"
+-          .. "3. Try manual install: :CodeDiff install!\n"
+-          .. "4. Or build from source: run 'make' (Unix) or 'build.cmd' (Windows)\n"
+-          .. "5. Download manually from: https://github.com/esmuellert/vscode-diff.nvim/releases",
++        "libvscode-diff not found and automatic local build failed: %s\n"
++          .. "Install a supported C compiler and retry :CodeDiff install.\n"
++          .. "Linux/macOS: cc, GCC, or Clang. Windows: MSVC, Clang, or MinGW-w64.",
+         err or "unknown error"
+       )
+     )
+diff --git a/lua/codediff/core/local_builder.lua b/lua/codediff/core/local_builder.lua
+new file mode 100644
+index 0000000..5bff05f
+--- /dev/null
++++ b/lua/codediff/core/local_builder.lua
+@@ -0,0 +1,191 @@
++local M = {}
++
++local ffi = require("ffi")
++local path_util = require("codediff.core.path")
++local version = require("codediff.version")
++
++local build_id
++
++local get_lib_ext = function()
++  if ffi.os == "Windows" then
++    return "dll"
++  end
++  if ffi.os == "OSX" then
++    return "dylib"
++  end
++  return "so"
++end
++
++local read_file = function(path)
++  local file = io.open(path, "rb")
++  if not file then
++    return ""
++  end
++  local content = file:read("*a")
++  file:close()
++  return content
++end
++
++local get_source_files = function()
++  local root = path_util.get_plugin_root()
++  local native_root = root .. "/libvscode-diff"
++  local patterns = {
++    root .. "/build.sh",
++    root .. "/build.cmd",
++    native_root .. "/*.c",
++    native_root .. "/*.def",
++    native_root .. "/include/*",
++    native_root .. "/src/*",
++    native_root .. "/vendor/*",
++  }
++  local files = {}
++  for _, pattern in ipairs(patterns) do
++    vim.list_extend(files, vim.fn.glob(pattern, false, true))
++  end
++  table.sort(files)
++  return files
++end
++
++local get_build_id = function()
++  if build_id then
++    return build_id
++  end
++  local root = path_util.get_plugin_root()
++  local parts = {}
++  for _, path in ipairs(get_source_files()) do
++    if vim.fn.filereadable(path) == 1 then
++      parts[#parts + 1] = path:sub(#root + 1)
++      parts[#parts + 1] = read_file(path)
++    end
++  end
++  build_id = version.VERSION .. "-" .. vim.fn.sha256(table.concat(parts)):sub(1, 12)
++  return build_id
++end
++
++local get_install_dir = function()
++  return vim.fn.stdpath("cache") .. "/codediff/native/" .. get_build_id()
++end
++
++local get_manual_lib_path = function()
++  return path_util.get_plugin_root() .. "/libvscode_diff." .. get_lib_ext()
++end
++
++local get_cached_lib_path = function()
++  return get_install_dir() .. "/libvscode_diff_" .. version.VERSION .. "." .. get_lib_ext()
++end
++
++local find_compiler = function()
++  local configured = vim.env.CC
++  if configured and configured ~= "" then
++    local command = configured:match("^%s*(%S+)")
++    if command and vim.fn.executable(command) == 1 then
++      return command
++    end
++    return nil, "Configured C compiler is not executable: " .. configured
++  end
++
++  local candidates = ffi.os == "Windows" and { "cl.exe", "clang.exe", "gcc.exe" } or { "cc", "gcc", "clang" }
++  for _, command in ipairs(candidates) do
++    if vim.fn.executable(command) == 1 then
++      return command
++    end
++  end
++
++  if ffi.os == "Windows" then
++    return nil, "No C compiler found. Install Visual Studio Build Tools, Clang, or MinGW-w64, then retry :CodeDiff install."
++  end
++  return nil, "No C compiler found. Install cc, GCC, or Clang, then retry :CodeDiff install."
++end
++
++local run_build = function(output_path, build_dir)
++  local root = path_util.get_plugin_root()
++  local command
++  if ffi.os == "Windows" then
++    command = { "cmd.exe", "/d", "/c", root .. "/build.cmd", output_path, build_dir }
++  else
++    command = { root .. "/build.sh", output_path, build_dir }
++  end
++
++  if vim.system then
++    return vim.system(command, { text = true }):wait()
++  end
++
++  local output = vim.fn.system(command)
++  return { code = vim.v.shell_error, stdout = output, stderr = "" }
++end
++
++local notify_error = function(message, silent)
++  if not silent then
++    vim.notify(message, vim.log.levels.ERROR)
++  end
++  return false, message
++end
++
++function M.get_install_dir()
++  if vim.env.VSCODE_DIFF_NO_AUTO_INSTALL then
++    return path_util.get_plugin_root()
++  end
++  return get_install_dir()
++end
++
++function M.get_lib_path()
++  local manual_path = get_manual_lib_path()
++  if vim.env.VSCODE_DIFF_NO_AUTO_INSTALL and vim.fn.filereadable(manual_path) == 1 then
++    return manual_path
++  end
++  return get_cached_lib_path()
++end
++
++function M.install(opts)
++  opts = opts or {}
++  local lib_path = get_cached_lib_path()
++  if not opts.force and vim.fn.filereadable(lib_path) == 1 then
++    return true
++  end
++
++  local _, compiler_error = find_compiler()
++  if compiler_error then
++    return notify_error(compiler_error, opts.silent)
++  end
++
++  local install_dir = get_install_dir()
++  local build_dir = install_dir .. "/build"
++  vim.fn.mkdir(build_dir, "p")
++  local temp_path = lib_path .. ".tmp"
++  os.remove(temp_path)
++
++  if not opts.silent then
++    vim.notify("Building libvscode-diff locally...", vim.log.levels.INFO)
++  end
++  local result = run_build(temp_path, build_dir)
++  if result.code ~= 0 then
++    os.remove(temp_path)
++    local output = vim.trim((result.stderr or "") .. "\n" .. (result.stdout or ""))
++    return notify_error("Failed to build libvscode-diff locally:\n" .. output, opts.silent)
++  end
++
++  os.remove(lib_path)
++  if not os.rename(temp_path, lib_path) then
++    os.remove(temp_path)
++    return notify_error("Failed to install locally built library at: " .. lib_path, opts.silent)
++  end
++
++  if not opts.silent then
++    vim.notify("Built libvscode-diff at: " .. lib_path, vim.log.levels.INFO)
++  end
++  return true
++end
++
++function M.is_installed()
++  return vim.fn.filereadable(M.get_lib_path()) == 1
++end
++
++function M.get_installed_version()
++  return M.is_installed() and version.VERSION or nil
++end
++
++function M.needs_update()
++  return not M.is_installed()
++end
++
++return M
+diff --git a/tests/core/local_builder_spec.lua b/tests/core/local_builder_spec.lua
+new file mode 100644
+index 0000000..2e36c2a
+--- /dev/null
++++ b/tests/core/local_builder_spec.lua
+@@ -0,0 +1,42 @@
++local builder = require("codediff.core.local_builder")
++
++describe("Local native builder", function()
++  local original_cc
++  local original_no_auto_install
++  local original_executable
++
++  before_each(function()
++    original_cc = vim.env.CC
++    original_no_auto_install = vim.env.VSCODE_DIFF_NO_AUTO_INSTALL
++    original_executable = vim.fn.executable
++  end)
++
++  after_each(function()
++    vim.env.CC = original_cc
++    vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = original_no_auto_install
++    vim.fn.executable = original_executable
++  end)
++
++  it("uses a source-addressed cache path", function()
++    vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = nil
++    local install_dir = builder.get_install_dir()
++
++    assert.is_truthy(install_dir:find(vim.fn.stdpath("cache"), 1, true))
++    assert.is_truthy(install_dir:match("/codediff/native/%d+%.%d+%.%d+%-[%da-f]+$"))
++    assert.is_truthy(builder.get_lib_path():find(install_dir, 1, true))
++  end)
++
++  it("reports how to install a compiler", function()
++    vim.env.CC = nil
++    vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = nil
++    vim.fn.executable = function()
++      return 0
++    end
++
++    local success, err = builder.install({ force = true, silent = true })
++
++    assert.is_false(success)
++    assert.is_truthy(err:match("No C compiler found"))
++    assert.is_truthy(err:match("retry :CodeDiff install"))
++  end)
++end)
+-- 
+2.49.2

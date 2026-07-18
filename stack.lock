@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 5196c4b5d7bfdda70b98c98b9b3ebcb24dcdc488
-expectedTree = 03bd0a9e410f7d0d129404ba7f0a47d089670634
+expectedHead = 9870def78cb5698506022b992164d70376a7e4e8
+expectedTree = 753038027ef36e6afe52b57409c4a7b0d6c23994
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -23,6 +23,7 @@ patches =
     intraline-line-matching
     native-gutter-signs
     explorer-line-statistics
+    local-native-build
     fork-notice
 
 [patch "manual-build-libgomp"]
@@ -114,6 +115,10 @@ description = Added native gutter signs support
 file = patches/014-native-gutter-signs.patch
 originCommit = 5655f16e1dc839f1743bf6f4187dd3319ae777d1
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
+
+[patch "local-native-build"]
+description = fix: build fork native library locally
+file = patches/016-local-native-build.patch
 
 [patch "fork-notice"]
 file = patches/016-fork-notice.patch
