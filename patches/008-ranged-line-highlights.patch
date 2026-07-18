@@ -1,4 +1,4 @@
-From 2d59f5b8489600ef1d6e1ae07b005335f618ce29 Mon Sep 17 00:00:00 2001
+From 5e574fa76a6885463e25ffc1ecc9626c3e4fc81f Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 21:22:44 +0100
 Subject: [PATCH] Use ranged extmarks for line highlights

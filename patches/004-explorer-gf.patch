@@ -1,4 +1,4 @@
-From 079aa7f338b31e369feae2451a98ba3b9f17d4ed Mon Sep 17 00:00:00 2001
+From ff28d500b9e3bd5bde4944b9ae7cd1aaa8556d14 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 09:09:09 +0100
 Subject: [PATCH] fix: allow gf from the explorer pane

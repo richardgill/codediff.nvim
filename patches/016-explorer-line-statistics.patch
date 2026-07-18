@@ -1,4 +1,4 @@
-From 775eaf690ab538090a41dbde878d542ee9c09b7c Mon Sep 17 00:00:00 2001
+From 259ff8f501f5c4a69f5ccec022e20af6c93f6acf Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 07:25:57 +0100
 Subject: [PATCH] feat(explorer): add optional line change statistics
@@ -1536,10 +1536,10 @@ index b097a81..019e336 100644
  
      return tree_nodes
 diff --git a/lua/codediff/ui/highlights.lua b/lua/codediff/ui/highlights.lua
-index 1d0dc93..48e9ec5 100644
+index d6afce5..3c21c4e 100644
 --- a/lua/codediff/ui/highlights.lua
 +++ b/lua/codediff/ui/highlights.lua
-@@ -242,6 +242,16 @@ function M.setup()
+@@ -253,6 +253,16 @@ function M.setup()
      return ok and hl and (hl.fg or hl.foreground)
    end
  
@@ -2105,7 +2105,7 @@ index 0000000..b7816d0
 +  end)
 +end)
 diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
-index e69ef3c..ed67ad1 100644
+index 815eaa2..9e631d4 100644
 --- a/tests/ui/highlights_spec.lua
 +++ b/tests/ui/highlights_spec.lua
 @@ -8,10 +8,20 @@ local highlights = require("codediff.ui.highlights")

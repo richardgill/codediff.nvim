@@ -1,4 +1,4 @@
-From 3b12bd7f5a7719965b02d3be2672897a1506651c Mon Sep 17 00:00:00 2001
+From e9015a42d1126c1009a082d03143ee11b0fa8a76 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 15:35:41 +0100
 Subject: [PATCH] fix: keep Neovim open when closing the last diff tab

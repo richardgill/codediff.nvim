@@ -1,4 +1,4 @@
-From 25b90d4762a7282ba36746f606d77d4c091b4dae Mon Sep 17 00:00:00 2001
+From 577eb4a7fe1ba764e5d5d806efb51d0fe34e7d49 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:44:21 +0100
 Subject: [PATCH] fix(explorer): select first visible file on initial open

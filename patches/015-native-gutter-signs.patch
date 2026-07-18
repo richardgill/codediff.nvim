@@ -1,4 +1,4 @@
-From b0b8b852cd5edaa92ca83146bfd74111da3c881b Mon Sep 17 00:00:00 2001
+From 260d5a7fe032c0dfa714a3c3dd51255132107c90 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 20:18:52 +0100
 Subject: [PATCH] Added native gutter signs support
@@ -11,7 +11,7 @@ Subject: [PATCH] Added native gutter signs support
  lua/codediff/config.lua                 |   1 +
  lua/codediff/ui/core.lua                |   5 +
  lua/codediff/ui/gutter_signs.lua        | 152 +++++++++++++
- lua/codediff/ui/highlights.lua          |   5 +
+ lua/codediff/ui/highlights.lua          |  16 ++
  lua/codediff/ui/inline.lua              |   3 +
  lua/codediff/ui/lifecycle/accessors.lua |  23 ++
  lua/codediff/ui/lifecycle/state.lua     |   9 +
@@ -19,10 +19,10 @@ Subject: [PATCH] Added native gutter signs support
  lua/codediff/ui/view/side_by_side.lua   |  11 +-
  lua/codediff/ui/view/welcome_window.lua |   4 -
  tests/ui/gutter_signs_spec.lua          | 273 ++++++++++++++++++++++++
- tests/ui/highlights_spec.lua            |  26 +++
+ tests/ui/highlights_spec.lua            |  37 ++++
  tests/ui/view/move_rendering_spec.lua   | 110 ++--------
  tests/ui/welcome_spec.lua               |   8 +-
- 18 files changed, 633 insertions(+), 122 deletions(-)
+ 18 files changed, 655 insertions(+), 122 deletions(-)
  create mode 100644 docs/native-gutter-signs-blocker.md
  create mode 100644 lua/codediff/ui/gutter_signs.lua
  create mode 100644 tests/ui/gutter_signs_spec.lua
@@ -407,17 +407,28 @@ index 0000000..e985dec
 +
 +return M
 diff --git a/lua/codediff/ui/highlights.lua b/lua/codediff/ui/highlights.lua
-index 52dec55..1d0dc93 100644
+index 52dec55..d6afce5 100644
 --- a/lua/codediff/ui/highlights.lua
 +++ b/lua/codediff/ui/highlights.lua
-@@ -170,6 +170,11 @@ function M.setup()
+@@ -170,6 +170,22 @@ function M.setup()
    vim.api.nvim_set_hl(0, "CodeDiffCharInsert", char_insert_color)
    vim.api.nvim_set_hl(0, "CodeDiffCharDelete", char_delete_color)
  
 +  vim.api.nvim_set_hl(0, "CodeDiffGutterInsert", { link = "CodeDiffLineInsert", default = true })
 +  vim.api.nvim_set_hl(0, "CodeDiffGutterDelete", { link = "CodeDiffLineDelete", default = true })
-+  vim.api.nvim_set_hl(0, "CodeDiffGutterInsertNumber", { link = "CodeDiffCharInsert", default = true })
-+  vim.api.nvim_set_hl(0, "CodeDiffGutterDeleteNumber", { link = "CodeDiffCharDelete", default = true })
++
++  -- Neovim applies number_hl_group to virtual lines anchored to the same buffer line.
++  -- Keep these groups foreground-only so filler rows do not inherit a colored number-column background.
++  vim.api.nvim_set_hl(0, "CodeDiffGutterInsertNumber", {
++    fg = char_insert_color.bg,
++    ctermfg = char_insert_color.ctermbg,
++    default = true,
++  })
++  vim.api.nvim_set_hl(0, "CodeDiffGutterDeleteNumber", {
++    fg = char_delete_color.bg,
++    ctermfg = char_delete_color.ctermbg,
++    default = true,
++  })
 +
    -- Moved code highlights (derived from DiffChange — the standard "changed" color)
    local diff_change_hl = vim.api.nvim_get_hl(0, { name = "DiffChange", link = false })
@@ -930,7 +941,7 @@ index 0000000..c96a97a
 +  end)
 +end)
 diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
-index c23f6c4..e69ef3c 100644
+index c23f6c4..815eaa2 100644
 --- a/tests/ui/highlights_spec.lua
 +++ b/tests/ui/highlights_spec.lua
 @@ -12,6 +12,10 @@ local function reset_codediff()
@@ -944,7 +955,7 @@ index c23f6c4..e69ef3c 100644
    config.options = vim.deepcopy(config.defaults)
    require("codediff").setup({})
  end
-@@ -165,6 +169,28 @@ describe("highlights.lua color derivation", function()
+@@ -165,6 +169,39 @@ describe("highlights.lua color derivation", function()
      assert.is_nil(insert.bold)
    end)
  
@@ -953,8 +964,19 @@ index c23f6c4..e69ef3c 100644
 +
 +    assert.equals("CodeDiffLineInsert", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsert", link = true }).link)
 +    assert.equals("CodeDiffLineDelete", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterDelete", link = true }).link)
-+    assert.equals("CodeDiffCharInsert", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsertNumber", link = true }).link)
-+    assert.equals("CodeDiffCharDelete", vim.api.nvim_get_hl(0, { name = "CodeDiffGutterDeleteNumber", link = true }).link)
++
++    local char_insert = vim.api.nvim_get_hl(0, { name = "CodeDiffCharInsert", link = false })
++    local char_delete = vim.api.nvim_get_hl(0, { name = "CodeDiffCharDelete", link = false })
++    local number_insert = vim.api.nvim_get_hl(0, { name = "CodeDiffGutterInsertNumber", link = false })
++    local number_delete = vim.api.nvim_get_hl(0, { name = "CodeDiffGutterDeleteNumber", link = false })
++    assert.equals(char_insert.bg, number_insert.fg)
++    assert.equals(char_insert.ctermbg, number_insert.ctermfg)
++    assert.is_nil(number_insert.bg)
++    assert.is_nil(number_insert.ctermbg)
++    assert.equals(char_delete.bg, number_delete.fg)
++    assert.equals(char_delete.ctermbg, number_delete.ctermfg)
++    assert.is_nil(number_delete.bg)
++    assert.is_nil(number_delete.ctermbg)
 +  end)
 +
 +  it("preserves colorscheme gutter highlight overrides", function()
