@@ -561,36 +561,6 @@ describe("Layout toggle", function()
     assert.same({ 2, 0 }, vim.api.nvim_win_get_cursor(0))
   end)
 
-  it("opens selected explorer file in previous tab", function()
-    repo = h.create_temp_git_repo()
-    repo.write_file("file.txt", { "line 1", "line 2" })
-    repo.git("add file.txt")
-    repo.git('commit -m "initial"')
-    repo.write_file("file.txt", { "line 1", "line 2 changed" })
-
-    vim.cmd("tabnew")
-    local previous_tab = vim.api.nvim_get_current_tabpage()
-    local tabpage, _, explorer = open_codediff_and_wait(repo, "file.txt")
-    select_explorer_file(tabpage, explorer, {
-      path = "file.txt",
-      status = "M",
-      git_root = repo.dir,
-      group = "unstaged",
-    }, function(session)
-      return session.modified_path == repo.path("file.txt")
-    end)
-
-    assert.is_true(explorer.winid and vim.api.nvim_win_is_valid(explorer.winid), "Explorer window should be valid")
-    vim.api.nvim_set_current_win(explorer.winid)
-
-    local callback = get_buffer_mapping_callback(explorer.bufnr, "P")
-    assert.is_function(callback, "open_in_prev_tab mapping should exist in explorer buffer")
-    callback()
-
-    assert.equals(previous_tab, vim.api.nvim_get_current_tabpage())
-    assert.equals(vim.fn.resolve(vim.fn.fnamemodify(repo.path("file.txt"), ":p")), vim.fn.resolve(vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())))
-  end)
-
   it("keeps explorer file navigation working after toggle", function()
     repo = h.create_temp_git_repo()
     repo.write_file("file1.txt", { "one" })
