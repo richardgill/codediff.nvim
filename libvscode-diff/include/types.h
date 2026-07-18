@@ -70,6 +70,11 @@ typedef struct {
   int capacity;
 } RangeMappingArray;
 
+typedef struct {
+  RangeMappingArray *results;
+  int count;
+} RangeMappingBatch;
+
 /**
  * DetailedLineRangeMapping - Final algorithm output
  * Maps to VSCode's DetailedLineRangeMapping.

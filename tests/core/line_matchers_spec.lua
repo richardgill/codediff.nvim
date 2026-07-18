@@ -138,6 +138,18 @@ describe("Line matchers", function()
     assert.is_true(#result.changes[1].inner_changes > 0)
   end)
 
+  it("preserves grouped results when batching mappings across changed blocks", function()
+    local result = diff.compute_diff({ "old alpha", "unchanged", "old beta" }, { "new alpha", "unchanged", "new beta" }, {
+      line_matcher = function()
+        return { one_line_mapping(1, 1) }
+      end,
+    })
+
+    assert.equal(2, #result.changes)
+    assert.equal(1, result.changes[1].line_mappings[1].inner_changes[1].original.start_line)
+    assert.equal(3, result.changes[2].line_mappings[1].inner_changes[1].original.start_line)
+  end)
+
   it("refines a one-to-many line mapping", function()
     local result = diff.compute_diff({ "before", "local result = prefix .. value", "after" }, { "before", "local result = prefix", "  .. value", "after" }, {
       line_matcher = function()

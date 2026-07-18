@@ -62,6 +62,11 @@ RangeMappingArray *refine_diff_char_level(const SequenceDiff *line_diff, const c
                                           int len_a, const char **lines_b, int len_b,
                                           const CharLevelOptions *options, bool *out_hit_timeout);
 
+RangeMappingBatch *refine_diffs_char_level(const SequenceDiffArray *line_diffs,
+                                           const char **lines_a, int len_a, const char **lines_b,
+                                           int len_b, const CharLevelOptions *options,
+                                           bool *out_hit_timeout);
+
 /**
  * Refine all line-level diffs to character-level - VSCode Parity
  * 
@@ -90,5 +95,6 @@ RangeMappingArray *refine_all_diffs_char_level(const SequenceDiffArray *line_dif
  * Helper: Free RangeMappingArray
  */
 void free_range_mapping_array(RangeMappingArray *arr);
+void free_range_mapping_batch(RangeMappingBatch *batch);
 
 #endif // CHAR_LEVEL_H

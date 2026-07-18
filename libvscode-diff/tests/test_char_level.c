@@ -518,6 +518,31 @@ TEST(delete_and_add) {
   free_range_mapping_array(result2);
 }
 
+TEST(batched_refinement) {
+  const char *original[] = {"old alpha", "unchanged", "old beta"};
+  const char *modified[] = {"new alpha", "unchanged", "new beta"};
+  SequenceDiff diffs[] = {{0, 1, 0, 1}, {2, 3, 2, 3}};
+  SequenceDiffArray line_diffs = {.diffs = diffs, .count = 2, .capacity = 2};
+  CharLevelOptions opts = {
+      .consider_whitespace_changes = true, .extend_to_subwords = false, .timeout_ms = 5000};
+  bool hit_timeout = false;
+
+  RangeMappingBatch *batch =
+      refine_diffs_char_level(&line_diffs, original, 3, modified, 3, &opts, &hit_timeout);
+
+  ASSERT(batch != NULL, "Batch result should not be NULL");
+  ASSERT_EQ(batch->count, 2, "Batch should preserve input grouping");
+  ASSERT(batch->results[0].count > 0, "First range should have mappings");
+  ASSERT(batch->results[1].count > 0, "Second range should have mappings");
+  ASSERT(!hit_timeout, "Batch should not time out");
+  ASSERT_EQ(batch->results[0].mappings[0].original.start_line, 1,
+            "First result should use absolute lines");
+  ASSERT_EQ(batch->results[1].mappings[0].original.start_line, 3,
+            "Second result should use absolute lines");
+
+  free_range_mapping_batch(batch);
+}
+
 // =============================================================================
 // Main Test Runner
 // =============================================================================
@@ -537,6 +562,7 @@ int main(void) {
   RUN_TEST(real_code_function_rename);
   RUN_TEST(cross_line_range_mapping);
   RUN_TEST(delete_and_add);
+  RUN_TEST(batched_refinement);
 
   printf("\n");
   printf("=======================================================\n");

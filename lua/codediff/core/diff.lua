@@ -103,6 +103,11 @@ ffi.cdef([[
   } RangeMappingArray;
 
   typedef struct {
+    RangeMappingArray* results;
+    int count;
+  } RangeMappingBatch;
+
+  typedef struct {
     bool consider_whitespace_changes;
     bool extend_to_subwords;
     int timeout_ms;
@@ -165,8 +170,8 @@ ffi.cdef([[
     bool* hit_timeout
   );
 
-  RangeMappingArray* refine_diff_char_level(
-    const SequenceDiff* line_diff,
+  RangeMappingBatch* refine_diffs_char_level(
+    const SequenceDiffArray* line_diffs,
     const char** original_lines,
     int original_count,
     const char** modified_lines,
@@ -176,7 +181,7 @@ ffi.cdef([[
   );
 
   void free_lines_diff(LinesDiff* diff);
-  void free_range_mapping_array(RangeMappingArray* mappings);
+  void free_range_mapping_batch(RangeMappingBatch* batch);
   void free_sequence_diff_array(SequenceDiffArray* diff);
   const char* get_version(void);
 ]])
@@ -428,37 +433,7 @@ local function absolute_line_range(range, start_line)
   }
 end
 
--- Compute absolute character changes for one line-range mapping.
-local function compute_mapping_char_changes(original_lines, modified_lines, mapping, options)
-  local c_orig, orig_count = lua_to_c_strings(original_lines)
-  local c_mod, mod_count = lua_to_c_strings(modified_lines)
-  local c_mapping = ffi.new("SequenceDiff")
-  c_mapping.seq1_start = mapping.original.start_line - 1
-  c_mapping.seq1_end = mapping.original.end_line - 1
-  c_mapping.seq2_start = mapping.modified.start_line - 1
-  c_mapping.seq2_end = mapping.modified.end_line - 1
-
-  local c_options = ffi.new("CharLevelOptions")
-  c_options.consider_whitespace_changes = not options.ignore_trim_whitespace
-  c_options.extend_to_subwords = options.extend_to_subwords or false
-  c_options.timeout_ms = options.max_computation_time_ms or 5000
-
-  local hit_timeout = ffi.new("bool[1]")
-  local c_mappings = lib.refine_diff_char_level(c_mapping, c_orig, orig_count, c_mod, mod_count, c_options, hit_timeout)
-  if c_mappings == nil then
-    error("refine_diff_char_level returned NULL")
-  end
-
-  local inner_changes = {}
-  for index = 0, c_mappings.count - 1 do
-    inner_changes[#inner_changes + 1] = range_mapping_to_lua(c_mappings.mappings[index])
-  end
-
-  lib.free_range_mapping_array(c_mappings)
-  return inner_changes, hit_timeout[0]
-end
-
-local function apply_line_matcher(change, line_block, original_lines, modified_lines, matcher, options)
+local function collect_line_mappings(change, line_block, original_lines, modified_lines, matcher, selected)
   local context = {
     original_lines = slice_lines(original_lines, line_block.original.start_line, line_block.original.end_line),
     modified_lines = slice_lines(modified_lines, line_block.modified.start_line, line_block.modified.end_line),
@@ -468,20 +443,56 @@ local function apply_line_matcher(change, line_block, original_lines, modified_l
   local mappings = matcher(context)
   validate_line_mappings(mappings, context)
 
-  local hit_timeout = false
   for _, mapping in ipairs(mappings) do
     local refined_mapping = {
       original = absolute_line_range(mapping.original, line_block.original.start_line),
       modified = absolute_line_range(mapping.modified, line_block.modified.start_line),
+      inner_changes = {},
     }
-    local inner_changes, mapping_hit_timeout = compute_mapping_char_changes(original_lines, modified_lines, refined_mapping, options)
-    refined_mapping.inner_changes = inner_changes
     change.line_mappings[#change.line_mappings + 1] = refined_mapping
-    vim.list_extend(change.inner_changes, inner_changes)
-    hit_timeout = hit_timeout or mapping_hit_timeout
+    selected[#selected + 1] = { change = change, mapping = refined_mapping }
+  end
+end
+
+local function refine_line_mappings(selected, original_lines, modified_lines, options)
+  if #selected == 0 then
+    return false
   end
 
-  return hit_timeout
+  local c_orig, orig_count = lua_to_c_strings(original_lines)
+  local c_mod, mod_count = lua_to_c_strings(modified_lines)
+  local c_mappings = ffi.new("SequenceDiff[?]", #selected)
+  for index, selected_mapping in ipairs(selected) do
+    c_mappings[index - 1].seq1_start = selected_mapping.mapping.original.start_line - 1
+    c_mappings[index - 1].seq1_end = selected_mapping.mapping.original.end_line - 1
+    c_mappings[index - 1].seq2_start = selected_mapping.mapping.modified.start_line - 1
+    c_mappings[index - 1].seq2_end = selected_mapping.mapping.modified.end_line - 1
+  end
+  local c_mapping_array = ffi.new("SequenceDiffArray", { diffs = c_mappings, count = #selected, capacity = #selected })
+  local c_options = ffi.new("CharLevelOptions", {
+    consider_whitespace_changes = not options.ignore_trim_whitespace,
+    extend_to_subwords = options.extend_to_subwords or false,
+    timeout_ms = options.max_computation_time_ms or 5000,
+  })
+  local hit_timeout = ffi.new("bool[1]")
+  local batch = lib.refine_diffs_char_level(c_mapping_array, c_orig, orig_count, c_mod, mod_count, c_options, hit_timeout)
+  if batch == nil then
+    error("refine_diffs_char_level returned NULL")
+  end
+  if batch.count ~= #selected then
+    lib.free_range_mapping_batch(batch)
+    error("refine_diffs_char_level returned an unexpected result count")
+  end
+
+  for index, selected_mapping in ipairs(selected) do
+    local result = batch.results[index - 1]
+    for mapping_index = 0, result.count - 1 do
+      selected_mapping.mapping.inner_changes[#selected_mapping.mapping.inner_changes + 1] = range_mapping_to_lua(result.mappings[mapping_index])
+    end
+    vim.list_extend(selected_mapping.change.inner_changes, selected_mapping.mapping.inner_changes)
+  end
+  lib.free_range_mapping_batch(batch)
+  return hit_timeout[0]
 end
 
 -- Main API: Compute diff between two sets of lines
@@ -494,12 +505,14 @@ function M.compute_diff(original_lines, modified_lines, options)
     matcher = require("codediff.config").options.diff.line_matcher
   end
 
+  local selected = {}
   for _, change in ipairs(changes) do
     for _, line_block in ipairs(change.line_blocks) do
-      hit_timeout = apply_line_matcher(change, line_block, original_lines, modified_lines, matcher, options) or hit_timeout
+      collect_line_mappings(change, line_block, original_lines, modified_lines, matcher, selected)
     end
     change.line_blocks = nil
   end
+  hit_timeout = refine_line_mappings(selected, original_lines, modified_lines, options) or hit_timeout
 
   local moves = {}
   if options.compute_moves then

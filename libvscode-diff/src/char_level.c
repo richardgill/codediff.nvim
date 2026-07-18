@@ -900,56 +900,80 @@ RangeMappingArray *refine_diff_char_level(const SequenceDiff *line_diff, const c
   return result;
 }
 
+RangeMappingBatch *refine_diffs_char_level(const SequenceDiffArray *line_diffs,
+                                           const char **lines_a, int len_a, const char **lines_b,
+                                           int len_b, const CharLevelOptions *options,
+                                           bool *out_hit_timeout) {
+  if (out_hit_timeout) {
+    *out_hit_timeout = false;
+  }
+  if (!line_diffs || !lines_a || !lines_b || !options) {
+    return NULL;
+  }
+
+  RangeMappingBatch *batch = (RangeMappingBatch *)malloc(sizeof(RangeMappingBatch));
+  if (!batch) {
+    return NULL;
+  }
+  batch->count = line_diffs->count;
+  batch->results = line_diffs->count > 0 ? (RangeMappingArray *)calloc((size_t)line_diffs->count,
+                                                                       sizeof(RangeMappingArray))
+                                         : NULL;
+  if (line_diffs->count > 0 && !batch->results) {
+    free(batch);
+    return NULL;
+  }
+
+  bool any_timeout = false;
+  for (int i = 0; i < line_diffs->count; i++) {
+    bool local_timeout = false;
+    RangeMappingArray *mappings = refine_diff_char_level(&line_diffs->diffs[i], lines_a, len_a,
+                                                         lines_b, len_b, options, &local_timeout);
+    if (!mappings) {
+      free_range_mapping_batch(batch);
+      return NULL;
+    }
+    batch->results[i] = *mappings;
+    free(mappings);
+    any_timeout = any_timeout || local_timeout;
+  }
+
+  if (out_hit_timeout) {
+    *out_hit_timeout = any_timeout;
+  }
+  return batch;
+}
+
 /**
- * Refine all line-level diffs - VSCode Parity
+ * Refine all line-level diffs - To confirm lua implementation has VSCode Parity
  */
 RangeMappingArray *refine_all_diffs_char_level(const SequenceDiffArray *line_diffs,
                                                const char **lines_a, int len_a,
                                                const char **lines_b, int len_b,
                                                const CharLevelOptions *options,
                                                bool *out_hit_timeout) {
-  // Initialize timeout flag
-  if (out_hit_timeout) {
-    *out_hit_timeout = false;
-  }
-
-  if (!line_diffs || !lines_a || !lines_b || !options) {
+  RangeMappingBatch *batch =
+      refine_diffs_char_level(line_diffs, lines_a, len_a, lines_b, len_b, options, out_hit_timeout);
+  if (!batch) {
     return NULL;
   }
 
   RangeMappingArray *result =
       create_range_mapping_array(line_diffs->count > 0 ? line_diffs->count * 4 : 10);
-
-  // Track if any refinement hit timeout
-  bool any_timeout = false;
-
-  // Refine each line diff
-  for (int i = 0; i < line_diffs->count; i++) {
-    bool local_timeout = false;
-    RangeMappingArray *char_mappings = refine_diff_char_level(
-        &line_diffs->diffs[i], lines_a, len_a, lines_b, len_b, options, &local_timeout);
-
-    // Accumulate timeout status (VSCode: if (characterDiffs.hitTimeout) hitTimeout = true)
-    if (local_timeout) {
-      any_timeout = true;
-    }
-
-    if (char_mappings) {
-      for (int j = 0; j < char_mappings->count; j++) {
-        add_range_mapping(result, &char_mappings->mappings[j]);
+  if (!result) {
+    free_range_mapping_batch(batch);
+    return NULL;
+  }
+  for (int i = 0; i < batch->count; i++) {
+    for (int j = 0; j < batch->results[i].count; j++) {
+      if (!add_range_mapping(result, &batch->results[i].mappings[j])) {
+        free_range_mapping_array(result);
+        free_range_mapping_batch(batch);
+        return NULL;
       }
-      free_range_mapping_array(char_mappings);
     }
   }
-
-  // Propagate timeout status to caller
-  if (out_hit_timeout) {
-    *out_hit_timeout = any_timeout;
-  }
-
-  // Note: Whitespace-only change scanning happens in the main diff computer
-  // (between line diffs), not here. This function only refines existing diffs.
-
+  free_range_mapping_batch(batch);
   return result;
 }
 
@@ -962,4 +986,14 @@ void free_range_mapping_array(RangeMappingArray *arr) {
   if (arr->mappings)
     free(arr->mappings);
   free(arr);
+}
+
+void free_range_mapping_batch(RangeMappingBatch *batch) {
+  if (!batch)
+    return;
+  for (int i = 0; i < batch->count; i++) {
+    free(batch->results[i].mappings);
+  }
+  free(batch->results);
+  free(batch);
 }
