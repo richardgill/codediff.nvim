@@ -50,7 +50,7 @@ file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/Makefile"
 # Makefile wrapper for developers (uses CMake underneath)
 # Users: Use build.sh instead (no CMake required)
 
-.PHONY: all build test test-c test-lua lint format clean help bump-patch bump-minor bump-major bump-prerelease
+.PHONY: all build benchmark test test-c test-lua lint format clean help bump-patch bump-minor bump-major bump-prerelease
 
 all: build
 
@@ -58,6 +58,9 @@ build:
 \t@cmake -B build -S .
 \t@cmake --build build
 \t@echo \"✓ Build successful\"
+
+benchmark:
+\t@./scripts/benchmark.sh
 
 test: test-c test-lua
 
@@ -91,7 +94,7 @@ bump-prerelease:
 \t@node scripts/bump_version.mjs prerelease
 
 help:
-\t@echo \"Targets: build, test, test-c, test-lua, lint, clean, help\"
+\t@echo \"Targets: build, benchmark, test, test-c, test-lua, lint, clean, help\"
 \t@echo \"Version: bump-patch, bump-minor, bump-major, bump-prerelease\"
 ")
 
