@@ -132,6 +132,8 @@ def fork_notice(config, names, code_head):
     stack = config["stack"]
     repository = stack["repository"]
     repo_url = f"https://github.com/{repository}"
+    compare_url = f"{repo_url}/compare/{stack['upstream']}...{code_head}"
+    readme_diff_url = f"{compare_url}#diff-b335630551682c19a781afebcf4d07bf978fb1f8ac04c6bf87428ed5106870f5"
     request_lines = [
         f"- [PR #{number} — {description}]({url})"
         for number, description, url, _ in pull_requests(config, names)
@@ -146,16 +148,22 @@ def fork_notice(config, names, code_head):
             f"> [Install the latest immutable snapshot]({repo_url}/releases/latest) · "
             f"[See list of old versions]({repo_url}/releases)"
         ),
-        f"> [View all downstream changes]({repo_url}/compare/{stack['upstream']}...{code_head})",
+        (
+            f"> [View README.md diff]({readme_diff_url}) · "
+            f"[View all downstream changes]({compare_url})"
+        ),
         "",
         "### Included pending upstream PRs",
+        "",
+        "Sorted by increasing complexity:",
         "",
         *request_lines,
         "",
         "## Install this fork",
         "",
         (
-            f"Choose a [snapshot release]({repo_url}/releases) and replace `<snapshot-sha>` below "
+            f"[Install the latest immutable snapshot]({repo_url}/releases/latest), or choose an older "
+            f"snapshot from [the releases list]({repo_url}/releases). Replace `<snapshot-sha>` below "
             "with its commit SHA. Each release also contains ready-to-copy installation snippets."
         ),
         "",
