@@ -191,47 +191,37 @@ end
 -- Step 3: Filler Line Calculation
 -- ============================================================================
 
-local function calculate_fillers(mapping)
-  local fillers = {}
-  local original_line = mapping.original.start_line
-  local modified_line = mapping.modified.start_line
-
-  for _, pair in ipairs(mapping.line_pairs) do
-    local original_count = pair.original_line - original_line
-    local modified_count = pair.modified_line - modified_line
-    if original_count > modified_count then
-      fillers[#fillers + 1] = {
-        buffer = "modified",
-        after_line = pair.modified_line - 1,
-        count = original_count - modified_count,
-      }
-    elseif modified_count > original_count then
-      fillers[#fillers + 1] = {
-        buffer = "original",
-        after_line = pair.original_line - 1,
-        count = modified_count - original_count,
-      }
-    end
-    original_line = pair.original_line + 1
-    modified_line = pair.modified_line + 1
-  end
-
-  local original_count = mapping.original.end_line - original_line
-  local modified_count = mapping.modified.end_line - modified_line
+local function append_filler(fillers, original_start, original_end, modified_start, modified_end)
+  local original_count = original_end - original_start
+  local modified_count = modified_end - modified_start
   if original_count > modified_count then
     fillers[#fillers + 1] = {
       buffer = "modified",
-      after_line = mapping.modified.end_line - 1,
+      after_line = modified_end - 1,
       count = original_count - modified_count,
     }
   elseif modified_count > original_count then
     fillers[#fillers + 1] = {
       buffer = "original",
-      after_line = mapping.original.end_line - 1,
+      after_line = original_end - 1,
       count = modified_count - original_count,
     }
   end
+end
 
+local function calculate_fillers(mapping)
+  local fillers = {}
+  local original_line = mapping.original.start_line
+  local modified_line = mapping.modified.start_line
+
+  for _, line_mapping in ipairs(mapping.line_mappings) do
+    append_filler(fillers, original_line, line_mapping.original.start_line, modified_line, line_mapping.modified.start_line)
+    append_filler(fillers, line_mapping.original.start_line, line_mapping.original.end_line, line_mapping.modified.start_line, line_mapping.modified.end_line)
+    original_line = line_mapping.original.end_line
+    modified_line = line_mapping.modified.end_line
+  end
+
+  append_filler(fillers, original_line, mapping.original.end_line, modified_line, mapping.modified.end_line)
   return fillers
 end
 

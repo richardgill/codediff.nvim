@@ -290,7 +290,7 @@ local function append_change(changes, original_start, original_end, modified_sta
     original = { start_line = original_start, end_line = original_end },
     modified = { start_line = modified_start, end_line = modified_end },
     inner_changes = {},
-    line_pairs = {},
+    line_mappings = {},
   }
 end
 
@@ -342,10 +342,10 @@ local function compute_line_changes(original_lines, modified_lines, options)
   return changes, hit_timeout[0]
 end
 
-local function slice_lines(lines, line_range)
+local function slice_lines(lines, start_index, end_index)
   local result = {}
-  for line = line_range.start_line, line_range.end_line - 1 do
-    result[#result + 1] = lines[line]
+  for index = start_index, end_index - 1 do
+    result[#result + 1] = lines[index]
   end
   return result
 end
@@ -359,54 +359,102 @@ local function offset_char_range(range, line_offset)
   }
 end
 
-local function refine_pair(original_line, modified_line, positions, options)
-  local pair_diff = compute_native_diff({ original_line }, { modified_line }, {
-    ignore_trim_whitespace = options.ignore_trim_whitespace,
-    max_computation_time_ms = options.max_computation_time_ms,
-    extend_to_subwords = options.extend_to_subwords,
-    compute_moves = false,
-  })
+local function validate_line_range(range, line_count, label)
+  if type(range) ~= "table" then
+    error(label .. " must be a table")
+  end
+  if type(range.start_index) ~= "number" or range.start_index % 1 ~= 0 then
+    error(label .. ".start_index must be an integer")
+  end
+  if type(range.end_index) ~= "number" or range.end_index % 1 ~= 0 then
+    error(label .. ".end_index must be an integer")
+  end
+  if range.start_index < 1 or range.end_index < range.start_index or range.end_index > line_count + 1 then
+    error(label .. " is out of bounds")
+  end
+end
+
+-- Validate that matcher output contains ordered, non-overlapping ranges within the changed block.
+local function validate_line_mappings(mappings, context)
+  if type(mappings) ~= "table" then
+    error("line matcher must return a table")
+  end
+
+  local previous
+  for index, mapping in ipairs(mappings) do
+    local label = "line mapping " .. index
+    if type(mapping) ~= "table" then
+      error(label .. " must be a table")
+    end
+    validate_line_range(mapping.original, #context.original_lines, label .. ".original")
+    validate_line_range(mapping.modified, #context.modified_lines, label .. ".modified")
+
+    local original_empty = mapping.original.start_index == mapping.original.end_index
+    local modified_empty = mapping.modified.start_index == mapping.modified.end_index
+    if original_empty and modified_empty then
+      error(label .. " cannot be empty on both sides")
+    end
+    if previous and (mapping.original.start_index < previous.original.end_index or mapping.modified.start_index < previous.modified.end_index) then
+      error("line mappings must be ordered and non-overlapping")
+    end
+    previous = mapping
+  end
+end
+
+local function absolute_line_range(range, start_line)
+  return {
+    start_line = start_line + range.start_index - 1,
+    end_line = start_line + range.end_index - 1,
+  }
+end
+
+-- Compute character changes for a line-range mapping and translate them to absolute file positions.
+local function compute_mapping_char_changes(context, mapping, absolute, options)
+  local mapping_diff = compute_native_diff(
+    slice_lines(context.original_lines, mapping.original.start_index, mapping.original.end_index),
+    slice_lines(context.modified_lines, mapping.modified.start_index, mapping.modified.end_index),
+    {
+      ignore_trim_whitespace = options.ignore_trim_whitespace,
+      max_computation_time_ms = options.max_computation_time_ms,
+      extend_to_subwords = options.extend_to_subwords,
+      compute_moves = false,
+    }
+  )
   local inner_changes = {}
 
-  for _, change in ipairs(pair_diff.changes) do
+  for _, change in ipairs(mapping_diff.changes) do
     for _, inner in ipairs(change.inner_changes) do
       inner_changes[#inner_changes + 1] = {
-        original = offset_char_range(inner.original, positions.original - 1),
-        modified = offset_char_range(inner.modified, positions.modified - 1),
+        original = offset_char_range(inner.original, absolute.original.start_line - 1),
+        modified = offset_char_range(inner.modified, absolute.modified.start_line - 1),
       }
     end
   end
 
-  return inner_changes, pair_diff.hit_timeout
+  return inner_changes, mapping_diff.hit_timeout
 end
 
 local function apply_line_matcher(change, original_lines, modified_lines, matcher, options)
   local context = {
-    original_lines = slice_lines(original_lines, change.original),
-    modified_lines = slice_lines(modified_lines, change.modified),
+    original_lines = slice_lines(original_lines, change.original.start_line, change.original.end_line),
+    modified_lines = slice_lines(modified_lines, change.modified.start_line, change.modified.end_line),
     original_start_line = change.original.start_line,
     modified_start_line = change.modified.start_line,
   }
-
-  if #context.original_lines == 0 or #context.modified_lines == 0 then
-    return false
-  end
+  local mappings = matcher(context)
+  validate_line_mappings(mappings, context)
 
   local hit_timeout = false
-  local pairs = matcher(context)
-  for _, pair in ipairs(pairs) do
-    local positions = {
-      original = change.original.start_line + pair.original_index - 1,
-      modified = change.modified.start_line + pair.modified_index - 1,
+  for _, mapping in ipairs(mappings) do
+    local refined_mapping = {
+      original = absolute_line_range(mapping.original, change.original.start_line),
+      modified = absolute_line_range(mapping.modified, change.modified.start_line),
     }
-    change.line_pairs[#change.line_pairs + 1] = {
-      original_line = positions.original,
-      modified_line = positions.modified,
-    }
-
-    local inner_changes, pair_hit_timeout = refine_pair(context.original_lines[pair.original_index], context.modified_lines[pair.modified_index], positions, options)
+    local inner_changes, mapping_hit_timeout = compute_mapping_char_changes(context, mapping, refined_mapping, options)
+    refined_mapping.inner_changes = inner_changes
+    change.line_mappings[#change.line_mappings + 1] = refined_mapping
     vim.list_extend(change.inner_changes, inner_changes)
-    hit_timeout = hit_timeout or pair_hit_timeout
+    hit_timeout = hit_timeout or mapping_hit_timeout
   end
 
   return hit_timeout

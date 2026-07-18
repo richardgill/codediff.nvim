@@ -222,7 +222,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 
 ### Intraline line matching
 
-CodeDiff uses a callback to pair original and modified lines within each changed block. Paired lines use `CodeDiffLineDelete`/`CodeDiffLineInsert`, with changed text additionally using `CodeDiffCharDelete`/`CodeDiffCharInsert`. Unpaired lines use only `CodeDiffLineDelete` or `CodeDiffLineInsert`. Similarity matching with a `0.75` threshold is the default:
+CodeDiff uses a callback to map original and modified line ranges within each changed block. Mapped ranges use `CodeDiffLineDelete`/`CodeDiffLineInsert`, with changed text additionally using `CodeDiffCharDelete`/`CodeDiffCharInsert`. Unmapped lines use only `CodeDiffLineDelete` or `CodeDiffLineInsert`. Similarity matching with a `0.75` threshold is the default:
 
 ```lua
 local line_matchers = require("codediff.line_matchers")
@@ -268,7 +268,7 @@ require("codediff").setup({
 })
 ```
 
-Custom callbacks receive one changed block and return ordered, non-crossing pairs of 1-based indices:
+Custom callbacks receive one changed block and return ordered, non-overlapping line range mappings. Indices are 1-based within the callback arrays and end indices are exclusive:
 
 ```lua
 ---@class CodeDiffLineMatcherContext
@@ -277,32 +277,36 @@ Custom callbacks receive one changed block and return ordered, non-crossing pair
 ---@field original_start_line integer
 ---@field modified_start_line integer
 
----@class CodeDiffLinePair
----@field original_index integer
----@field modified_index integer
+---@class CodeDiffLineRange
+---@field start_index integer
+---@field end_index integer
 
----@alias CodeDiffLineMatcher fun(context: CodeDiffLineMatcherContext): CodeDiffLinePair[]
+---@class CodeDiffLineRangeMapping
+---@field original CodeDiffLineRange
+---@field modified CodeDiffLineRange
+
+---@alias CodeDiffLineMatcher fun(context: CodeDiffLineMatcherContext): CodeDiffLineRangeMapping[]
 ```
 
 For example:
 
 ```lua
 local function match_by_position(context)
-  local pair_count = math.min(#context.original_lines, #context.modified_lines)
-  local pairs = {}
+  local mapping_count = math.min(#context.original_lines, #context.modified_lines)
+  local mappings = {}
 
-  for index = 1, pair_count do
-    pairs[index] = {
-      original_index = index,
-      modified_index = index,
+  for index = 1, mapping_count do
+    mappings[index] = {
+      original = { start_index = index, end_index = index + 1 },
+      modified = { start_index = index, end_index = index + 1 },
     }
   end
 
-  return pairs
+  return mappings
 end
 ```
 
-Each line may appear in at most one pair. Omitted lines remain unpaired. Paired lines retain `CodeDiffLineInsert` or `CodeDiffLineDelete` and receive `CodeDiffCharInsert` or `CodeDiffCharDelete` over changed characters. Unpaired lines receive only their line-level highlight. Pure insertions and deletions do not invoke the matcher.
+Mappings may be one-to-one, one-to-many, or many-to-one. Either side may be empty for a pure insertion or deletion, but both sides cannot be empty. Omitted lines remain unmapped and receive only their line-level highlight. Mapped ranges retain `CodeDiffLineInsert` or `CodeDiffLineDelete` and receive `CodeDiffCharInsert` or `CodeDiffCharDelete` over changed characters.
 
 Matchers run synchronously during rendering and automatic refreshes. Custom callbacks should avoid I/O and return quickly. `diff.max_computation_time_ms` cannot interrupt custom Lua code.
 

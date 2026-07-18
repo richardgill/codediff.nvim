@@ -59,7 +59,7 @@ local function find_best_pair(context, range, threshold)
   return best
 end
 
-local function collect_similar_pairs(context, range, threshold, pairs)
+local function collect_similar_mappings(context, range, threshold, mappings)
   if range.original_start > range.original_end or range.modified_start > range.modified_end then
     return
   end
@@ -69,40 +69,46 @@ local function collect_similar_pairs(context, range, threshold, pairs)
     return
   end
 
-  collect_similar_pairs(context, {
+  collect_similar_mappings(context, {
     original_start = range.original_start,
     original_end = best.original_index - 1,
     modified_start = range.modified_start,
     modified_end = best.modified_index - 1,
-  }, threshold, pairs)
+  }, threshold, mappings)
 
-  pairs[#pairs + 1] = {
-    original_index = best.original_index,
-    modified_index = best.modified_index,
+  mappings[#mappings + 1] = {
+    original = {
+      start_index = best.original_index,
+      end_index = best.original_index + 1,
+    },
+    modified = {
+      start_index = best.modified_index,
+      end_index = best.modified_index + 1,
+    },
   }
 
-  collect_similar_pairs(context, {
+  collect_similar_mappings(context, {
     original_start = best.original_index + 1,
     original_end = range.original_end,
     modified_start = best.modified_index + 1,
     modified_end = range.modified_end,
-  }, threshold, pairs)
+  }, threshold, mappings)
 end
 
 -- Pair similar original and modified lines in order using an optional similarity threshold.
 -- Example: left = "local old_name = 1", right = "local new_name = 1" gives 0.83.
 function M.similarity(context, options)
   local threshold = options and options.threshold or DEFAULT_THRESHOLD
-  local pairs = {}
+  local mappings = {}
 
-  collect_similar_pairs(context, {
+  collect_similar_mappings(context, {
     original_start = 1,
     original_end = #context.original_lines,
     modified_start = 1,
     modified_end = #context.modified_lines,
-  }, threshold, pairs)
+  }, threshold, mappings)
 
-  return pairs
+  return mappings
 end
 
 -- Pair original and modified lines by position only when both sides have equal line counts (GitHub-style).
@@ -113,14 +119,14 @@ function M.equal_line_count(context)
     return {}
   end
 
-  local pairs = {}
+  local mappings = {}
   for index = 1, #context.original_lines do
-    pairs[index] = {
-      original_index = index,
-      modified_index = index,
+    mappings[index] = {
+      original = { start_index = index, end_index = index + 1 },
+      modified = { start_index = index, end_index = index + 1 },
     }
   end
-  return pairs
+  return mappings
 end
 
 function M.none(_context)

@@ -133,10 +133,10 @@ Set the layout in your config:
                                               *codediff-line-matching*
 Intraline line matching~
 
-CodeDiff uses a callback to pair original and modified lines within each
-changed block. Paired lines use CodeDiffLineDelete/CodeDiffLineInsert, with
+CodeDiff uses a callback to map original and modified line ranges within each
+changed block. Mapped ranges use CodeDiffLineDelete/CodeDiffLineInsert, with
 changed text additionally using CodeDiffCharDelete/CodeDiffCharInsert.
-Unpaired lines use only CodeDiffLineDelete or CodeDiffLineInsert. Similarity
+Unmapped lines use only CodeDiffLineDelete or CodeDiffLineInsert. Similarity
 matching with a 0.75 threshold is the default:
 >lua
   local line_matchers = require("codediff.line_matchers")
@@ -164,16 +164,25 @@ Other built-ins:
 <
 
 A custom matcher receives `original_lines`, `modified_lines`,
-`original_start_line`, and `modified_start_line`. It returns ordered pairs:
+`original_start_line`, and `modified_start_line`. It returns ordered,
+non-overlapping line range mappings:
 >lua
   return {
-    { original_index = 1, modified_index = 1 },
-    { original_index = 3, modified_index = 2 },
+    {
+      original = { start_index = 1, end_index = 2 },
+      modified = { start_index = 1, end_index = 2 },
+    },
+    {
+      original = { start_index = 3, end_index = 4 },
+      modified = { start_index = 2, end_index = 3 },
+    },
   }
 <
 
-Indices are 1-based within the callback's line arrays. Paired lines receive
-line-level and changed-character highlights. Unpaired lines receive only
+Indices are 1-based within the callback's line arrays and end indices are
+exclusive. Mappings may be one-to-one, one-to-many, or many-to-one. Either
+side may be empty, but both sides cannot be empty. Mapped ranges receive
+line-level and changed-character highlights. Unmapped lines receive only
 line-level highlights.
 
                                                       *codediff-moved-code*

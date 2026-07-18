@@ -101,6 +101,34 @@ describe("Render Core", function()
     vim.api.nvim_buf_delete(right_buf, {force = true})
   end)
 
+  it("Aligns a one-to-many line mapping", function()
+    local left_buf = vim.api.nvim_create_buf(false, true)
+    local right_buf = vim.api.nvim_create_buf(false, true)
+    local original = { "local result = prefix .. value" }
+    local modified = { "local result = prefix", "  .. value" }
+
+    vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, original)
+    vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, modified)
+
+    local lines_diff = diff.compute_diff(original, modified, {
+      line_matcher = function()
+        return {
+          {
+            original = { start_index = 1, end_index = 2 },
+            modified = { start_index = 1, end_index = 3 },
+          },
+        }
+      end,
+    })
+    local rendered = core.render_diff(left_buf, right_buf, original, modified, lines_diff)
+
+    assert.equal(1, rendered.left_fillers)
+    assert.equal(0, rendered.right_fillers)
+
+    vim.api.nvim_buf_delete(left_buf, { force = true })
+    vim.api.nvim_buf_delete(right_buf, { force = true })
+  end)
+
   -- Test 5: Character-level diff highlights
   it("Renders character-level differences within modified lines", function()
     local left_buf = vim.api.nvim_create_buf(false, true)
