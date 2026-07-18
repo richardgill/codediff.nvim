@@ -82,6 +82,7 @@ local set_whole_buffer_sign = function(bufnr, sign, priority, tracks_appends)
   vim.api.nvim_buf_set_extmark(bufnr, namespace, 0, 0, {
     end_row = tracks_appends and line_count or line_count - 1,
     end_col = 0,
+    right_gravity = false,
     end_right_gravity = tracks_appends,
     sign_text = sign.text,
     sign_hl_group = sign.hl_group,

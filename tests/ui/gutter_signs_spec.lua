@@ -193,14 +193,17 @@ describe("Native gutter signs", function()
     assert.equals(2, find_sign(session.original_bufnr, "└").row)
   end)
 
-  it("renders a growing whole-file sign with one extmark", function()
+  it("keeps a growing whole-file sign anchored across replacement and appends", function()
     config.options.diff.gutter_signs = { changed_priority = 100 }
+    vim.api.nvim_buf_set_lines(session.modified_bufnr, 0, -1, false, { "loading" })
     gutter_signs.set_whole_file(session.modified_bufnr, "modified")
 
+    vim.api.nvim_buf_set_lines(session.modified_bufnr, 0, -1, false, { "one", "two", "three" })
     local sign = get_signs(session.modified_bufnr)[1]
     assert.equals("＋", sign.text)
     assert.equals("CodeDiffGutterInsert", sign.hl)
     assert.equals("CodeDiffGutterInsertNumber", sign.number_hl)
+    assert.equals(0, sign.row)
     assert.equals(3, sign.end_row)
 
     vim.api.nvim_buf_set_lines(session.modified_bufnr, 3, -1, false, { "loaded later" })
