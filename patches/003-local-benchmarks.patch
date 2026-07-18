@@ -1,4 +1,4 @@
-From f785b5c4f3ee1ddd272be8d74371a4a650879f48 Mon Sep 17 00:00:00 2001
+From 7ea3abb4fed997a7036447cf87408486ea9b6e94 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 11:56:21 +0000
 Subject: [PATCH] chore: add local benchmark suites
@@ -6,19 +6,27 @@ Subject: [PATCH] chore: add local benchmark suites
 ---
  CMakeLists.txt           |   7 +-
  Makefile                 |   7 +-
- benchmarks/diff.lua      |  47 +++++++
- benchmarks/fixtures.lua  | 128 +++++++++++++++++
- benchmarks/harness.lua   | 117 ++++++++++++++++
- benchmarks/render.lua    | 157 +++++++++++++++++++++
- benchmarks/workflows.lua | 292 +++++++++++++++++++++++++++++++++++++++
- docs/BENCHMARKS.md       |  29 ++++
+ benchmarks/bootstrap.lua |   2 +
+ benchmarks/diff.lua      |  52 +++++++
+ benchmarks/fixtures.lua  | 207 ++++++++++++++++++++++++++++
+ benchmarks/harness.lua   | 179 ++++++++++++++++++++++++
+ benchmarks/normalize.lua |  36 +++++
+ benchmarks/render.lua    | 156 +++++++++++++++++++++
+ benchmarks/report.lua    | 163 ++++++++++++++++++++++
+ benchmarks/timeout.lua   |  97 +++++++++++++
+ benchmarks/workflows.lua | 291 +++++++++++++++++++++++++++++++++++++++
+ docs/BENCHMARKS.md       |  41 ++++++
  docs/README.md           |   1 +
- scripts/benchmark.sh     |  31 +++++
- 10 files changed, 812 insertions(+), 4 deletions(-)
+ scripts/benchmark.sh     |  61 ++++++++
+ 14 files changed, 1296 insertions(+), 4 deletions(-)
+ create mode 100644 benchmarks/bootstrap.lua
  create mode 100644 benchmarks/diff.lua
  create mode 100644 benchmarks/fixtures.lua
  create mode 100644 benchmarks/harness.lua
+ create mode 100644 benchmarks/normalize.lua
  create mode 100644 benchmarks/render.lua
+ create mode 100644 benchmarks/report.lua
+ create mode 100644 benchmarks/timeout.lua
  create mode 100644 benchmarks/workflows.lua
  create mode 100644 docs/BENCHMARKS.md
  create mode 100755 scripts/benchmark.sh
@@ -85,29 +93,41 @@ index 99ec60b..25d7334 100644
 -	@echo "Targets: build, test, test-c, test-lua, lint, clean, help"
 +	@echo "Targets: build, benchmark, test, test-c, test-lua, lint, clean, help"
  	@echo "Version: bump-patch, bump-minor, bump-major, bump-prerelease"
-diff --git a/benchmarks/diff.lua b/benchmarks/diff.lua
+diff --git a/benchmarks/bootstrap.lua b/benchmarks/bootstrap.lua
 new file mode 100644
-index 0000000..eddd2c4
+index 0000000..cd702c6
 --- /dev/null
-+++ b/benchmarks/diff.lua
-@@ -0,0 +1,47 @@
++++ b/benchmarks/bootstrap.lua
+@@ -0,0 +1,2 @@
 +vim.opt.runtimepath:prepend(vim.fn.getcwd())
 +vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
+diff --git a/benchmarks/diff.lua b/benchmarks/diff.lua
+new file mode 100644
+index 0000000..e5ad640
+--- /dev/null
++++ b/benchmarks/diff.lua
+@@ -0,0 +1,52 @@
++dofile("benchmarks/bootstrap.lua")
 +
 +local diff = require("codediff.core.diff")
 +local fixture_data = dofile("benchmarks/fixtures.lua")
 +local harness = dofile("benchmarks/harness.lua")
++local normalize = dofile("benchmarks/normalize.lua")
 +
 +local validate = function(case, result)
 +  assert(type(result) == "table", case.name .. ": compute_diff returned no result")
 +  assert(result.hit_timeout == false, case.name .. ": compute_diff timed out")
 +  assert(type(result.changes) == "table", case.name .. ": changes are missing")
 +  assert(type(result.moves) == "table" and #result.moves == 0, case.name .. ": unexpected moves")
-+  assert(#result.changes == case.expected_changes, case.name .. ": unexpected change count")
++  assert(#result.changes == case.expected_changes, string.format("%s: expected %d changes, got %d", case.name, case.expected_changes, #result.changes))
 +end
 +
 +local run = function(case)
 +  return diff.compute_diff(case.original, case.modified, fixture_data.diff_options)
++end
++
++local hash_result = function(_, result)
++  return normalize.hash_lines_diff(result)
 +end
 +
 +local print_result = function(case, stats)
@@ -128,6 +148,7 @@ index 0000000..eddd2c4
 +    cases = fixture_data.cases,
 +    run = run,
 +    validate = validate,
++    hash_result = hash_result,
 +    print_result = print_result,
 +  })
 +end
@@ -140,10 +161,10 @@ index 0000000..eddd2c4
 +vim.cmd("quit")
 diff --git a/benchmarks/fixtures.lua b/benchmarks/fixtures.lua
 new file mode 100644
-index 0000000..f2731ce
+index 0000000..30ef4d8
 --- /dev/null
 +++ b/benchmarks/fixtures.lua
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,207 @@
 +local M = {}
 +
 +M.diff_options = {
@@ -201,6 +222,37 @@ index 0000000..f2731ce
 +  return lines
 +end
 +
++local make_dense_block = function(block_size, changed)
++  return make_lines(1000, "dense block", function(index)
++    local in_block = index > 400 and index <= 400 + block_size
++    return changed and in_block and make_line("dense replacement", index) or make_line("dense block", index)
++  end)
++end
++
++local make_interleaved = function(modified)
++  local lines = {}
++  for index = 1, 100 do
++    local prefix = modified and "new entry" or "old entry"
++    lines[#lines + 1] = make_line(prefix, index)
++    if modified and index % 5 == 0 then
++      lines[#lines + 1] = make_line("interleaved insertion", index)
++    end
++  end
++  return lines
++end
++
++local make_sparse_blocks = function(changed)
++  return make_lines(5000, "sparse blocks", function(index)
++    return changed and index % 50 == 0 and make_line("sparse replacement", index) or make_line("sparse blocks", index)
++  end)
++end
++
++local load_pinned_file = function(revision, path)
++  local lines = vim.fn.systemlist({ "git", "show", revision .. ":" .. path })
++  assert(vim.v.shell_error == 0, string.format("cannot load pinned fixture %s:%s", revision, path))
++  return lines
++end
++
 +local insertion_original, insertion_modified = make_large_insertion()
 +M.cases = {
 +  {
@@ -221,6 +273,54 @@ index 0000000..f2731ce
 +    original = insertion_original,
 +    modified = insertion_modified,
 +    expected_changes = 1,
++  },
++  {
++    name = "pure-insertion-1000",
++    original = { "" },
++    modified = make_lines(1000, "pure insertion"),
++    expected_changes = 1,
++  },
++  {
++    name = "pure-deletion-1000",
++    original = make_lines(1000, "pure deletion"),
++    modified = { "" },
++    expected_changes = 1,
++  },
++  {
++    name = "dense-block-50",
++    original = make_dense_block(50, false),
++    modified = make_dense_block(50, true),
++    expected_changes = 1,
++  },
++  {
++    name = "dense-block-200",
++    original = make_dense_block(200, false),
++    modified = make_dense_block(200, true),
++    expected_changes = 1,
++  },
++  {
++    name = "interleaved-100x120",
++    original = make_interleaved(false),
++    modified = make_interleaved(true),
++    expected_changes = 1,
++  },
++  {
++    name = "sparse-100-blocks",
++    original = make_sparse_blocks(false),
++    modified = make_sparse_blocks(true),
++    expected_changes = 100,
++  },
++  {
++    name = "real-lua-navigation",
++    original = load_pinned_file("52c3dd434f6ddb428ea671334ab9774ac46a7787^", "lua/codediff/ui/view/navigation.lua"),
++    modified = load_pinned_file("52c3dd434f6ddb428ea671334ab9774ac46a7787", "lua/codediff/ui/view/navigation.lua"),
++    expected_changes = 3,
++  },
++  {
++    name = "real-docs-index",
++    original = load_pinned_file("0bc4a59da4c082b0e844e12121bece3de3f83748^", "docs/README.md"),
++    modified = load_pinned_file("0bc4a59da4c082b0e844e12121bece3de3f83748", "docs/README.md"),
++    expected_changes = 4,
 +  },
 +  {
 +    name = "repeated-context",
@@ -274,14 +374,15 @@ index 0000000..f2731ce
 +return M
 diff --git a/benchmarks/harness.lua b/benchmarks/harness.lua
 new file mode 100644
-index 0000000..855666f
+index 0000000..a8d0c9b
 --- /dev/null
 +++ b/benchmarks/harness.lua
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,179 @@
 +local M = {}
-+local WARMUP_COUNT = 3
-+local SAMPLE_COUNT = 20
++local WARMUP_COUNT = tonumber(vim.env.CODEDIFF_BENCHMARK_WARMUPS) or 3
++local SAMPLE_COUNT = tonumber(vim.env.CODEDIFF_BENCHMARK_SAMPLES) or 20
 +local NS_PER_MS = 1000000
++local PROJECT_ROOT = vim.fn.getcwd()
 +
 +local median = function(sorted)
 +  local middle = math.floor(#sorted / 2)
@@ -316,6 +417,7 @@ index 0000000..855666f
 +    context = config.setup_case(case)
 +  end
 +  collectgarbage("collect")
++  local memory_before_kb = collectgarbage("count")
 +  local started_at = vim.uv.hrtime()
 +  local result
 +  if case.run then
@@ -324,12 +426,22 @@ index 0000000..855666f
 +    result = config.run(case, context)
 +  end
 +  local elapsed = vim.uv.hrtime() - started_at
++  local memory_delta_kb = collectgarbage("count") - memory_before_kb
 +  if case.validate then
 +    case.validate(result, context)
 +  else
 +    config.validate(case, result, context)
 +  end
-+  return elapsed / NS_PER_MS
++  local output_hash = config.hash_result and config.hash_result(case, result, context) or nil
++  local sample = {
++    elapsed_ms = elapsed / NS_PER_MS,
++    lua_memory_delta_kb = memory_delta_kb,
++    output_hash = output_hash,
++  }
++  if config.sample_metadata then
++    sample.metadata = config.sample_metadata(case, result, context)
++  end
++  return sample
 +end
 +
 +local benchmark = function(config, case)
@@ -337,11 +449,24 @@ index 0000000..855666f
 +    run_once(config, case)
 +  end
 +
-+  local samples = {}
++  local elapsed_samples = {}
++  local memory_samples = {}
++  local raw_samples = {}
++  local output_hash
 +  for index = 1, SAMPLE_COUNT do
-+    samples[index] = run_once(config, case)
++    local sample = run_once(config, case)
++    elapsed_samples[index] = sample.elapsed_ms
++    memory_samples[index] = sample.lua_memory_delta_kb
++    raw_samples[index] = sample
++    output_hash = output_hash or sample.output_hash
++    assert(not output_hash or sample.output_hash == output_hash, case.name .. ": output hash changed between samples")
 +  end
-+  return summarize(samples)
++
++  local stats = summarize(elapsed_samples)
++  stats.lua_memory_delta_kb = summarize(memory_samples)
++  stats.output_hash = output_hash
++  stats.samples = raw_samples
++  return stats
 +end
 +
 +local get_arguments = function(script)
@@ -369,6 +494,28 @@ index 0000000..855666f
 +  error(string.format("unknown %s benchmark %q", suite_name, name))
 +end
 +
++local write_raw_results = function(config, results)
++  local path = vim.env.CODEDIFF_BENCHMARK_RAW_FILE
++  if not path then
++    return
++  end
++  local usage = vim.uv.getrusage()
++  local revision = vim.fn.systemlist({ "git", "-C", PROJECT_ROOT, "rev-parse", "HEAD" })[1]
++  local dirty = #vim.fn.systemlist({ "git", "-C", PROJECT_ROOT, "status", "--porcelain" }) > 0
++  local payload = {
++    schema_version = 1,
++    suite = config.suite_name,
++    process_index = tonumber(vim.env.CODEDIFF_BENCHMARK_PROCESS_INDEX),
++    plugin_revision = revision,
++    plugin_dirty = dirty,
++    omp_num_threads = tonumber(vim.env.OMP_NUM_THREADS),
++    max_rss_kb = usage.maxrss,
++    results = results,
++  }
++  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
++  vim.fn.writefile({ vim.json.encode(payload) }, path)
++end
++
 +function M.run(config)
 +  local arguments = get_arguments(config.script)
 +  if arguments[1] == "--list" then
@@ -385,24 +532,80 @@ index 0000000..855666f
 +    config.setup()
 +  end
 +
-+  print(string.format("%s (%d warmups, %d samples)", config.title, WARMUP_COUNT, SAMPLE_COUNT))
-+  print(config.description)
-+  print(config.header)
-+
-+  for _, case in ipairs(select_cases(config.cases, arguments[1], config.suite_name)) do
-+    config.print_result(case, benchmark(config, case))
++  local quiet = vim.env.CODEDIFF_BENCHMARK_QUIET == "1"
++  if not quiet then
++    io.stdout:write(string.format("%s (%d warmups, %d samples)\n", config.title, WARMUP_COUNT, SAMPLE_COUNT))
++    io.stdout:write(config.description .. "\n")
++    io.stdout:write(config.header .. "\n")
 +  end
++
++  local results = {}
++  for _, case in ipairs(select_cases(config.cases, arguments[1], config.suite_name)) do
++    local stats = benchmark(config, case)
++    results[#results + 1] = {
++      name = case.name,
++      output_hash = stats.output_hash,
++      samples = stats.samples,
++    }
++    if not quiet then
++      config.print_result(case, stats)
++    end
++  end
++  write_raw_results(config, results)
++end
++
++M.summarize = summarize
++
++return M
+diff --git a/benchmarks/normalize.lua b/benchmarks/normalize.lua
+new file mode 100644
+index 0000000..d8508b8
+--- /dev/null
++++ b/benchmarks/normalize.lua
+@@ -0,0 +1,36 @@
++local M = {}
++
++local append_range = function(parts, label, range)
++  parts[#parts + 1] = string.format("%s:%d:%d:%d:%d", label, range.start_line, range.start_col or 0, range.end_line, range.end_col or 0)
++end
++
++local append_line_mapping = function(parts, mapping)
++  append_range(parts, "lo", mapping.original)
++  append_range(parts, "lm", mapping.modified)
++  for _, inner in ipairs(mapping.inner_changes or {}) do
++    append_range(parts, "lio", inner.original)
++    append_range(parts, "lim", inner.modified)
++  end
++end
++
++function M.hash_lines_diff(result)
++  local parts = { result.hit_timeout and "timeout:1" or "timeout:0" }
++  for _, change in ipairs(result.changes or {}) do
++    append_range(parts, "co", change.original)
++    append_range(parts, "cm", change.modified)
++    for _, inner in ipairs(change.inner_changes or {}) do
++      append_range(parts, "io", inner.original)
++      append_range(parts, "im", inner.modified)
++    end
++    for _, mapping in ipairs(change.line_mappings or {}) do
++      append_line_mapping(parts, mapping)
++    end
++  end
++  for _, move in ipairs(result.moves or {}) do
++    append_range(parts, "mo", move.original)
++    append_range(parts, "mm", move.modified)
++  end
++  return vim.fn.sha256(table.concat(parts, "|"))
 +end
 +
 +return M
 diff --git a/benchmarks/render.lua b/benchmarks/render.lua
 new file mode 100644
-index 0000000..8ff9c5b
+index 0000000..578dd61
 --- /dev/null
 +++ b/benchmarks/render.lua
-@@ -0,0 +1,157 @@
-+vim.opt.runtimepath:prepend(vim.fn.getcwd())
-+vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
+@@ -0,0 +1,156 @@
++dofile("benchmarks/bootstrap.lua")
 +
 +local core = require("codediff.ui.core")
 +local diff = require("codediff.core.diff")
@@ -558,14 +761,285 @@ index 0000000..8ff9c5b
 +  os.exit(1)
 +end
 +vim.cmd("quit")
+diff --git a/benchmarks/report.lua b/benchmarks/report.lua
+new file mode 100644
+index 0000000..9acfc43
+--- /dev/null
++++ b/benchmarks/report.lua
+@@ -0,0 +1,163 @@
++local harness = dofile("benchmarks/harness.lua")
++
++local get_result_dir = function()
++  local found_script = false
++  for _, argument in ipairs(vim.v.argv) do
++    if found_script then
++      return argument
++    end
++    if argument:sub(-#"benchmarks/report.lua") == "benchmarks/report.lua" then
++      found_script = true
++    end
++  end
++  error("usage: nvim -l benchmarks/report.lua <result-directory>")
++end
++
++local read_json = function(path)
++  local lines = vim.fn.readfile(path)
++  return vim.json.decode(table.concat(lines, "\n"))
++end
++
++local sorted_keys = function(values)
++  local keys = {}
++  for key in pairs(values) do
++    keys[#keys + 1] = key
++  end
++  table.sort(keys)
++  return keys
++end
++
++local aggregate = function(raw_files)
++  local groups = {}
++  for _, path in ipairs(raw_files) do
++    local payload = read_json(path)
++    for _, result in ipairs(payload.results) do
++      local key = payload.suite .. "/" .. result.name
++      local group = groups[key]
++        or {
++          suite = payload.suite,
++          name = result.name,
++          elapsed = {},
++          memory = {},
++          hashes = {},
++          max_rss_kb = 0,
++          process_count = 0,
++          hit_timeout_count = 0,
++          timeout_observation_count = 0,
++        }
++      group.process_count = group.process_count + 1
++      group.max_rss_kb = math.max(group.max_rss_kb, payload.max_rss_kb or 0)
++      if result.output_hash then
++        group.hashes[result.output_hash] = true
++      end
++      for _, sample in ipairs(result.samples) do
++        group.elapsed[#group.elapsed + 1] = sample.elapsed_ms
++        group.memory[#group.memory + 1] = sample.lua_memory_delta_kb
++        if sample.metadata and sample.metadata.hit_timeout ~= nil then
++          group.timeout_observation_count = group.timeout_observation_count + 1
++          if sample.metadata.hit_timeout then
++            group.hit_timeout_count = group.hit_timeout_count + 1
++          end
++        end
++      end
++      groups[key] = group
++    end
++  end
++
++  local results = {}
++  for _, key in ipairs(sorted_keys(groups)) do
++    local group = groups[key]
++    local hashes = sorted_keys(group.hashes)
++    assert(#hashes <= 1, string.format("%s: output hashes differ between processes", key))
++    local elapsed_stats = harness.summarize(group.elapsed)
++    local memory_stats = harness.summarize(group.memory)
++    results[#results + 1] = {
++      suite = group.suite,
++      name = group.name,
++      process_count = group.process_count,
++      sample_count = #group.elapsed,
++      median_ms = elapsed_stats.median,
++      p95_ms = elapsed_stats.p95,
++      mad_ms = elapsed_stats.mad,
++      lua_memory_delta_kb = memory_stats.median,
++      process_max_rss_kb = group.max_rss_kb,
++      output_hash = hashes[1],
++      hit_timeout_count = group.hit_timeout_count,
++      timeout_observation_count = group.timeout_observation_count,
++    }
++  end
++  return results
++end
++
++local markdown = function(results, raw_count, generated_at)
++  local lines = {
++    "# CodeDiff benchmark report",
++    "",
++    string.format("Generated: %s", generated_at),
++    string.format("Raw process results: %d", raw_count),
++    "",
++    "| Suite | Benchmark | Median | p95 | MAD | Lua delta | Output hash |",
++    "|---|---|---:|---:|---:|---:|---|",
++  }
++  for _, result in ipairs(results) do
++    local hash = result.output_hash and result.output_hash:sub(1, 12) or "-"
++    lines[#lines + 1] = string.format(
++      "| %s | %s | %.3f ms | %.3f ms | %.3f ms | %.1f KiB | `%s` |",
++      result.suite,
++      result.name,
++      result.median_ms,
++      result.p95_ms,
++      result.mad_ms,
++      result.lua_memory_delta_kb,
++      hash
++    )
++  end
++
++  local suite_rss = {}
++  for _, result in ipairs(results) do
++    suite_rss[result.suite] = math.max(suite_rss[result.suite] or 0, result.process_max_rss_kb)
++  end
++  vim.list_extend(lines, { "", "## Process maximum RSS", "", "| Suite | Max RSS |", "|---|---:|" })
++  for _, suite in ipairs(sorted_keys(suite_rss)) do
++    lines[#lines + 1] = string.format("| %s | %.1f MiB |", suite, suite_rss[suite] / 1024)
++  end
++
++  local timeout_results = {}
++  for _, result in ipairs(results) do
++    if result.timeout_observation_count > 0 then
++      timeout_results[#timeout_results + 1] = result
++    end
++  end
++  if #timeout_results > 0 then
++    vim.list_extend(lines, { "", "## Timeout responses", "", "| Benchmark | Hit timeout |", "|---|---:|" })
++    for _, result in ipairs(timeout_results) do
++      lines[#lines + 1] = string.format("| %s | %d / %d |", result.name, result.hit_timeout_count, result.timeout_observation_count)
++    end
++  end
++  return lines
++end
++
++local main = function()
++  local result_dir = get_result_dir()
++  local raw_files = vim.fn.globpath(result_dir .. "/raw", "*.json", false, true)
++  table.sort(raw_files)
++  assert(#raw_files > 0, "no raw benchmark results found")
++
++  local results = aggregate(raw_files)
++  local generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
++  local report_lines = markdown(results, #raw_files, generated_at)
++  vim.fn.writefile({ vim.json.encode({ schema_version = 1, generated_at = generated_at, raw_files = raw_files, results = results }) }, result_dir .. "/results.json")
++  vim.fn.writefile(report_lines, result_dir .. "/report.md")
++  print(table.concat(report_lines, "\n"))
++  print("")
++  print("Raw results: " .. result_dir .. "/raw")
++  print("Machine report: " .. result_dir .. "/results.json")
++  print("Markdown report: " .. result_dir .. "/report.md")
++end
++
++local ok, err = pcall(main)
++if not ok then
++  io.stderr:write("Benchmark report error: " .. tostring(err) .. "\n")
++  os.exit(1)
++end
++vim.cmd("quit")
+diff --git a/benchmarks/timeout.lua b/benchmarks/timeout.lua
+new file mode 100644
+index 0000000..37fc512
+--- /dev/null
++++ b/benchmarks/timeout.lua
+@@ -0,0 +1,97 @@
++dofile("benchmarks/bootstrap.lua")
++
++local diff = require("codediff.core.diff")
++local fixture_data = dofile("benchmarks/fixtures.lua")
++local harness = dofile("benchmarks/harness.lua")
++local timeout_options = vim.deepcopy(fixture_data.diff_options)
++timeout_options.max_computation_time_ms = 25
++
++local make_unrelated_lines = function(side)
++  local lines = {}
++  local character = side == "original" and "a" or "Z"
++  for index = 1, 200 do
++    lines[index] = string.format("%s-%04d-%s", side, index, string.rep(character, 96))
++  end
++  return lines
++end
++
++local make_repetitive_lines = function(changed)
++  local lines = {}
++  local suffix = changed and " changed" or ""
++  for index = 1, 200 do
++    lines[index] = "local value = repeated_pattern + shared" .. suffix
++  end
++  return lines
++end
++
++local cases = {
++  {
++    name = "timeout-full-rewrite",
++    original = fixture_data.by_name["full-rewrite"].original,
++    modified = fixture_data.by_name["full-rewrite"].modified,
++  },
++  {
++    name = "timeout-unrelated-200",
++    original = make_unrelated_lines("original"),
++    modified = make_unrelated_lines("modified"),
++  },
++  {
++    name = "timeout-repetitive-200",
++    original = make_repetitive_lines(false),
++    modified = make_repetitive_lines(true),
++  },
++}
++
++local run = function(case)
++  return diff.compute_diff(case.original, case.modified, timeout_options)
++end
++
++local validate = function(case, result)
++  assert(type(result) == "table", case.name .. ": compute_diff returned no result")
++  assert(type(result.hit_timeout) == "boolean", case.name .. ": timeout status is missing")
++  assert(type(result.changes) == "table", case.name .. ": changes are missing")
++end
++
++local sample_metadata = function(_, result)
++  return { hit_timeout = result.hit_timeout }
++end
++
++local print_result = function(case, stats)
++  local line_count = string.format("%d -> %d", #case.original, #case.modified)
++  print(
++    string.format(
++      "%-24s %13s %8.3fms %8.3fms %8.3fms %8.1fKiB %8.3f .. %8.3fms",
++      case.name,
++      line_count,
++      stats.median,
++      stats.p95,
++      stats.mad,
++      stats.lua_memory_delta_kb.median,
++      stats.min,
++      stats.max
++    )
++  )
++end
++
++local main = function()
++  harness.run({
++    script = "benchmarks/timeout.lua",
++    suite_name = "timeout",
++    usage = "usage: scripts/benchmark.sh timeout [--list | benchmark-name]",
++    title = "CodeDiff short-timeout responsiveness benchmarks",
++    description = "Each computation has a 25ms algorithm timeout. Lower is better.",
++    header = string.format("%-24s %13s %10s %10s %10s %10s %19s", "benchmark", "lines", "median", "p95", "MAD", "Lua delta", "min .. max"),
++    cases = cases,
++    run = run,
++    validate = validate,
++    sample_metadata = sample_metadata,
++    print_result = print_result,
++  })
++end
++
++local ok, err = pcall(main)
++if not ok then
++  io.stderr:write("Timeout benchmark error: " .. tostring(err) .. "\n")
++  os.exit(1)
++end
++vim.cmd("quit")
 diff --git a/benchmarks/workflows.lua b/benchmarks/workflows.lua
 new file mode 100644
-index 0000000..87ec842
+index 0000000..31a431c
 --- /dev/null
 +++ b/benchmarks/workflows.lua
-@@ -0,0 +1,292 @@
-+vim.opt.runtimepath:prepend(vim.fn.getcwd())
-+vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
+@@ -0,0 +1,291 @@
++dofile("benchmarks/bootstrap.lua")
 +
 +vim.cmd("runtime plugin/codediff.lua")
 +require("codediff").setup({
@@ -858,17 +1332,19 @@ index 0000000..87ec842
 +vim.cmd("qall!")
 diff --git a/docs/BENCHMARKS.md b/docs/BENCHMARKS.md
 new file mode 100644
-index 0000000..0552ed5
+index 0000000..337f4bd
 --- /dev/null
 +++ b/docs/BENCHMARKS.md
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,41 @@
 +# Local benchmarks
 +
-+CodeDiff includes warmed `compute_diff()` microbenchmarks, side-by-side rendering benchmarks, and workflow benchmarks for opening a diff, switching files, `gf`, and hunk navigation. They use deterministic generated inputs, exclude fixture setup and validation from timing, and build the native library in Release mode. Each case performs 3 warmups followed by 20 measured samples timed with `vim.uv.hrtime()` and reported in milliseconds.
++CodeDiff includes deterministic `compute_diff()`, rendering, timeout-responsiveness, and workflow benchmarks. Fixture generation, setup, validation, output hashing, and process startup are outside timed regions. The native library is built in Release mode and benchmark processes use `OMP_NUM_THREADS=1`.
++
++Each selected case runs 3 warmups and 20 measured samples in each of 3 fresh Neovim processes. Reports include median, p95, MAD, Lua memory delta, process maximum RSS, and normalized output hashes where output parity applies.
 +
 +## Run benchmarks
 +
-+Run every case:
++Run every suite:
 +
 +```bash
 +./scripts/benchmark.sh
@@ -876,67 +1352,107 @@ index 0000000..0552ed5
 +make benchmark
 +```
 +
-+List case names, run one suite, or run one case:
++List cases, run one suite, or run one case:
 +
 +```bash
 +./scripts/benchmark.sh --list
-+./scripts/benchmark.sh diff
-+./scripts/benchmark.sh diff sparse-edits
-+./scripts/benchmark.sh render
++./scripts/benchmark.sh diff sparse-100-blocks
 +./scripts/benchmark.sh render dense-rerender
-+./scripts/benchmark.sh workflows
++./scripts/benchmark.sh timeout timeout-full-rewrite
 +./scripts/benchmark.sh workflows open-to-render
 +```
 +
-+Rendering timings precompute the diff and measure only clearing and applying side-by-side highlights and filler lines to buffers. They cover both first-render and rerender states, but not terminal or GUI drawing because Neovim runs headlessly.
++`CODEDIFF_BENCHMARK_PROCESS_RUNS`, `CODEDIFF_BENCHMARK_WARMUPS`, and `CODEDIFF_BENCHMARK_SAMPLES` can shorten exploratory runs. Use the defaults for comparisons.
 +
-+Workflow timings run inside an already-started headless Neovim. Opening and file switching include Git operations, diff computation, and rendering; they do not include Neovim process startup. Run benchmarks on an otherwise idle machine and compare results from the same machine and configuration.
++## Results
++
++Each invocation prints its output locations. By default they are created under:
++
++```text
++build/benchmarks/<timestamp>-<pid>/raw/*.json
++build/benchmarks/<timestamp>-<pid>/results.json
++build/benchmarks/<timestamp>-<pid>/report.md
++```
++
++The raw files contain every sample from each process. `results.json` and `report.md` aggregate all processes. Compare normalized hashes before comparing timing across revisions.
++
++Pinned real-world fixtures use CodeDiff files at fixed Git commits, so fixture content is stable across checked-out revisions. Rendering timings measure clearing and applying side-by-side highlights and filler lines, not terminal or GUI drawing. Workflow timings run inside an already-started headless Neovim and do not include Neovim startup.
 diff --git a/docs/README.md b/docs/README.md
-index e5e3c4f..3875b42 100644
+index e5e3c4f..e7e5d9b 100644
 --- a/docs/README.md
 +++ b/docs/README.md
 @@ -8,6 +8,7 @@
  ## Building & Contributing
  
  - **[BUILD.md](BUILD.md)** — Build system guide: CMake, Makefile targets, standalone scripts for users without CMake
-+- **[BENCHMARKS.md](BENCHMARKS.md)** — Run and compare local microbenchmarks and workflow benchmarks
++- **[BENCHMARKS.md](BENCHMARKS.md)** — Run and compare local performance benchmark suites
  - **[VERSION_MANAGEMENT.md](VERSION_MANAGEMENT.md)** — Semantic versioning workflow and automated version bumping
  - **[dependency-distribution.md](dependency-distribution.md)** — How OpenMP/libgomp is bundled so users don't need system packages
  
 diff --git a/scripts/benchmark.sh b/scripts/benchmark.sh
 new file mode 100755
-index 0000000..c64f4ee
+index 0000000..adc0728
 --- /dev/null
 +++ b/scripts/benchmark.sh
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,61 @@
 +#!/usr/bin/env bash
 +
 +set -euo pipefail
 +
 +SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 +PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++PROCESS_RUNS="${CODEDIFF_BENCHMARK_PROCESS_RUNS:-3}"
++RESULT_DIR="${CODEDIFF_BENCHMARK_OUTPUT_DIR:-$PROJECT_ROOT/build/benchmarks/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 +
 +cd "$PROJECT_ROOT"
 +cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 +cmake --build build --config Release --target vscode_diff
 +
++run_suite_process() {
++    local suite="$1"
++    local process_index="$2"
++    shift 2
++    local raw_file="$RESULT_DIR/raw/$suite-$process_index.json"
++    CODEDIFF_BENCHMARK_PROCESS_INDEX="$process_index" \
++    CODEDIFF_BENCHMARK_RAW_FILE="$raw_file" \
++    CODEDIFF_BENCHMARK_QUIET=1 \
++    OMP_NUM_THREADS=1 \
++        nvim --headless --clean -u NONE -l "benchmarks/$suite.lua" "$@" 2>&1 | sed -E '/^Hunk [0-9]+ of [0-9]+$/d'
++}
++
 +run_suite() {
 +    local suite="$1"
 +    shift
-+    VSCODE_DIFF_NO_AUTO_INSTALL=1 nvim --headless --clean -u NONE -l "benchmarks/$suite.lua" "$@" 2>&1 | grep -Ev '^Hunk [0-9]+ of [0-9]+$'
++    for ((process_index = 1; process_index <= PROCESS_RUNS; process_index++)); do
++        run_suite_process "$suite" "$process_index" "$@"
++    done
 +}
 +
++list_suite() {
++    local suite="$1"
++    OMP_NUM_THREADS=1 nvim --headless --clean -u NONE -l "benchmarks/$suite.lua" --list
++}
++
++all_suites=(diff render workflows timeout)
++
++if [ "${1:-}" = "--list" ]; then
++    for suite in "${all_suites[@]}"; do
++        list_suite "$suite"
++    done
++    exit 0
++fi
++
 +if [ $# -eq 0 ]; then
-+    run_suite diff
-+    run_suite render
-+    run_suite workflows
-+elif [ "$1" = "--list" ]; then
-+    run_suite diff --list
-+    run_suite render --list
-+    run_suite workflows --list
-+elif [ "$1" = "diff" ] || [ "$1" = "render" ] || [ "$1" = "workflows" ]; then
-+    run_suite "$@"
++    for suite in "${all_suites[@]}"; do
++        run_suite "$suite"
++    done
++elif [ "$1" = "diff" ] || [ "$1" = "render" ] || [ "$1" = "workflows" ] || [ "$1" = "timeout" ]; then
++    suite="$1"
++    shift
++    run_suite "$suite" "$@"
 +else
-+    printf 'Usage: %s [--list | diff [benchmark] | render [benchmark] | workflows [benchmark]]\n' "$0" >&2
++    printf 'Usage: %s [--list | diff | render | workflows | timeout] [benchmark]\n' "$0" >&2
 +    exit 1
 +fi
++
++nvim --headless --clean -u NONE -l benchmarks/report.lua "$RESULT_DIR"

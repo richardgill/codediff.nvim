@@ -1,657 +1,2293 @@
-From 58f85668378bfb47daf8b32c798345e0d76e5941 Mon Sep 17 00:00:00 2001
+From 60f7c49ce0b17e9299709e52a6dcaa2f99ca85d2 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
-Date: Sat, 18 Jul 2026 07:49:52 +0100
-Subject: [PATCH] feat: add configurable line pairing for intraline highlights
+Date: Sat, 18 Jul 2026 15:25:25 +0100
+Subject: [PATCH] Added native line matcher implementation and tests
 
 ---
- README.md                           |  86 +++++++++++++
- doc/codediff.txt                    |  46 +++++++
- doc/tags                            |   1 +
- libvscode-diff/libvscode_diff.def   |  12 +-
- lua/codediff/config.lua             |   3 +
- lua/codediff/core/diff.lua          | 193 +++++++++++++++++++++++++++-
- lua/codediff/line_matchers.lua      | 130 +++++++++++++++++++
- lua/codediff/ui/core.lua            | 146 +++++----------------
- lua/codediff/ui/merge_alignment.lua |   4 +-
- tests/core/line_matchers_spec.lua   |  89 +++++++++++++
- tests/ui/inline_spec.lua            |   4 +-
- 11 files changed, 586 insertions(+), 128 deletions(-)
- create mode 100644 lua/codediff/line_matchers.lua
- create mode 100644 tests/core/line_matchers_spec.lua
+ README.md                                    |   53 +
+ doc/codediff.txt                             |   63 +
+ doc/tags                                     |    1 +
+ docs/performance.md                          |   19 +-
+ libvscode-diff/CMakeLists.txt                |    3 +
+ libvscode-diff/default_lines_diff_computer.c | 1122 +++++++-----------
+ libvscode-diff/include/line_matcher.h        |   14 +
+ libvscode-diff/include/types.h               |   16 +
+ libvscode-diff/src/line_matcher.c            |  370 ++++++
+ libvscode-diff/tests/test_line_matcher.c     |  146 +++
+ lua/codediff/config.lua                      |   48 +-
+ lua/codediff/core/diff.lua                   |   40 +-
+ lua/codediff/ui/core.lua                     |  174 ++-
+ lua/codediff/ui/merge_alignment.lua          |    4 +-
+ tests/core/line_matcher_spec.lua             |  195 +++
+ tests/ui/core_spec.lua                       |   23 +
+ tests/ui/inline_spec.lua                     |    4 +-
+ 17 files changed, 1489 insertions(+), 806 deletions(-)
+ create mode 100644 libvscode-diff/include/line_matcher.h
+ create mode 100644 libvscode-diff/src/line_matcher.c
+ create mode 100644 libvscode-diff/tests/test_line_matcher.c
+ create mode 100644 tests/core/line_matcher_spec.lua
 
 diff --git a/README.md b/README.md
-index 8768b9d..3b22526 100644
+index f232663..792de00 100644
 --- a/README.md
 +++ b/README.md
-@@ -225,6 +225,92 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -90,6 +90,10 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+       disable_inlay_hints = true,         -- Disable inlay hints in diff windows for cleaner view
+       max_computation_time_ms = 5000,     -- Maximum time for diff computation (VSCode default)
+       ignore_trim_whitespace = false,     -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
++      line_matcher = {
++        strategy = "similarity",          -- "similarity" (default), "vscode", or "equal_line_count"
++        threshold = 0.75,                 -- Similarity-only byte-LCS threshold, from 0 to 1
++      },
+       hide_merge_artifacts = false,       -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
+       original_position = "left",         -- Position of original (old) content: "left" or "right"
+       conflict_ours_position = "right",   -- Position of ours (:2) in conflict view: "left" or "right"
+@@ -224,6 +228,55 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
  
  `diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
  
-+### Intraline line matching
++### Native line matching
 +
-+CodeDiff uses a callback to pair original and modified lines within each changed block. Paired lines use `CodeDiffLineDelete`/`CodeDiffLineInsert`, with changed text additionally using `CodeDiffCharDelete`/`CodeDiffCharInsert`. Unpaired lines use only `CodeDiffLineDelete` or `CodeDiffLineInsert`. Similarity matching with a `0.75` threshold is the default:
++CodeDiff provides several line-matching strategies implemented in the native diff engine.
 +
-+```lua
-+local line_matchers = require("codediff.line_matchers")
++Line matching determines which changed lines in the old and new versions correspond to each other. Paired lines receive character-level refinement, while unmatched lines remain line-level changes.
 +
-+require("codediff").setup({
-+  diff = {
-+    line_matcher = line_matchers.similarity,
-+  },
-+})
-+```
++Three strategies are available:
 +
-+Wrap the default matcher to choose a threshold from `0.0` to `1.0`; lower values pair more lines:
++1. **`similarity` (default)**
 +
-+```lua
-+require("codediff").setup({
-+  diff = {
-+    line_matcher = function(context)
-+      return line_matchers.similarity(context, {
-+        threshold = 0.6,
-+      })
-+    end,
-+  },
-+})
-+```
++   Pairs similar lines while leaving unrelated lines as line-level changes.
 +
-+For GitHub-style matching, pair lines by position only when both sides of a changed block have the same line count:
++   The score is `2 * LCS(left, right) / (#left + #right)`. For example, `local old_name = 1` and `local new_name = 1` score approximately 0.83. With the default threshold of 0.75, these lines are paired. Increasing the threshold requires a closer match; decreasing it allows less similar lines to be paired.
 +
-+```lua
-+require("codediff").setup({
-+  diff = {
-+    line_matcher = line_matchers.equal_line_count,
-+  },
-+})
-+```
++   ```lua
++   diff = {
++     line_matcher = {
++       strategy = "similarity",
++       threshold = 0.75,
++     },
++   }
++   ```
 +
-+To disable character-level matching while retaining line-level highlights:
++2. **`vscode`**
 +
-+```lua
-+require("codediff").setup({
-+  diff = {
-+    line_matcher = line_matchers.none,
-+  },
-+})
-+```
++   Refines each complete changed block. Use this to preserve CodeDiff's previous behavior, including split and merged lines.
 +
-+Custom callbacks receive one changed block and return ordered, non-crossing pairs of 1-based indices:
++   ```lua
++   diff = {
++     line_matcher = {
++       strategy = "vscode",
++     },
++   }
++   ```
 +
-+```lua
-+---@class CodeDiffLineMatcherContext
-+---@field original_lines string[]
-+---@field modified_lines string[]
-+---@field original_start_line integer
-+---@field modified_start_line integer
++3. **`equal_line_count`**
 +
-+---@class CodeDiffLinePair
-+---@field original_index integer
-+---@field modified_index integer
++   Uses GitHub-style line matching: lines are paired by position only when both sides of a changed block contain the same number of lines. Blocks with unequal counts remain line-level changes.
 +
-+---@alias CodeDiffLineMatcher fun(context: CodeDiffLineMatcherContext): CodeDiffLinePair[]
-+```
++   ```lua
++   diff = {
++     line_matcher = {
++       strategy = "equal_line_count",
++     },
++   }
++   ```
 +
-+For example:
-+
-+```lua
-+local function match_by_position(context)
-+  local pair_count = math.min(#context.original_lines, #context.modified_lines)
-+  local pairs = {}
-+
-+  for index = 1, pair_count do
-+    pairs[index] = {
-+      original_index = index,
-+      modified_index = index,
-+    }
-+  end
-+
-+  return pairs
-+end
-+```
-+
-+Each line may appear in at most one pair. Omitted lines remain unpaired. Paired lines retain `CodeDiffLineInsert` or `CodeDiffLineDelete` and receive `CodeDiffCharInsert` or `CodeDiffCharDelete` over changed characters. Unpaired lines receive only their line-level highlight. Pure insertions and deletions do not invoke the matcher.
-+
-+Matchers run synchronously during rendering and automatic refreshes. Custom callbacks should avoid I/O and return quickly. `diff.max_computation_time_ms` cannot interrupt custom Lua code.
++Custom Lua matcher callbacks are not supported.
 +
  The C library will be downloaded automatically on first use. No `build` step needed!
  
  ### Managing Library Installation
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 578bfab..fa5426e 100644
+index 058fe82..fa2cba9 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
-@@ -149,6 +149,51 @@ the alignment rows blank:
+@@ -190,6 +190,65 @@ The toggle keymap can be customized:
+   })
+ <
  
- Non-empty patterns use the CodeDiffFiller highlight group. Inline deleted
- lines and move annotations are not filler rows and are unaffected.
-+                                              *codediff-line-matching*
-+Intraline line matching~
++LINE MATCHING                              *codediff-line-matcher*
 +
-+CodeDiff uses a callback to pair original and modified lines within each
-+changed block. Paired lines use CodeDiffLineDelete/CodeDiffLineInsert, with
-+changed text additionally using CodeDiffCharDelete/CodeDiffCharInsert.
-+Unpaired lines use only CodeDiffLineDelete or CodeDiffLineInsert. Similarity
-+matching with a 0.75 threshold is the default:
++CodeDiff provides several line-matching strategies implemented in the native
++diff engine.
++
++Line matching determines which changed lines in the old and new versions
++correspond to each other. Paired lines receive character-level refinement,
++while unmatched lines remain line-level changes.
++
++Three strategies are available:
++
++1. `similarity` (default)
++
++Pairs similar lines while leaving unrelated lines as line-level changes.
++
++The score is `2 * LCS(left, right) / (#left + #right)`. For example,
++`local old_name = 1` and `local new_name = 1` score approximately 0.83.
++With the default threshold of 0.75, these lines are paired. Increasing the
++threshold requires a closer match; decreasing it allows less similar lines
++to be paired.
++
 +>lua
-+  local line_matchers = require("codediff.line_matchers")
-+
-+  require("codediff").setup({
-+    diff = { line_matcher = line_matchers.similarity },
-+  })
-+<
-+
-+Wrap the default matcher to change its threshold:
-+>lua
-+  require("codediff").setup({
-+    diff = {
-+      line_matcher = function(context)
-+        return line_matchers.similarity(context, { threshold = 0.6 })
-+      end,
++  diff = {
++    line_matcher = {
++      strategy = "similarity",
++      threshold = 0.75,
 +    },
-+  })
-+<
-+
-+Other built-ins:
-+>lua
-+  line_matchers.equal_line_count  -- GitHub-style: pair positionally only for equal counts
-+  line_matchers.none              -- Disable character-level matching
-+<
-+
-+A custom matcher receives `original_lines`, `modified_lines`,
-+`original_start_line`, and `modified_start_line`. It returns ordered pairs:
-+>lua
-+  return {
-+    { original_index = 1, modified_index = 1 },
-+    { original_index = 3, modified_index = 2 },
 +  }
 +<
 +
-+Indices are 1-based within the callback's line arrays. Paired lines receive
-+line-level and changed-character highlights. Unpaired lines receive only
-+line-level highlights.
- 
-                                                       *codediff-moved-code*
- Moved code detection~
-@@ -210,6 +255,7 @@ Setup entry point:
++2. `vscode`
++
++Refines each complete changed block. Use this to preserve CodeDiff's
++previous behavior, including split and merged lines.
++
++>lua
++  diff = {
++    line_matcher = {
++      strategy = "vscode",
++    },
++  }
++<
++
++3. `equal_line_count`
++
++Uses GitHub-style line matching: lines are paired by position only when
++both sides of a changed block contain the same number of lines. Blocks
++with unequal counts remain line-level changes.
++
++>lua
++  diff = {
++    line_matcher = {
++      strategy = "equal_line_count",
++    },
++  }
++<
++
++Custom Lua matcher callbacks are not supported.
++
+ Setup entry point:
+ >lua
+   require("codediff").setup({
+@@ -209,6 +268,10 @@ Setup entry point:
        filler_text = "╱",
        disable_inlay_hints = true,
        max_computation_time_ms = 5000,
-+      line_matcher = require("codediff.line_matchers").similarity,
++      line_matcher = {
++        strategy = "similarity",
++        threshold = 0.75,
++      },
        hide_merge_artifacts = false,
        conflict_result_position = "bottom",
        conflict_result_height = 30,
 diff --git a/doc/tags b/doc/tags
-index 5ee5d4c..bf45c88 100644
+index 5ee5d4c..9953104 100644
 --- a/doc/tags
 +++ b/doc/tags
 @@ -10,6 +10,7 @@ codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
  codediff-history	codediff.txt	/*codediff-history*
  codediff-history-line-range	codediff.txt	/*codediff-history-line-range*
  codediff-layout	codediff.txt	/*codediff-layout*
-+codediff-line-matching	codediff.txt	/*codediff-line-matching*
++codediff-line-matcher	codediff.txt	/*codediff-line-matcher*
  codediff-lua-api	codediff.txt	/*codediff-lua-api*
  codediff-moved-code	codediff.txt	/*codediff-moved-code*
  codediff-quickstart	codediff.txt	/*codediff-quickstart*
-diff --git a/libvscode-diff/libvscode_diff.def b/libvscode-diff/libvscode_diff.def
-index b253cee..c7e11f8 100644
---- a/libvscode-diff/libvscode_diff.def
-+++ b/libvscode-diff/libvscode_diff.def
-@@ -1,5 +1,7 @@
--LIBRARY vscode_diff
--EXPORTS
--    compute_diff
--    free_lines_diff
--    get_version
-+LIBRARY vscode_diff
-+EXPORTS
-+    compute_diff
-+    compute_line_alignments
-+    free_lines_diff
-+    free_sequence_diff_array
-+    get_version
+diff --git a/docs/performance.md b/docs/performance.md
+index 4292685..e6376ab 100644
+--- a/docs/performance.md
++++ b/docs/performance.md
+@@ -4,14 +4,15 @@ This plugin provides high-quality character-level diff highlighting similar to V
+ 
+ ## How It Works
+ 
+-### Two-Phase Diff Computation
++### Native Diff Computation
+ 
+-The diff algorithm works in two phases:
++The diff algorithm works in three stages:
+ 
+ 1. **Line-level diff** - Compares entire lines to find which lines changed
+-2. **Character-level refinement** - For each changed line, computes exactly what characters differ
++2. **Line matching** - Determines which changed lines correspond to each other
++3. **Character-level refinement** - Computes exactly what characters differ in matched lines
+ 
+-Each changed region is analyzed **independently**. The timeout applies to each individual Myers algorithm computation.
++All stages share one timeout budget for the complete diff computation. See [Native line matching](../README.md#native-line-matching) for the available matching strategies.
+ 
+ ### Why Timeout Works Well
+ 
+@@ -49,7 +50,7 @@ Even at 100ms, you'll see meaningful character-level highlighting where it matte
+ ### Default (Quality Priority)
+ 
+ ```lua
+-require("vscode-diff").setup({
++require("codediff").setup({
+   diff = {
+     max_computation_time_ms = 5000,  -- 5 seconds (VSCode default)
+   }
+@@ -61,7 +62,7 @@ require("vscode-diff").setup({
+ ### Fast Mode (Speed Priority)
+ 
+ ```lua
+-require("vscode-diff").setup({
++require("codediff").setup({
+   diff = {
+     max_computation_time_ms = 1000,  -- 1 second
+   }
+@@ -75,7 +76,7 @@ require("vscode-diff").setup({
+ ### Minimal Timeout Mode
+ 
+ ```lua
+-require("vscode-diff").setup({
++require("codediff").setup({
+   diff = {
+     max_computation_time_ms = 100,  -- 100ms
+   }
+@@ -112,11 +113,11 @@ Set your maximum wait time and the plugin respects it. No surprises or hangs, ev
+ 
+ ## Technical Details
+ 
+-The algorithm processes each changed region independently. Timeout applies to each Myers computation separately, not the total time.
++The timeout is shared across line alignment, line matching, character refinement, and move detection. It applies to the complete diff computation rather than restarting for each changed region.
+ 
+ This means:
+ - Fast regions complete and provide full detail
+-- Slow regions timeout and fall back to line-level
++- When the deadline expires, remaining refinement is skipped and line-level changes are preserved
+ - The timeout value doesn't need to be perfect - it naturally adapts to the complexity of your changes
+ 
+ 
+diff --git a/libvscode-diff/CMakeLists.txt b/libvscode-diff/CMakeLists.txt
+index f4f1249..dca3653 100644
+--- a/libvscode-diff/CMakeLists.txt
++++ b/libvscode-diff/CMakeLists.txt
+@@ -127,6 +127,7 @@ set(DIFF_CORE_SOURCES
+     default_lines_diff_computer.c
+     src/char_level.c
+     src/line_level.c
++    src/line_matcher.c
+     src/myers.c
+     src/optimize.c
+     src/sequence.c
+@@ -256,6 +257,7 @@ set(TEST_COMMON_SOURCES
+     src/myers.c
+     src/optimize.c
+     src/line_level.c
++    src/line_matcher.c
+     src/char_level.c
+     src/range_mapping.c
+     src/utf8_utils.c
+@@ -319,6 +321,7 @@ add_diff_test(test_myers)
+ add_diff_test(test_sequence)
+ add_diff_test(test_line_optimization)
+ add_diff_test(test_line_boundary_scoring)
++add_diff_test(test_line_matcher)
+ add_diff_test(test_char_level)
+ add_diff_test(test_dp_algorithm)
+ add_diff_test(test_char_boundary_categories)
+diff --git a/libvscode-diff/default_lines_diff_computer.c b/libvscode-diff/default_lines_diff_computer.c
+index 1ebf8b8..11ddaa6 100644
+--- a/libvscode-diff/default_lines_diff_computer.c
++++ b/libvscode-diff/default_lines_diff_computer.c
+@@ -12,311 +12,366 @@
+ // ============================================================================
+ 
+ #include "default_lines_diff_computer.h"
+-#include "line_level.h"
+ #include "char_level.h"
+-#include "range_mapping.h"
+ #include "compute_moved_lines.h"
++#include "line_level.h"
++#include "line_matcher.h"
+ #include "string_hash_map.h"
+ #include "utils.h"
++#include <limits.h>
+ #include <stdlib.h>
+ #include <string.h>
+-#include <stdio.h>
+ 
+-#ifdef USE_OPENMP
+-#include <omp.h>
+-#endif
++static bool arrays_equal(const char **left, int left_count, const char **right,
++                         int right_count) {
++  if (left_count != right_count) {
++    return false;
++  }
++  for (int index = 0; index < left_count; index++) {
++    if (strcmp(left[index], right[index]) != 0) {
++      return false;
++    }
++  }
++  return true;
++}
+ 
+-// ============================================================================
+-// Forward Declarations
+-// ============================================================================
++static LinesDiff *create_empty_lines_diff(void) {
++  LinesDiff *result = (LinesDiff *)calloc(1, sizeof(LinesDiff));
++  return result;
++}
+ 
+-static LinesDiff* create_empty_lines_diff(void);
+-static LinesDiff* create_full_file_diff(
+-    const char** original_lines,
+-    int original_count,
+-    const char** modified_lines,
+-    int modified_count
+-);
+-static RangeMappingArray* refine_diff(
+-    const SequenceDiff* diff,
+-    const char** original_lines,
+-    int original_count,
+-    const char** modified_lines,
+-    int modified_count,
+-    Timeout* timeout,
+-    bool consider_whitespace_changes,
+-    const DiffOptions* options,
+-    bool* hit_timeout
+-);
++static bool timeout_expired(const Timeout *timeout) {
++  return timeout->timeout_ms > 0 &&
++         get_current_time_ms() - timeout->start_time_ms >= timeout->timeout_ms;
++}
+ 
+-// ============================================================================
+-// Helper Functions (Bottom-Up Implementation)
+-// ============================================================================
++static int remaining_timeout_ms(const Timeout *timeout) {
++  if (timeout->timeout_ms <= 0) {
++    return 0;
++  }
++  int64_t remaining = timeout->timeout_ms -
++                      (get_current_time_ms() - timeout->start_time_ms);
++  if (remaining <= 0) {
++    return -1;
++  }
++  return remaining > INT_MAX ? INT_MAX : (int)remaining;
++}
+ 
+-/**
+- * Create empty LinesDiff for trivial equality case.
+- * 
+- * VSCode Reference: defaultLinesDiffComputer.ts computeDiff() line 32
+- * VSCode Parity: 100%
+- */
+-static LinesDiff* create_empty_lines_diff(void) {
+-    LinesDiff* result = (LinesDiff*)malloc(sizeof(LinesDiff));
+-    if (!result) return NULL;
+-    
+-    result->changes.mappings = NULL;
+-    result->changes.count = 0;
+-    result->changes.capacity = 0;
+-    
+-    result->moves.moves = NULL;
+-    result->moves.count = 0;
+-    result->moves.capacity = 0;
+-    
+-    result->hit_timeout = false;
+-    
+-    return result;
++static bool grow_changes(DetailedLineRangeMappingArray *changes) {
++  if (changes->count < changes->capacity) {
++    return true;
++  }
++  int capacity = changes->capacity == 0 ? 8 : changes->capacity * 2;
++  DetailedLineRangeMapping *mappings =
++      (DetailedLineRangeMapping *)realloc(
++          changes->mappings,
++          (size_t)capacity * sizeof(DetailedLineRangeMapping));
++  if (!mappings) {
++    return false;
++  }
++  changes->mappings = mappings;
++  changes->capacity = capacity;
++  return true;
+ }
+ 
+-/**
+- * Create LinesDiff for single empty line case.
+- * 
+- * When one side is a single empty line, return a full file diff.
+- * 
+- * VSCode Reference: defaultLinesDiffComputer.ts computeDiff() lines 35-48
+- * VSCode Parity: 100%
+- */
+-static LinesDiff* create_full_file_diff(
+-    const char** original_lines,
+-    int original_count,
+-    const char** modified_lines,
+-    int modified_count
+-) {
+-    LinesDiff* result = (LinesDiff*)malloc(sizeof(LinesDiff));
+-    if (!result) return NULL;
+-    
+-    // Allocate one DetailedLineRangeMapping
+-    result->changes.mappings = (DetailedLineRangeMapping*)malloc(sizeof(DetailedLineRangeMapping));
+-    if (!result->changes.mappings) {
+-        free(result);
+-        return NULL;
+-    }
+-    result->changes.count = 1;
+-    result->changes.capacity = 1;
+-    
+-    // Set line ranges: full file
+-    result->changes.mappings[0].original.start_line = 1;
+-    result->changes.mappings[0].original.end_line = original_count + 1;
+-    result->changes.mappings[0].modified.start_line = 1;
+-    result->changes.mappings[0].modified.end_line = modified_count + 1;
+-    
+-    // Create one RangeMapping for the entire content
+-    result->changes.mappings[0].inner_changes = (RangeMapping*)malloc(sizeof(RangeMapping));
+-    if (!result->changes.mappings[0].inner_changes) {
+-        free(result->changes.mappings);
+-        free(result);
+-        return NULL;
+-    }
+-    result->changes.mappings[0].inner_change_count = 1;
+-    
+-    // Original range
+-    result->changes.mappings[0].inner_changes[0].original.start_line = 1;
+-    result->changes.mappings[0].inner_changes[0].original.start_col = 1;
+-    result->changes.mappings[0].inner_changes[0].original.end_line = original_count;
+-    if (original_count > 0) {
+-        result->changes.mappings[0].inner_changes[0].original.end_col = 
+-            (int)strlen(original_lines[original_count - 1]) + 1;
+-    } else {
+-        result->changes.mappings[0].inner_changes[0].original.end_col = 1;
++static bool append_change(DetailedLineRangeMappingArray *changes,
++                          const SequenceDiff *block, int *change_index) {
++  int original_start = block->seq1_start + 1;
++  int original_end = block->seq1_end + 1;
++  int modified_start = block->seq2_start + 1;
++  int modified_end = block->seq2_end + 1;
++  if (changes->count > 0) {
++    DetailedLineRangeMapping *previous = &changes->mappings[changes->count - 1];
++    if (previous->original.end_line >= original_start &&
++        previous->modified.end_line >= modified_start) {
++      if (original_end > previous->original.end_line) {
++        previous->original.end_line = original_end;
++      }
++      if (modified_end > previous->modified.end_line) {
++        previous->modified.end_line = modified_end;
++      }
++      *change_index = changes->count - 1;
++      return true;
+     }
+-    
+-    // Modified range
+-    result->changes.mappings[0].inner_changes[0].modified.start_line = 1;
+-    result->changes.mappings[0].inner_changes[0].modified.start_col = 1;
+-    result->changes.mappings[0].inner_changes[0].modified.end_line = modified_count;
+-    if (modified_count > 0) {
+-        result->changes.mappings[0].inner_changes[0].modified.end_col = 
+-            (int)strlen(modified_lines[modified_count - 1]) + 1;
+-    } else {
+-        result->changes.mappings[0].inner_changes[0].modified.end_col = 1;
+-    }
+-    
+-    // No moves
+-    result->moves.moves = NULL;
+-    result->moves.count = 0;
+-    result->moves.capacity = 0;
+-    
+-    result->hit_timeout = false;
+-    
+-    return result;
++  }
++
++  if (!grow_changes(changes)) {
++    return false;
++  }
++  DetailedLineRangeMapping *change = &changes->mappings[changes->count];
++  memset(change, 0, sizeof(*change));
++  change->original =
++      (LineRange){.start_line = original_start, .end_line = original_end};
++  change->modified =
++      (LineRange){.start_line = modified_start, .end_line = modified_end};
++  *change_index = changes->count++;
++  return true;
+ }
+ 
+-/**
+- * Check if arrays are equal (element-by-element comparison).
+- * 
+- * VSCode Reference: equals() from arrays.js
+- * VSCode Parity: 100%
+- */
+-static bool arrays_equal(const char** a, int a_len, const char** b, int b_len) {
+-    if (a_len != b_len) return false;
+-    
+-    for (int i = 0; i < a_len; i++) {
+-        if (strcmp(a[i], b[i]) != 0) {
+-            return false;
+-        }
+-    }
++static bool grow_line_mappings(DetailedLineRangeMapping *change) {
++  if (change->line_mapping_count < change->line_mapping_capacity) {
+     return true;
++  }
++  int capacity =
++      change->line_mapping_capacity == 0 ? 4 : change->line_mapping_capacity * 2;
++  LineMapping *mappings = (LineMapping *)realloc(
++      change->line_mappings, (size_t)capacity * sizeof(LineMapping));
++  if (!mappings) {
++    return false;
++  }
++  change->line_mappings = mappings;
++  change->line_mapping_capacity = capacity;
++  return true;
+ }
+ 
+-/**
+- * Refine a SequenceDiff to character-level RangeMappings.
+- * 
+- * This is the C port of VSCode's refineDiff() method.
+- * 
+- * @param diff Line-level diff to refine
+- * @param original_lines Original file lines
+- * @param original_count Number of original lines
+- * @param modified_lines Modified file lines
+- * @param modified_count Number of modified lines
+- * @param timeout Timeout for computation
+- * @param consider_whitespace_changes If true, include whitespace changes
+- * @param options Diff options
+- * @param hit_timeout Output: set to true if timeout was hit
+- * @return Array of RangeMappings (character-level changes)
+- * 
+- * VSCode Reference: defaultLinesDiffComputer.ts refineDiff() lines 220-259
+- * VSCode Parity: 100%
+- */
+-static RangeMappingArray* refine_diff(
+-    const SequenceDiff* diff,
+-    const char** original_lines,
+-    int original_count,
+-    const char** modified_lines,
+-    int modified_count,
+-    Timeout* timeout,
+-    bool consider_whitespace_changes,
+-    const DiffOptions* options,
+-    bool* hit_timeout
+-) {
+-    // Call our existing refine_diff_char_level function
+-    CharLevelOptions char_opts;
+-    char_opts.consider_whitespace_changes = consider_whitespace_changes;
+-    char_opts.extend_to_subwords = options->extend_to_subwords;
+-    char_opts.timeout_ms = timeout->timeout_ms;
+-    
+-    bool local_timeout = false;
+-    RangeMappingArray* result = refine_diff_char_level(
+-        diff,
+-        original_lines, original_count,
+-        modified_lines, modified_count,
+-        &char_opts,
+-        &local_timeout
+-    );
+-    
+-    if (local_timeout && hit_timeout) {
+-        *hit_timeout = true;
++static bool append_inner_changes(DetailedLineRangeMapping *change,
++                                 const RangeMappingArray *refined) {
++  if (refined->count == 0) {
++    return true;
++  }
++  int count = change->inner_change_count + refined->count;
++  RangeMapping *inner_changes = (RangeMapping *)realloc(
++      change->inner_changes, (size_t)count * sizeof(RangeMapping));
++  if (!inner_changes) {
++    return false;
++  }
++  change->inner_changes = inner_changes;
++  memcpy(change->inner_changes + change->inner_change_count, refined->mappings,
++         (size_t)refined->count * sizeof(RangeMapping));
++  change->inner_change_count = count;
++  return true;
++}
++
++static bool append_line_mapping(DetailedLineRangeMapping *change,
++                                const SequenceDiff *match,
++                                const char **original_lines,
++                                int original_count,
++                                const char **modified_lines,
++                                int modified_count,
++                                bool consider_whitespace_changes,
++                                const DiffOptions *options,
++                                const Timeout *timeout, bool *hit_timeout) {
++  if (!grow_line_mappings(change)) {
++    return false;
++  }
++  LineMapping *line_mapping =
++      &change->line_mappings[change->line_mapping_count];
++  memset(line_mapping, 0, sizeof(*line_mapping));
++  line_mapping->original = (LineRange){
++      .start_line = match->seq1_start + 1,
++      .end_line = match->seq1_end + 1,
++  };
++  line_mapping->modified = (LineRange){
++      .start_line = match->seq2_start + 1,
++      .end_line = match->seq2_end + 1,
++  };
++  change->line_mapping_count++;
++
++  bool empty_buffer =
++      (original_count == 1 && original_lines[0][0] == '\0') ||
++      (modified_count == 1 && modified_lines[0][0] == '\0');
++  if (empty_buffer) {
++    RangeMapping full_file = {
++        .original = {.start_line = 1,
++                     .start_col = 1,
++                     .end_line = original_count,
++                     .end_col = original_count > 0
++                                    ? (int)strlen(original_lines[original_count - 1]) + 1
++                                    : 1},
++        .modified = {.start_line = 1,
++                     .start_col = 1,
++                     .end_line = modified_count,
++                     .end_col = modified_count > 0
++                                    ? (int)strlen(modified_lines[modified_count - 1]) + 1
++                                    : 1},
++    };
++    RangeMappingArray refined = {
++        .mappings = &full_file,
++        .count = 1,
++        .capacity = 1,
++    };
++    return append_inner_changes(change, &refined);
++  }
++
++  int remaining = remaining_timeout_ms(timeout);
++  if (remaining < 0) {
++    *hit_timeout = true;
++    return true;
++  }
++  CharLevelOptions char_options = {
++      .consider_whitespace_changes = consider_whitespace_changes,
++      .extend_to_subwords = options->extend_to_subwords,
++      .timeout_ms = remaining,
++  };
++  bool local_timeout = false;
++  RangeMappingArray *refined = refine_diff_char_level(
++      match, original_lines, original_count, modified_lines, modified_count,
++      &char_options, &local_timeout);
++  if (!refined) {
++    return false;
++  }
++  bool success = append_inner_changes(change, refined);
++  range_mapping_array_free(refined);
++  if (local_timeout) {
++    *hit_timeout = true;
++  }
++  return success;
++}
++
++static bool process_block(DetailedLineRangeMappingArray *changes,
++                          const SequenceDiff *block,
++                          const char **original_lines, int original_count,
++                          const char **modified_lines, int modified_count,
++                          bool consider_whitespace_changes,
++                          const DiffOptions *options, const Timeout *timeout,
++                          bool *hit_timeout) {
++  int change_index;
++  if (!append_change(changes, block, &change_index)) {
++    return false;
++  }
++  if (*hit_timeout || timeout_expired(timeout)) {
++    *hit_timeout = true;
++    return true;
++  }
++
++  bool matcher_timeout = false;
++  SequenceDiffArray *matches = compute_line_matches(
++      block, original_lines, modified_lines, options->line_matcher_strategy,
++      options->line_matcher_threshold, timeout, &matcher_timeout);
++  if (!matches) {
++    return false;
++  }
++  if (matcher_timeout) {
++    *hit_timeout = true;
++  }
++  for (int index = 0; index < matches->count; index++) {
++    if (!append_line_mapping(&changes->mappings[change_index],
++                             &matches->diffs[index], original_lines,
++                             original_count, modified_lines, modified_count,
++                             consider_whitespace_changes, options, timeout,
++                             hit_timeout)) {
++      sequence_diff_array_free(matches);
++      return false;
+     }
+-    
+-    return result;
++    if (*hit_timeout) {
++      break;
++    }
++  }
++  sequence_diff_array_free(matches);
++  return true;
+ }
+ 
+-/**
+- * Scan equal-length line regions for whitespace-only changes.
+- * 
+- * When two lines have the same hash (trimmed content) but different actual
+- * content, they differ only in whitespace. This function detects and refines
+- * such differences.
+- * 
+- * @param equal_lines_count Number of equal lines to scan
+- * @param seq1_last_start Current position in original lines
+- * @param seq2_last_start Current position in modified lines
+- * @param original_lines Original file lines
+- * @param original_count Number of original lines
+- * @param modified_lines Modified file lines
+- * @param modified_count Number of modified lines
+- * @param consider_whitespace_changes If false, skip scanning
+- * @param timeout Timeout for computation
+- * @param options Diff options
+- * @param alignments Output: accumulate RangeMappings here
+- * @param hit_timeout Output: set to true if any refinement times out
+- * 
+- * VSCode Reference: defaultLinesDiffComputer.ts scanForWhitespaceChanges() lines 100-118
+- * VSCode Parity: 100%
+- */
+-static void scan_for_whitespace_changes(
+-    int equal_lines_count,
+-    int seq1_last_start,
+-    int seq2_last_start,
+-    const char** original_lines,
+-    int original_count,
+-    const char** modified_lines,
+-    int modified_count,
+-    bool consider_whitespace_changes,
+-    Timeout* timeout,
+-    const DiffOptions* options,
+-    RangeMappingArray* alignments,
+-    bool* hit_timeout
+-) {
+-    if (!consider_whitespace_changes) {
+-        return;
++static bool process_whitespace_changes(
++    DetailedLineRangeMappingArray *changes, int count, int original_start,
++    int modified_start, const char **original_lines, int original_count,
++    const char **modified_lines, int modified_count,
++    bool consider_whitespace_changes, const DiffOptions *options,
++    const Timeout *timeout, bool *hit_timeout) {
++  if (!consider_whitespace_changes) {
++    return true;
++  }
++  for (int offset = 0; offset < count; offset++) {
++    int original_index = original_start + offset;
++    int modified_index = modified_start + offset;
++    if (strcmp(original_lines[original_index], modified_lines[modified_index]) ==
++        0) {
++      continue;
+     }
+-    
+-    for (int i = 0; i < equal_lines_count; i++) {
+-        int seq1_offset = seq1_last_start + i;
+-        int seq2_offset = seq2_last_start + i;
+-        
+-        if (strcmp(original_lines[seq1_offset], modified_lines[seq2_offset]) != 0) {
+-            // This is because of whitespace changes, diff these lines
+-            SequenceDiff line_diff = {
+-                .seq1_start = seq1_offset,
+-                .seq1_end = seq1_offset + 1,
+-                .seq2_start = seq2_offset,
+-                .seq2_end = seq2_offset + 1
+-            };
+-            
+-            bool local_timeout = false;
+-            RangeMappingArray* character_diffs = refine_diff(
+-                &line_diff,
+-                original_lines, original_count,
+-                modified_lines, modified_count,
+-                timeout,
+-                consider_whitespace_changes,
+-                options,
+-                &local_timeout
+-            );
+-            
+-            if (character_diffs) {
+-                // Add all mappings to alignments array
+-                for (int j = 0; j < character_diffs->count; j++) {
+-                    // Grow alignments array if needed
+-                    if (alignments->count >= alignments->capacity) {
+-                        size_t new_capacity = (size_t)(alignments->capacity == 0 ? 8 : alignments->capacity * 2);
+-                        RangeMapping* new_mappings = (RangeMapping*)realloc(
+-                            alignments->mappings,
+-                            new_capacity * sizeof(RangeMapping)
+-                        );
+-                        if (new_mappings) {
+-                            alignments->mappings = new_mappings;
+-                            alignments->capacity = (int)new_capacity;
+-                        }
+-                    }
+-                    
+-                    if (alignments->count < alignments->capacity) {
+-                        alignments->mappings[alignments->count++] = character_diffs->mappings[j];
+-                    }
+-                }
+-                
+-                range_mapping_array_free(character_diffs);
+-            }
+-            
+-            if (local_timeout) {
+-                *hit_timeout = true;
+-            }
+-        }
++    SequenceDiff block = {
++        .seq1_start = original_index,
++        .seq1_end = original_index + 1,
++        .seq2_start = modified_index,
++        .seq2_end = modified_index + 1,
++    };
++    if (!process_block(changes, &block, original_lines, original_count,
++                       modified_lines, modified_count,
++                       consider_whitespace_changes, options, timeout,
++                       hit_timeout)) {
++      return false;
+     }
++  }
++  return true;
+ }
+ 
+-// ============================================================================
+-// Main Function: compute_diff
+-// ============================================================================
++static void free_change_contents(DetailedLineRangeMapping *change) {
++  free(change->inner_changes);
++  free(change->line_mappings);
++}
++
++static void free_changes(DetailedLineRangeMappingArray *changes) {
++  if (!changes) {
++    return;
++  }
++  for (int index = 0; index < changes->count; index++) {
++    free_change_contents(&changes->mappings[index]);
++  }
++  free(changes->mappings);
++  changes->mappings = NULL;
++  changes->count = 0;
++  changes->capacity = 0;
++}
++
++static bool compute_moves(const DetailedLineRangeMappingArray *changes,
++                          const char **original_lines, int original_count,
++                          const char **modified_lines, int modified_count,
++                          const Timeout *timeout, MovedTextArray *moves,
++                          bool *hit_timeout) {
++  int remaining = remaining_timeout_ms(timeout);
++  if (remaining < 0) {
++    *hit_timeout = true;
++    return true;
++  }
++  StringHashMap *hash_map = string_hash_map_create();
++  uint32_t *original_hashes = original_count > 0
++                                  ? (uint32_t *)malloc((size_t)original_count *
++                                                       sizeof(uint32_t))
++                                  : NULL;
++  uint32_t *modified_hashes = modified_count > 0
++                                  ? (uint32_t *)malloc((size_t)modified_count *
++                                                       sizeof(uint32_t))
++                                  : NULL;
++  if (!hash_map || (original_count > 0 && !original_hashes) ||
++      (modified_count > 0 && !modified_hashes)) {
++    free(original_hashes);
++    free(modified_hashes);
++    string_hash_map_destroy(hash_map);
++    return false;
++  }
++
++  for (int index = 0; index < original_count; index++) {
++    char *trimmed = trim_string(original_lines[index]);
++    if (!trimmed) {
++      free(original_hashes);
++      free(modified_hashes);
++      string_hash_map_destroy(hash_map);
++      return false;
++    }
++    original_hashes[index] = string_hash_map_get_or_create(hash_map, trimmed);
++    free(trimmed);
++  }
++  for (int index = 0; index < modified_count; index++) {
++    char *trimmed = trim_string(modified_lines[index]);
++    if (!trimmed) {
++      free(original_hashes);
++      free(modified_hashes);
++      string_hash_map_destroy(hash_map);
++      return false;
++    }
++    modified_hashes[index] = string_hash_map_get_or_create(hash_map, trimmed);
++    free(trimmed);
++  }
++
++  compute_moved_lines(changes->mappings, changes->count, original_lines,
++                      original_count, modified_lines, modified_count,
++                      original_hashes, modified_hashes, remaining, moves);
++  free(original_hashes);
++  free(modified_hashes);
++  string_hash_map_destroy(hash_map);
++  if (timeout_expired(timeout)) {
++    *hit_timeout = true;
++  }
++  return true;
++}
+ 
+ /**
+  * Compute diff between two files.
+@@ -338,396 +393,105 @@ static void scan_for_whitespace_changes(
+  * - No computeMoves implementation (Neovim UI limitation)
+  * - No assertion validation (can be added later if needed)
+  */
+-LinesDiff* compute_diff(
+-    const char** original_lines,
+-    int original_count,
+-    const char** modified_lines,
+-    int modified_count,
+-    const DiffOptions* options
+-) {
+-    // Early exit: 0-1 lines and equal
+-    if (original_count <= 1 && arrays_equal(original_lines, original_count, 
+-                                            modified_lines, modified_count)) {
+-        return create_empty_lines_diff();
+-    }
+-    
+-    // Early exit: single empty line
+-    if ((original_count == 1 && strlen(original_lines[0]) == 0) ||
+-        (modified_count == 1 && strlen(modified_lines[0]) == 0)) {
+-        return create_full_file_diff(original_lines, original_count,
+-                                     modified_lines, modified_count);
+-    }
+-    
+-    // Setup timeout
+-    Timeout timeout;
+-    timeout.timeout_ms = options->max_computation_time_ms;
+-    timeout.start_time_ms = get_current_time_ms();
+-    
+-    bool consider_whitespace_changes = !options->ignore_trim_whitespace;
+-    
+-    // Line-level diff
+-    // Use our compute_line_alignments which internally selects DP (<1700 lines) or Myers
+-    // VSCode Reference: defaultLinesDiffComputer.ts lines 66-77
+-    bool line_hit_timeout = false;
+-    SequenceDiffArray* line_alignments = compute_line_alignments(
+-        original_lines, original_count,
+-        modified_lines, modified_count,
+-        timeout.timeout_ms,
+-        &line_hit_timeout
+-    );
+-    bool hit_timeout = line_hit_timeout;
+-    
+-    if (!line_alignments) {
+-        return NULL;
+-    }
+-    
+-    // Optimize line diffs (already done inside compute_line_diff)
+-    // No need to call optimize_sequence_diffs or remove_very_short_matching_lines_between_diffs
+-    
+-    // Initialize character mappings array
+-    RangeMappingArray* alignments = (RangeMappingArray*)malloc(sizeof(RangeMappingArray));
+-    if (!alignments) {
+-        sequence_diff_array_free(line_alignments);
+-        return NULL;
+-    }
+-    alignments->mappings = NULL;
+-    alignments->count = 0;
+-    alignments->capacity = 0;
+-    
+-#ifdef USE_OPENMP
+-    // Parallel character refinement (OpenMP)
+-    // Set default thread count if not explicitly configured by user
+-    if (getenv("OMP_NUM_THREADS") == NULL) {
+-        int num_procs = omp_get_num_procs();
+-        omp_set_num_threads(num_procs > 4 ? 4 : num_procs);
+-    }
+-    
+-    // Only parallelize if we have enough diffs to justify thread overhead
+-    const int MIN_DIFFS_FOR_PARALLEL = 1;
+-    int use_parallel = line_alignments->count >= MIN_DIFFS_FOR_PARALLEL;
+-    
+-    if (use_parallel) {
+-        // Pre-allocate thread-local result arrays
+-        int num_diffs = line_alignments->count;
+-        RangeMappingArray** thread_results = (RangeMappingArray**)calloc((size_t)num_diffs, sizeof(RangeMappingArray*));
+-        int* thread_equal_lines = (int*)calloc((size_t)num_diffs, sizeof(int));
+-        int* thread_seq1_starts = (int*)calloc((size_t)num_diffs, sizeof(int));
+-        int* thread_seq2_starts = (int*)calloc((size_t)num_diffs, sizeof(int));
+-        int* thread_timeouts = (int*)calloc((size_t)num_diffs, sizeof(int));
+-        
+-        if (!thread_results || !thread_equal_lines || !thread_seq1_starts || 
+-            !thread_seq2_starts || !thread_timeouts) {
+-            free(thread_results);
+-            free(thread_equal_lines);
+-            free(thread_seq1_starts);
+-            free(thread_seq2_starts);
+-            free(thread_timeouts);
+-            use_parallel = 0; // Fallback to sequential
+-        } else {
+-            // Precompute position data (sequential, fast)
+-            int seq1_last_start = 0;
+-            int seq2_last_start = 0;
+-            for (int i = 0; i < num_diffs; i++) {
+-                const SequenceDiff* diff = &line_alignments->diffs[i];
+-                thread_equal_lines[i] = diff->seq1_start - seq1_last_start;
+-                thread_seq1_starts[i] = seq1_last_start;
+-                thread_seq2_starts[i] = seq2_last_start;
+-                seq1_last_start = diff->seq1_end;
+-                seq2_last_start = diff->seq2_end;
+-            }
+-            
+-            // Parallel character refinement with dynamic scheduling
+-            // MSVC OpenMP 2.0 workaround: declare loop variable outside
+-#ifdef _MSC_VER
+-            #pragma warning(push)
+-            #pragma warning(disable: 4101) // unreferenced local variable (false positive with OpenMP)
+-#endif
+-            int diff_idx;
+-            #pragma omp parallel for schedule(dynamic, 1) shared(thread_results, thread_timeouts) private(diff_idx)
+-            for (diff_idx = 0; diff_idx < num_diffs; diff_idx++) {
+-                const SequenceDiff* diff = &line_alignments->diffs[diff_idx];
+-                
+-                // Thread-local timeout flags
+-                bool ws_timeout = false;
+-                bool char_timeout = false;
+-                
+-                // Thread-local whitespace change scanning
+-                RangeMappingArray* ws_changes = (RangeMappingArray*)malloc(sizeof(RangeMappingArray));
+-                ws_changes->mappings = NULL;
+-                ws_changes->count = 0;
+-                ws_changes->capacity = 0;
+-                
+-                scan_for_whitespace_changes(
+-                    thread_equal_lines[diff_idx],
+-                    thread_seq1_starts[diff_idx],
+-                    thread_seq2_starts[diff_idx],
+-                    original_lines, original_count,
+-                    modified_lines, modified_count,
+-                    consider_whitespace_changes,
+-                    &timeout,
+-                    options,
+-                    ws_changes,
+-                    &ws_timeout
+-                );
+-                
+-                // Thread-local character diff refinement
+-                RangeMappingArray* character_diffs = refine_diff(
+-                    diff,
+-                    original_lines, original_count,
+-                    modified_lines, modified_count,
+-                    &timeout,
+-                    consider_whitespace_changes,
+-                    options,
+-                    &char_timeout
+-                );
+-                
+-                // Store timeout flags - no race condition since each thread writes to its own index
+-                if (ws_timeout || char_timeout) {
+-                    thread_timeouts[diff_idx] = 1;
+-                }
+-                
+-                // Merge ws_changes and character_diffs into thread_results[diff_idx]
+-                int total_count = (ws_changes ? ws_changes->count : 0) + 
+-                                 (character_diffs ? character_diffs->count : 0);
+-                
+-                if (total_count > 0) {
+-                    RangeMappingArray* combined = (RangeMappingArray*)malloc(sizeof(RangeMappingArray));
+-                    combined->mappings = (RangeMapping*)malloc((size_t)total_count * sizeof(RangeMapping));
+-                    combined->count = 0;
+-                    combined->capacity = total_count;
+-                    
+-                    if (ws_changes && ws_changes->count > 0) {
+-                        memcpy(combined->mappings, ws_changes->mappings, 
+-                               (size_t)ws_changes->count * sizeof(RangeMapping));
+-                        combined->count += ws_changes->count;
+-                    }
+-                    
+-                    if (character_diffs && character_diffs->count > 0) {
+-                        memcpy(combined->mappings + combined->count, character_diffs->mappings,
+-                               (size_t)character_diffs->count * sizeof(RangeMapping));
+-                        combined->count += character_diffs->count;
+-                    }
+-                    
+-                    thread_results[diff_idx] = combined;
+-                }
+-                
+-                if (ws_changes) range_mapping_array_free(ws_changes);
+-                if (character_diffs) range_mapping_array_free(character_diffs);
+-            }
+-#ifdef _MSC_VER
+-            #pragma warning(pop)
+-#endif
+-            
+-            // Check timeout flags
+-            for (int i = 0; i < num_diffs; i++) {
+-                if (thread_timeouts[i]) {
+-                    hit_timeout = true;
+-                    break;
+-                }
+-            }
+-            
+-            // Optimized merge: calculate total size and do single allocation + batch copy
+-            int total_size = 0;
+-            for (int i = 0; i < num_diffs; i++) {
+-                if (thread_results[i]) {
+-                    total_size += thread_results[i]->count;
+-                }
+-            }
+-            
+-            if (total_size > 0) {
+-                alignments->mappings = (RangeMapping*)malloc((size_t)total_size * sizeof(RangeMapping));
+-                if (alignments->mappings) {
+-                    alignments->capacity = total_size;
+-                    int offset = 0;
+-                    for (int i = 0; i < num_diffs; i++) {
+-                        if (thread_results[i] && thread_results[i]->count > 0) {
+-                            memcpy(alignments->mappings + offset,
+-                                   thread_results[i]->mappings,
+-                                   (size_t)thread_results[i]->count * sizeof(RangeMapping));
+-                            offset += thread_results[i]->count;
+-                        }
+-                    }
+-                    alignments->count = total_size;
+-                }
+-            }
+-            
+-            // Cleanup thread results
+-            for (int i = 0; i < num_diffs; i++) {
+-                if (thread_results[i]) {
+-                    range_mapping_array_free(thread_results[i]);
+-                }
+-            }
+-            
+-            free(thread_results);
+-            free(thread_equal_lines);
+-            free(thread_seq1_starts);
+-            free(thread_seq2_starts);
+-            free(thread_timeouts);
+-        }
+-    }
+-    
+-    // Fallback to sequential or handle remaining work
+-    if (!use_parallel)
+-#endif
+-    {
+-        // Sequential character refinement loop (original code)
+-        int seq1_last_start = 0;
+-        int seq2_last_start = 0;
+-        
+-        for (int diff_idx = 0; diff_idx < line_alignments->count; diff_idx++) {
+-            const SequenceDiff* diff = &line_alignments->diffs[diff_idx];
+-            
+-            int equal_lines_count = diff->seq1_start - seq1_last_start;
+-            
+-            // Scan equal lines for whitespace changes
+-            scan_for_whitespace_changes(
+-                equal_lines_count,
+-                seq1_last_start,
+-                seq2_last_start,
+-                original_lines, original_count,
+-                modified_lines, modified_count,
+-                consider_whitespace_changes,
+-                &timeout,
+-                options,
+-                alignments,
+-                &hit_timeout
+-            );
+-            
+-            seq1_last_start = diff->seq1_end;
+-            seq2_last_start = diff->seq2_end;
+-            
+-            // Refine this diff region
+-            bool local_timeout = false;
+-            RangeMappingArray* character_diffs = refine_diff(
+-                diff,
+-                original_lines, original_count,
+-                modified_lines, modified_count,
+-                &timeout,
+-                consider_whitespace_changes,
+-                options,
+-                &local_timeout
+-            );
+-            
+-            if (local_timeout) {
+-                hit_timeout = true;
+-            }
+-            
+-            if (character_diffs) {
+-                // Add all character mappings
+-                for (int j = 0; j < character_diffs->count; j++) {
+-                    if (alignments->count >= alignments->capacity) {
+-                        size_t new_capacity = (size_t)(alignments->capacity == 0 ? 16 : alignments->capacity * 2);
+-                        RangeMapping* new_mappings = (RangeMapping*)realloc(
+-                            alignments->mappings,
+-                            new_capacity * sizeof(RangeMapping)
+-                        );
+-                        if (new_mappings) {
+-                            alignments->mappings = new_mappings;
+-                            alignments->capacity = (int)new_capacity;
+-                        }
+-                    }
+-                    
+-                    if (alignments->count < alignments->capacity) {
+-                        alignments->mappings[alignments->count++] = character_diffs->mappings[j];
+-                    }
+-                }
+-                
+-                range_mapping_array_free(character_diffs);
+-            }
+-        }
+-    }
+-    
+-    // Scan remaining equal lines (sequential - happens after all diffs)
+-    int seq1_final = 0;
+-    int seq2_final = 0;
+-    if (line_alignments->count > 0) {
+-        seq1_final = line_alignments->diffs[line_alignments->count - 1].seq1_end;
+-        seq2_final = line_alignments->diffs[line_alignments->count - 1].seq2_end;
++LinesDiff *compute_diff(const char **original_lines, int original_count,
++                        const char **modified_lines, int modified_count,
++                        const DiffOptions *options) {
++  if (arrays_equal(original_lines, original_count, modified_lines,
++                   modified_count)) {
++    return create_empty_lines_diff();
++  }
++
++  Timeout timeout = {
++      .timeout_ms = options->max_computation_time_ms,
++      .start_time_ms = get_current_time_ms(),
++  };
++  bool hit_timeout = false;
++  int remaining = remaining_timeout_ms(&timeout);
++  bool empty_buffer =
++      (original_count == 1 && original_lines[0][0] == '\0') ||
++      (modified_count == 1 && modified_lines[0][0] == '\0');
++  SequenceDiffArray *line_alignments;
++  if (empty_buffer) {
++    line_alignments = (SequenceDiffArray *)malloc(sizeof(SequenceDiffArray));
++    if (line_alignments) {
++      line_alignments->diffs =
++          (SequenceDiff *)malloc(sizeof(SequenceDiff));
++      line_alignments->count = line_alignments->diffs ? 1 : 0;
++      line_alignments->capacity = line_alignments->diffs ? 1 : 0;
++      if (line_alignments->diffs) {
++        line_alignments->diffs[0] = (SequenceDiff){
++            .seq1_start = 0,
++            .seq1_end = original_count,
++            .seq2_start = 0,
++            .seq2_end = modified_count,
++        };
++      }
+     }
+-    
+-    int remaining = original_count - seq1_final;
+-    scan_for_whitespace_changes(
+-        remaining,
+-        seq1_final,
+-        seq2_final,
+-        original_lines, original_count,
+-        modified_lines, modified_count,
+-        consider_whitespace_changes,
+-        &timeout,
+-        options,
+-        alignments,
+-        &hit_timeout
+-    );
+-    
+-    // Convert to line mappings
+-    DetailedLineRangeMappingArray* changes = line_range_mapping_from_range_mappings(
+-        alignments,
+-        original_lines, original_count,
+-        modified_lines, modified_count,
+-        false  // dontAssertStartLine
+-    );
+-    
+-    // Compute moves if requested
+-    MovedTextArray computed_moves = { NULL, 0, 0 };
+-    if (options->compute_moves && changes && changes->count > 0) {
+-        // Recompute line hashes (same algorithm as LineSequence: trimmed perfect hash)
+-        StringHashMap *move_hash_map = string_hash_map_create();
+-        uint32_t *hashed_orig = (uint32_t *)malloc((size_t)original_count * sizeof(uint32_t));
+-        uint32_t *hashed_mod = (uint32_t *)malloc((size_t)modified_count * sizeof(uint32_t));
++  } else {
++    line_alignments = compute_line_alignments(
++        original_lines, original_count, modified_lines, modified_count,
++        remaining, &hit_timeout);
++  }
++  if (!line_alignments || (empty_buffer && !line_alignments->diffs)) {
++    sequence_diff_array_free(line_alignments);
++    return NULL;
++  }
+ 
+-        for (int i = 0; i < original_count; i++) {
+-            char *trimmed = trim_string(original_lines[i]);
+-            hashed_orig[i] = string_hash_map_get_or_create(move_hash_map, trimmed);
+-            free(trimmed);
+-        }
+-        for (int i = 0; i < modified_count; i++) {
+-            char *trimmed = trim_string(modified_lines[i]);
+-            hashed_mod[i] = string_hash_map_get_or_create(move_hash_map, trimmed);
+-            free(trimmed);
+-        }
++  DetailedLineRangeMappingArray changes = {0};
++  bool consider_whitespace_changes = !options->ignore_trim_whitespace;
++  int previous_original = 0;
++  int previous_modified = 0;
++  bool success = true;
++  for (int index = 0; index < line_alignments->count && success; index++) {
++    const SequenceDiff *block = &line_alignments->diffs[index];
++    success = process_whitespace_changes(
++                  &changes, block->seq1_start - previous_original,
++                  previous_original, previous_modified, original_lines,
++                  original_count, modified_lines, modified_count,
++                  consider_whitespace_changes, options, &timeout,
++                  &hit_timeout) &&
++              process_block(&changes, block, original_lines, original_count,
++                            modified_lines, modified_count,
++                            consider_whitespace_changes, options, &timeout,
++                            &hit_timeout);
++    previous_original = block->seq1_end;
++    previous_modified = block->seq2_end;
++  }
++  if (success) {
++    int remaining_original = original_count - previous_original;
++    int remaining_modified = modified_count - previous_modified;
++    int remaining_equal = remaining_original < remaining_modified
++                              ? remaining_original
++                              : remaining_modified;
++    success = process_whitespace_changes(
++        &changes, remaining_equal, previous_original, previous_modified,
++        original_lines, original_count, modified_lines, modified_count,
++        consider_whitespace_changes, options, &timeout, &hit_timeout);
++  }
++  sequence_diff_array_free(line_alignments);
++  if (!success) {
++    free_changes(&changes);
++    return NULL;
++  }
+ 
+-        compute_moved_lines(
+-            changes->mappings, changes->count,
+-            original_lines, original_count,
+-            modified_lines, modified_count,
+-            hashed_orig, hashed_mod,
+-            timeout.timeout_ms,
+-            &computed_moves);
++  MovedTextArray moves = {0};
++  if (options->compute_moves && changes.count > 0 &&
++      !compute_moves(&changes, original_lines, original_count, modified_lines,
++                     modified_count, &timeout, &moves, &hit_timeout)) {
++    free_changes(&changes);
++    return NULL;
++  }
+ 
+-        free(hashed_orig);
+-        free(hashed_mod);
+-        string_hash_map_destroy(move_hash_map);
+-    }
+-    
+-    // Create LinesDiff result
+-    LinesDiff* result = (LinesDiff*)malloc(sizeof(LinesDiff));
+-    if (!result) {
+-        free_detailed_line_range_mapping_array(changes);
+-        range_mapping_array_free(alignments);
+-        sequence_diff_array_free(line_alignments);
+-        return NULL;
+-    }
+-    
+-    // Transfer changes
+-    if (changes) {
+-        result->changes = *changes;
+-        free(changes);  // Free the container, not the contents
+-    } else {
+-        result->changes.mappings = NULL;
+-        result->changes.count = 0;
+-        result->changes.capacity = 0;
+-    }
+-    
+-    // Transfer moves
+-    result->moves = computed_moves;
+-    
+-    result->hit_timeout = hit_timeout;
+-    
+-    // Cleanup
+-    range_mapping_array_free(alignments);
+-    sequence_diff_array_free(line_alignments);
+-    
+-    return result;
++  LinesDiff *result = (LinesDiff *)malloc(sizeof(LinesDiff));
++  if (!result) {
++    free_changes(&changes);
++    free(moves.moves);
++    return NULL;
++  }
++  result->changes = changes;
++  result->moves = moves;
++  result->hit_timeout = hit_timeout;
++  return result;
+ }
+ 
+ /**
+@@ -735,23 +499,13 @@ LinesDiff* compute_diff(
+  * 
+  * @param diff LinesDiff to free (can be NULL)
+  */
+-void free_lines_diff(LinesDiff* diff) {
+-    if (!diff) return;
+-    
+-    if (diff->changes.mappings) {
+-        for (int i = 0; i < diff->changes.count; i++) {
+-            if (diff->changes.mappings[i].inner_changes) {
+-                free(diff->changes.mappings[i].inner_changes);
+-            }
+-        }
+-        free(diff->changes.mappings);
+-    }
+-    
+-    if (diff->moves.moves) {
+-        free(diff->moves.moves);
+-    }
+-    
+-    free(diff);
++void free_lines_diff(LinesDiff *diff) {
++  if (!diff) {
++    return;
++  }
++  free_changes(&diff->changes);
++  free(diff->moves.moves);
++  free(diff);
+ }
+ 
+ /**
+@@ -759,6 +513,4 @@ void free_lines_diff(LinesDiff* diff) {
+  * Version is embedded at build time from VERSION file.
+  */
+ #include "version.h"
+-const char* get_version(void) {
+-    return VSCODE_DIFF_VERSION;
+-}
++const char *get_version(void) { return VSCODE_DIFF_VERSION; }
+diff --git a/libvscode-diff/include/line_matcher.h b/libvscode-diff/include/line_matcher.h
+new file mode 100644
+index 0000000..c214c40
+--- /dev/null
++++ b/libvscode-diff/include/line_matcher.h
+@@ -0,0 +1,14 @@
++#ifndef LINE_MATCHER_H
++#define LINE_MATCHER_H
++
++#include "types.h"
++
++SequenceDiffArray *compute_line_matches(const SequenceDiff *block,
++                                        const char **original_lines,
++                                        const char **modified_lines,
++                                        LineMatcherStrategy strategy,
++                                        double threshold,
++                                        const Timeout *timeout,
++                                        bool *hit_timeout);
++
++#endif
+diff --git a/libvscode-diff/include/types.h b/libvscode-diff/include/types.h
+index e7fbf98..fa8a46b 100644
+--- a/libvscode-diff/include/types.h
++++ b/libvscode-diff/include/types.h
+@@ -70,6 +70,11 @@ typedef struct {
+   int capacity;
+ } RangeMappingArray;
+ 
++typedef struct {
++  LineRange original;
++  LineRange modified;
++} LineMapping;
++
+ /**
+  * DetailedLineRangeMapping - Final algorithm output
+  * Maps to VSCode's DetailedLineRangeMapping.
+@@ -80,6 +85,9 @@ typedef struct {
+   LineRange modified;          // Which lines in modified
+   RangeMapping *inner_changes; // Character-level changes (NULL if no inner changes)
+   int inner_change_count;      // Number of inner changes
++  LineMapping *line_mappings;
++  int line_mapping_count;
++  int line_mapping_capacity;
+ } DetailedLineRangeMapping;
+ 
+ typedef struct {
+@@ -103,6 +111,12 @@ typedef struct {
+   int capacity;
+ } MovedTextArray;
+ 
++typedef enum {
++  LINE_MATCHER_SIMILARITY = 0,
++  LINE_MATCHER_VSCODE = 1,
++  LINE_MATCHER_EQUAL_LINE_COUNT = 2,
++} LineMatcherStrategy;
++
+ /**
+  * DiffOptions - Configuration for diff computation
+  * Maps to VSCode's ILinesDiffComputerOptions.
+@@ -112,6 +126,8 @@ typedef struct {
+   int max_computation_time_ms; // 0 = infinite timeout
+   bool compute_moves;          // If true, compute moved blocks (not implemented yet)
+   bool extend_to_subwords;     // If true, extend diffs to subword boundaries
++  LineMatcherStrategy line_matcher_strategy;
++  double line_matcher_threshold;
+ } DiffOptions;
+ 
+ /**
+diff --git a/libvscode-diff/src/line_matcher.c b/libvscode-diff/src/line_matcher.c
+new file mode 100644
+index 0000000..9185653
+--- /dev/null
++++ b/libvscode-diff/src/line_matcher.c
+@@ -0,0 +1,370 @@
++#include "line_matcher.h"
++#include "utils.h"
++#include <stdlib.h>
++#include <string.h>
++
++typedef struct {
++  const unsigned char *text;
++  int length;
++  int frequency[256];
++} LineMetadata;
++
++typedef struct {
++  int original_start;
++  int original_end;
++  int modified_start;
++  int modified_end;
++} MatchRange;
++
++typedef struct {
++  int original_index;
++  int modified_index;
++  double score;
++  bool found;
++} BestPair;
++
++typedef struct {
++  MatchRange *items;
++  int count;
++  int capacity;
++} RangeStack;
++
++static bool deadline_expired(const Timeout *timeout) {
++  return timeout->timeout_ms > 0 &&
++         get_current_time_ms() - timeout->start_time_ms >= timeout->timeout_ms;
++}
++
++static SequenceDiffArray *create_matches(void) {
++  SequenceDiffArray *result = (SequenceDiffArray *)malloc(sizeof(SequenceDiffArray));
++  if (!result) {
++    return NULL;
++  }
++  result->diffs = NULL;
++  result->count = 0;
++  result->capacity = 0;
++  return result;
++}
++
++static bool append_match(SequenceDiffArray *matches, int original_index,
++                         int modified_index) {
++  if (matches->count >= matches->capacity) {
++    int capacity = matches->capacity == 0 ? 8 : matches->capacity * 2;
++    SequenceDiff *items = (SequenceDiff *)realloc(
++        matches->diffs, (size_t)capacity * sizeof(SequenceDiff));
++    if (!items) {
++      return false;
++    }
++    matches->diffs = items;
++    matches->capacity = capacity;
++  }
++  matches->diffs[matches->count++] = (SequenceDiff){
++      .seq1_start = original_index,
++      .seq1_end = original_index + 1,
++      .seq2_start = modified_index,
++      .seq2_end = modified_index + 1,
++  };
++  return true;
++}
++
++static LineMetadata *create_metadata(const char **lines, int start, int end) {
++  int count = end - start;
++  LineMetadata *metadata =
++      count > 0 ? (LineMetadata *)calloc((size_t)count, sizeof(LineMetadata)) : NULL;
++  if (count > 0 && !metadata) {
++    return NULL;
++  }
++  for (int index = 0; index < count; index++) {
++    const unsigned char *text = (const unsigned char *)lines[start + index];
++    metadata[index].text = text;
++    metadata[index].length = (int)strlen((const char *)text);
++    for (int offset = 0; offset < metadata[index].length; offset++) {
++      metadata[index].frequency[text[offset]]++;
++    }
++  }
++  return metadata;
++}
++
++static int frequency_overlap(const LineMetadata *left,
++                             const LineMetadata *right) {
++  int overlap = 0;
++  for (int byte = 0; byte < 256; byte++) {
++    overlap += left->frequency[byte] < right->frequency[byte]
++                   ? left->frequency[byte]
++                   : right->frequency[byte];
++  }
++  return overlap;
++}
++
++static int lcs_length(const LineMetadata *left, const LineMetadata *right,
++                      int *row, double minimum_score, const Timeout *timeout,
++                      bool *hit_timeout) {
++  int prefix = 0;
++  int shorter_length = left->length < right->length ? left->length : right->length;
++  while (prefix < shorter_length && left->text[prefix] == right->text[prefix]) {
++    prefix++;
++  }
++  int suffix = 0;
++  while (suffix < shorter_length - prefix &&
++         left->text[left->length - suffix - 1] ==
++             right->text[right->length - suffix - 1]) {
++    suffix++;
++  }
++
++  const unsigned char *left_middle = left->text + prefix;
++  const unsigned char *right_middle = right->text + prefix;
++  int left_length = left->length - prefix - suffix;
++  int right_length = right->length - prefix - suffix;
++  const unsigned char *rows = left_middle;
++  const unsigned char *columns = right_middle;
++  int row_count = left_length;
++  int column_count = right_length;
++  if (column_count > row_count) {
++    rows = right_middle;
++    columns = left_middle;
++    row_count = right_length;
++    column_count = left_length;
++  }
++
++  memset(row, 0, (size_t)(column_count + 1) * sizeof(int));
++  int common = prefix + suffix;
++  int total_length = left->length + right->length;
++  for (int row_index = 0; row_index < row_count; row_index++) {
++    int diagonal = 0;
++    for (int column = 1; column <= column_count; column++) {
++      int previous = row[column];
++      if (rows[row_index] == columns[column - 1]) {
++        row[column] = diagonal + 1;
++      } else if (row[column - 1] > row[column]) {
++        row[column] = row[column - 1];
++      }
++      diagonal = previous;
++    }
++
++    int remaining = row_count - row_index - 1;
++    int upper_lcs = common + row[column_count] + remaining;
++    int maximum_lcs = common + column_count;
++    if (upper_lcs > maximum_lcs) {
++      upper_lcs = maximum_lcs;
++    }
++    if (2.0 * upper_lcs / total_length < minimum_score) {
++      return -1;
++    }
++    if ((row_index & 31) == 31 && deadline_expired(timeout)) {
++      *hit_timeout = true;
++      return -1;
++    }
++  }
++  return common + row[column_count];
++}
++
++static BestPair find_best_pair(const MatchRange *range,
++                               const LineMetadata *original,
++                               const LineMetadata *modified,
++                               int original_base, int modified_base,
++                               double threshold, int *row,
++                               const Timeout *timeout, bool *hit_timeout) {
++  BestPair best = {0};
++  int candidate_count = 0;
++  for (int original_index = range->original_start;
++       original_index < range->original_end; original_index++) {
++    int expected_modified =
++        range->modified_start + original_index - range->original_start;
++    int modified_start = expected_modified - 10;
++    int modified_end = expected_modified + 10;
++    if (modified_start < range->modified_start) {
++      modified_start = range->modified_start;
++    }
++    if (modified_end >= range->modified_end) {
++      modified_end = range->modified_end - 1;
++    }
++
++    for (int modified_index = modified_start; modified_index <= modified_end;
++         modified_index++) {
++      if ((candidate_count++ & 31) == 31 && deadline_expired(timeout)) {
++        *hit_timeout = true;
++        return best;
++      }
++      const LineMetadata *left = &original[original_index - original_base];
++      const LineMetadata *right = &modified[modified_index - modified_base];
++      double score;
++      if (left->length == right->length &&
++          memcmp(left->text, right->text, (size_t)left->length) == 0) {
++        score = 1.0;
++      } else if (left->length == 0 || right->length == 0) {
++        score = 0.0;
++      } else {
++        int total_length = left->length + right->length;
++        int upper_lcs = left->length < right->length ? left->length : right->length;
++        int overlap = frequency_overlap(left, right);
++        if (overlap < upper_lcs) {
++          upper_lcs = overlap;
++        }
++        double upper_score = 2.0 * upper_lcs / total_length;
++        double minimum_score = best.found && best.score > threshold ? best.score : threshold;
++        if (upper_score < threshold || (best.found && upper_score <= best.score)) {
++          continue;
++        }
++        int lcs = lcs_length(left, right, row, minimum_score, timeout, hit_timeout);
++        if (*hit_timeout) {
++          return best;
++        }
++        if (lcs < 0) {
++          continue;
++        }
++        score = 2.0 * lcs / total_length;
++      }
++      if (score >= threshold && (!best.found || score > best.score)) {
++        best = (BestPair){
++            .original_index = original_index,
++            .modified_index = modified_index,
++            .score = score,
++            .found = true,
++        };
++      }
++    }
++  }
++  return best;
++}
++
++static bool push_range(RangeStack *stack, MatchRange range) {
++  if (range.original_start >= range.original_end ||
++      range.modified_start >= range.modified_end) {
++    return true;
++  }
++  if (stack->count >= stack->capacity) {
++    int capacity = stack->capacity == 0 ? 16 : stack->capacity * 2;
++    MatchRange *items = (MatchRange *)realloc(
++        stack->items, (size_t)capacity * sizeof(MatchRange));
++    if (!items) {
++      return false;
++    }
++    stack->items = items;
++    stack->capacity = capacity;
++  }
++  stack->items[stack->count++] = range;
++  return true;
++}
++
++static int compare_matches(const void *left_value, const void *right_value) {
++  const SequenceDiff *left = (const SequenceDiff *)left_value;
++  const SequenceDiff *right = (const SequenceDiff *)right_value;
++  return left->seq1_start - right->seq1_start;
++}
++
++static bool collect_similarity_matches(SequenceDiffArray *matches,
++                                       const SequenceDiff *block,
++                                       const char **original_lines,
++                                       const char **modified_lines,
++                                       double threshold, const Timeout *timeout,
++                                       bool *hit_timeout) {
++  LineMetadata *original =
++      create_metadata(original_lines, block->seq1_start, block->seq1_end);
++  LineMetadata *modified =
++      create_metadata(modified_lines, block->seq2_start, block->seq2_end);
++  if ((block->seq1_end > block->seq1_start && !original) ||
++      (block->seq2_end > block->seq2_start && !modified)) {
++    free(original);
++    free(modified);
++    return false;
++  }
++
++  int maximum_length = 0;
++  for (int index = block->seq1_start; index < block->seq1_end; index++) {
++    int length = original[index - block->seq1_start].length;
++    if (length > maximum_length) {
++      maximum_length = length;
++    }
++  }
++  for (int index = block->seq2_start; index < block->seq2_end; index++) {
++    int length = modified[index - block->seq2_start].length;
++    if (length > maximum_length) {
++      maximum_length = length;
++    }
++  }
++  int *row = (int *)malloc((size_t)(maximum_length + 1) * sizeof(int));
++  RangeStack stack = {0};
++  bool success = row && push_range(&stack, (MatchRange){
++                                             .original_start = block->seq1_start,
++                                             .original_end = block->seq1_end,
++                                             .modified_start = block->seq2_start,
++                                             .modified_end = block->seq2_end,
++                                         });
++
++  while (success && stack.count > 0 && !*hit_timeout) {
++    MatchRange range = stack.items[--stack.count];
++    BestPair best = find_best_pair(&range, original, modified, block->seq1_start,
++                                   block->seq2_start, threshold, row, timeout,
++                                   hit_timeout);
++    if (!best.found || *hit_timeout) {
++      continue;
++    }
++    success = append_match(matches, best.original_index, best.modified_index) &&
++              push_range(&stack,
++                         (MatchRange){
++                             .original_start = best.original_index + 1,
++                             .original_end = range.original_end,
++                             .modified_start = best.modified_index + 1,
++                             .modified_end = range.modified_end,
++                         }) &&
++              push_range(&stack,
++                         (MatchRange){
++                             .original_start = range.original_start,
++                             .original_end = best.original_index,
++                             .modified_start = range.modified_start,
++                             .modified_end = best.modified_index,
++                         });
++  }
++
++  if (matches->count > 1) {
++    qsort(matches->diffs, (size_t)matches->count, sizeof(SequenceDiff),
++          compare_matches);
++  }
++  free(stack.items);
++  free(row);
++  free(original);
++  free(modified);
++  return success;
++}
++
++SequenceDiffArray *compute_line_matches(const SequenceDiff *block,
++                                        const char **original_lines,
++                                        const char **modified_lines,
++                                        LineMatcherStrategy strategy,
++                                        double threshold,
++                                        const Timeout *timeout,
++                                        bool *hit_timeout) {
++  *hit_timeout = false;
++  SequenceDiffArray *matches = create_matches();
++  if (!matches) {
++    return NULL;
++  }
++
++  int original_count = block->seq1_end - block->seq1_start;
++  int modified_count = block->seq2_end - block->seq2_start;
++  bool success = true;
++  if (strategy == LINE_MATCHER_VSCODE) {
++    if (original_count > 0 || modified_count > 0) {
++      success = append_match(matches, block->seq1_start, block->seq2_start);
++      if (success) {
++        matches->diffs[0] = *block;
++      }
++    }
++  } else if (strategy == LINE_MATCHER_EQUAL_LINE_COUNT) {
++    if (original_count == modified_count) {
++      for (int index = 0; index < original_count && success; index++) {
++        success = append_match(matches, block->seq1_start + index,
++                               block->seq2_start + index);
++      }
++    }
++  } else {
++    success = collect_similarity_matches(matches, block, original_lines,
++                                         modified_lines, threshold, timeout,
++                                         hit_timeout);
++  }
++
++  if (!success) {
++    sequence_diff_array_free(matches);
++    return NULL;
++  }
++  return matches;
++}
+diff --git a/libvscode-diff/tests/test_line_matcher.c b/libvscode-diff/tests/test_line_matcher.c
+new file mode 100644
+index 0000000..7974941
+--- /dev/null
++++ b/libvscode-diff/tests/test_line_matcher.c
+@@ -0,0 +1,146 @@
++#include "line_matcher.h"
++#include "utils.h"
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#define ASSERT(condition, message)                                             \
++  do {                                                                         \
++    if (!(condition)) {                                                        \
++      fprintf(stderr, "%s\n", message);                                      \
++      return false;                                                            \
++    }                                                                          \
++  } while (0)
++
++typedef struct {
++  const char *name;
++  LineMatcherStrategy strategy;
++  const char **original;
++  int original_count;
++  const char **modified;
++  int modified_count;
++  double threshold;
++  int expected_count;
++} MatchCase;
++
++static SequenceDiffArray *run_case(const MatchCase *test_case,
++                                   bool *hit_timeout) {
++  SequenceDiff block = {
++      .seq1_start = 0,
++      .seq1_end = test_case->original_count,
++      .seq2_start = 0,
++      .seq2_end = test_case->modified_count,
++  };
++  Timeout timeout = {.timeout_ms = 1000,
++                     .start_time_ms = get_current_time_ms()};
++  return compute_line_matches(&block, test_case->original, test_case->modified,
++                              test_case->strategy, test_case->threshold,
++                              &timeout, hit_timeout);
++}
++
++static bool test_strategies(void) {
++  const char *equal_original[] = {"old one", "old two"};
++  const char *equal_modified[] = {"new one", "new two"};
++  const char *unequal_modified[] = {"new one"};
++  const char *similar_original[] = {"local old_name = 1", "removed"};
++  const char *similar_modified[] = {"local new_name = 1", "unrelated"};
++  const char *unicode_original[] = {"caf\xC3\xA9"};
++  const char *unicode_modified[] = {"cafe"};
++  MatchCase cases[] = {
++      {"vscode complete block", LINE_MATCHER_VSCODE, equal_original, 2,
++       unequal_modified, 1, 0.75, 1},
++      {"equal counts", LINE_MATCHER_EQUAL_LINE_COUNT, equal_original, 2,
++       equal_modified, 2, 0.75, 2},
++      {"unequal counts", LINE_MATCHER_EQUAL_LINE_COUNT, equal_original, 2,
++       unequal_modified, 1, 0.75, 0},
++      {"similar lines", LINE_MATCHER_SIMILARITY, similar_original, 2,
++       similar_modified, 2, 0.75, 1},
++      {"unicode byte score", LINE_MATCHER_SIMILARITY, unicode_original, 1,
++       unicode_modified, 1, 0.6, 1},
++  };
++
++  int count = (int)(sizeof(cases) / sizeof(cases[0]));
++  for (int index = 0; index < count; index++) {
++    bool hit_timeout = false;
++    SequenceDiffArray *matches = run_case(&cases[index], &hit_timeout);
++    ASSERT(matches != NULL, cases[index].name);
++    ASSERT(!hit_timeout, cases[index].name);
++    ASSERT(matches->count == cases[index].expected_count, cases[index].name);
++    sequence_diff_array_free(matches);
++  }
++  return true;
++}
++
++static bool test_threshold_boundary(void) {
++  const char *original[] = {"cat"};
++  const char *modified[] = {"cut"};
++  MatchCase accepted = {"accepted boundary", LINE_MATCHER_SIMILARITY, original,
++                        1, modified, 1, 2.0 / 3.0, 1};
++  MatchCase rejected = {"rejected boundary", LINE_MATCHER_SIMILARITY, original,
++                        1, modified, 1, 0.667, 0};
++  MatchCase cases[] = {accepted, rejected};
++  for (int index = 0; index < 2; index++) {
++    bool hit_timeout = false;
++    SequenceDiffArray *matches = run_case(&cases[index], &hit_timeout);
++    ASSERT(matches != NULL, cases[index].name);
++    ASSERT(matches->count == cases[index].expected_count, cases[index].name);
++    sequence_diff_array_free(matches);
++  }
++  return true;
++}
++
++static bool test_tie_order(void) {
++  const char *original[] = {"same", "same"};
++  const char *modified[] = {"same", "same"};
++  MatchCase test_case = {"tie order", LINE_MATCHER_SIMILARITY, original, 2,
++                         modified, 2, 0.75, 2};
++  bool hit_timeout = false;
++  SequenceDiffArray *matches = run_case(&test_case, &hit_timeout);
++  ASSERT(matches != NULL, "tie order allocation");
++  ASSERT(matches->count == 2, "tie order count");
++  ASSERT(matches->diffs[0].seq1_start == 0 &&
++             matches->diffs[0].seq2_start == 0,
++         "tie order first");
++  ASSERT(matches->diffs[1].seq1_start == 1 &&
++             matches->diffs[1].seq2_start == 1,
++         "tie order second");
++  sequence_diff_array_free(matches);
++  return true;
++}
++
++static bool test_timeout(void) {
++  int length = 15000;
++  char *left = (char *)malloc((size_t)length + 1);
++  char *right = (char *)malloc((size_t)length + 1);
++  ASSERT(left && right, "timeout allocation");
++  for (int index = 0; index < length; index++) {
++    left[index] = (char)('a' + index % 23);
++    right[index] = (char)('a' + (index * 7) % 23);
++  }
++  left[length] = '\0';
++  right[length] = '\0';
++  const char *original[] = {left};
++  const char *modified[] = {right};
++  SequenceDiff block = {.seq1_start = 0,
++                        .seq1_end = 1,
++                        .seq2_start = 0,
++                        .seq2_end = 1};
++  Timeout timeout = {.timeout_ms = 1, .start_time_ms = get_current_time_ms()};
++  bool hit_timeout = false;
++  SequenceDiffArray *matches = compute_line_matches(
++      &block, original, modified, LINE_MATCHER_SIMILARITY, 0.75, &timeout,
++      &hit_timeout);
++  ASSERT(matches != NULL, "timeout result");
++  ASSERT(hit_timeout, "timeout flag");
++  sequence_diff_array_free(matches);
++  free(left);
++  free(right);
++  return true;
++}
++
++int main(void) {
++  bool passed = test_strategies() && test_threshold_boundary() &&
++                test_tie_order() && test_timeout();
++  return passed ? 0 : 1;
++}
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 06d777b..3e2c01a 100644
+index 106aeaf..06efc8e 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
-@@ -1,6 +1,8 @@
- -- Configuration module
- local M = {}
- 
-+local line_matchers = require("codediff.line_matchers")
-+
- M.defaults = {
-   -- Highlight configuration
-   highlights = {
-@@ -35,6 +37,7 @@ M.defaults = {
+@@ -34,6 +34,10 @@ M.defaults = {
      disable_inlay_hints = true, -- Disable inlay hints in diff windows for cleaner view
      max_computation_time_ms = 5000, -- Maximum time for diff computation (5 seconds, VSCode default)
      ignore_trim_whitespace = false, -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
-+    line_matcher = line_matchers.similarity, -- Pair similar changed lines for character-level highlights
++    line_matcher = {
++      strategy = "similarity", -- Native line matching: "similarity", "vscode", or "equal_line_count"
++      threshold = 0.75, -- Minimum byte-LCS score for the "similarity" strategy
++    },
      hide_merge_artifacts = false, -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
      original_position = "left", -- Position of original (old) content: "left" or "right"
      conflict_ours_position = "right", -- Position of ours (:2) in conflict view: "left" or "right" (independent of original_position)
+@@ -168,8 +172,50 @@ M.defaults = {
+ 
+ M.options = vim.deepcopy(M.defaults)
+ 
++local line_matcher_keys = {
++  strategy = true,
++  threshold = true,
++}
++
++function M.resolve_line_matcher(value)
++  value = value or M.defaults.diff.line_matcher
++  if type(value) ~= "table" then
++    error("diff.line_matcher must be a table")
++  end
++  for key in pairs(value) do
++    if not line_matcher_keys[key] then
++      error("unknown diff.line_matcher option: " .. tostring(key))
++    end
++  end
++
++  local strategy = value.strategy or "similarity"
++  if strategy ~= "similarity" and strategy ~= "vscode" and strategy ~= "equal_line_count" then
++    error("diff.line_matcher.strategy must be one of: similarity, vscode, equal_line_count")
++  end
++  if strategy ~= "similarity" and value.threshold ~= nil then
++    error("diff.line_matcher.threshold is only valid for the similarity strategy")
++  end
++
++  if strategy ~= "similarity" then
++    return { strategy = strategy }
++  end
++  local threshold = value.threshold or 0.75
++  if type(threshold) ~= "number" or threshold < 0 or threshold > 1 then
++    error("diff.line_matcher.threshold must be a number between 0 and 1")
++  end
++  return { strategy = strategy, threshold = threshold }
++end
++
+ function M.setup(opts)
+-  M.options = vim.tbl_deep_extend("force", M.options, opts or {})
++  opts = opts or {}
++  local line_matcher = opts.diff and opts.diff.line_matcher
++  if line_matcher ~= nil then
++    line_matcher = M.resolve_line_matcher(line_matcher)
++  end
++  M.options = vim.tbl_deep_extend("force", M.options, opts)
++  if line_matcher ~= nil then
++    M.options.diff.line_matcher = line_matcher
++  end
+ end
+ 
+ return M
 diff --git a/lua/codediff/core/diff.lua b/lua/codediff/core/diff.lua
-index b2fbe1f..0b40aa7 100644
+index b2fbe1f..a89289d 100644
 --- a/lua/codediff/core/diff.lua
 +++ b/lua/codediff/core/diff.lua
-@@ -65,6 +65,19 @@ end
- -- FFI type definitions matching C types.h
- ffi.cdef([[
-   // Basic range types
+@@ -83,11 +83,19 @@ ffi.cdef([[
+     CharRange modified;
+   } RangeMapping;
+ 
 +  typedef struct {
-+    int seq1_start;
-+    int seq1_end;
-+    int seq2_start;
-+    int seq2_end;
-+  } SequenceDiff;
-+
-+  typedef struct {
-+    SequenceDiff* diffs;
-+    int count;
-+    int capacity;
-+  } SequenceDiffArray;
++    LineRange original;
++    LineRange modified;
++  } LineMapping;
 +
    typedef struct {
-     int start_line;  // 1-based, inclusive
-     int end_line;    // 1-based, EXCLUSIVE
-@@ -131,7 +144,17 @@ ffi.cdef([[
-     const DiffOptions* options
-   );
+     LineRange original;
+     LineRange modified;
+     RangeMapping* inner_changes;
+     int inner_change_count;
++    LineMapping* line_mappings;
++    int line_mapping_count;
++    int line_mapping_capacity;
+   } DetailedLineRangeMapping;
  
-+  SequenceDiffArray* compute_line_alignments(
-+    const char** original_lines,
-+    int original_count,
-+    const char** modified_lines,
-+    int modified_count,
-+    int timeout_ms,
-+    bool* hit_timeout
-+  );
+   typedef struct {
+@@ -115,11 +123,15 @@ ffi.cdef([[
+   } LinesDiff;
+ 
+   // Options
++  typedef int LineMatcherStrategy;
 +
-   void free_lines_diff(LinesDiff* diff);
-+  void free_sequence_diff_array(SequenceDiffArray* diff);
-   const char* get_version(void);
- ]])
+   typedef struct {
+     bool ignore_trim_whitespace;
+     int max_computation_time_ms;
+     bool compute_moves;
+     bool extend_to_subwords;
++    LineMatcherStrategy line_matcher_strategy;
++    double line_matcher_threshold;
+   } DiffOptions;
  
-@@ -227,11 +250,7 @@ local function lines_diff_to_lua(c_diff)
+   // API functions
+@@ -140,6 +152,10 @@ ffi.cdef([[
+ ---@field max_computation_time_ms integer
+ ---@field compute_moves boolean
+ ---@field extend_to_subwords boolean
++---@field line_matcher_strategy integer
++---@field line_matcher_threshold number
++
++local line_matcher_strategies = { similarity = 0, vscode = 1, equal_line_count = 2 }
+ 
+ -- Convert Lua string array to C string array
+ local function lua_to_c_strings(lines)
+@@ -180,19 +196,27 @@ local function range_mapping_to_lua(c_mapping)
+ end
+ 
+ -- Convert C DetailedLineRangeMapping to Lua table
++local function line_mapping_to_lua(c_mapping)
++  return {
++    original = line_range_to_lua(c_mapping.original),
++    modified = line_range_to_lua(c_mapping.modified),
++  }
++end
++
+ local function detailed_mapping_to_lua(c_mapping)
+   local inner_changes = {}
+-
+-  if c_mapping.inner_changes ~= nil then
+-    for i = 0, c_mapping.inner_change_count - 1 do
+-      table.insert(inner_changes, range_mapping_to_lua(c_mapping.inner_changes[i]))
+-    end
++  for i = 0, c_mapping.inner_change_count - 1 do
++    inner_changes[#inner_changes + 1] = range_mapping_to_lua(c_mapping.inner_changes[i])
++  end
++  local line_mappings = {}
++  for i = 0, c_mapping.line_mapping_count - 1 do
++    line_mappings[#line_mappings + 1] = line_mapping_to_lua(c_mapping.line_mappings[i])
+   end
+-
+   return {
+     original = line_range_to_lua(c_mapping.original),
+     modified = line_range_to_lua(c_mapping.modified),
+     inner_changes = inner_changes,
++    line_mappings = line_mappings,
    }
  end
  
---- Main API: Compute diff between two sets of lines
---- Returns Lua table representation of LinesDiff
--function M.compute_diff(original_lines, modified_lines, options)
--  options = options or {}
--
-+local function compute_native_diff(original_lines, modified_lines, options)
-   -- Convert Lua lines to C arrays
-   local c_orig, orig_count = lua_to_c_strings(original_lines)
-   local c_mod, mod_count = lua_to_c_strings(modified_lines)
-@@ -247,7 +266,6 @@ function M.compute_diff(original_lines, modified_lines, options)
+@@ -244,6 +268,10 @@ function M.compute_diff(original_lines, modified_lines, options)
+   c_options.max_computation_time_ms = options.max_computation_time_ms or 5000
+   c_options.compute_moves = options.compute_moves or false
+   c_options.extend_to_subwords = options.extend_to_subwords or false
++  local config = require("codediff.config")
++  local matcher = config.resolve_line_matcher(options.line_matcher or config.options.diff.line_matcher)
++  c_options.line_matcher_strategy = line_matcher_strategies[matcher.strategy]
++  c_options.line_matcher_threshold = matcher.threshold or 0.75
  
    -- Call C function
    local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
--
-   if c_diff == nil then
-     error("compute_diff returned NULL")
-   end
-@@ -257,10 +275,171 @@ function M.compute_diff(original_lines, modified_lines, options)
- 
-   -- Free C memory
-   lib.free_lines_diff(c_diff)
--
-   return lua_diff
- end
- 
-+local function append_change(changes, original_start, original_end, modified_start, modified_end)
-+  local previous = changes[#changes]
-+  if previous and previous.original.end_line >= original_start and previous.modified.end_line >= modified_start then
-+    previous.original.end_line = math.max(previous.original.end_line, original_end)
-+    previous.modified.end_line = math.max(previous.modified.end_line, modified_end)
-+    return
-+  end
-+
-+  changes[#changes + 1] = {
-+    original = { start_line = original_start, end_line = original_end },
-+    modified = { start_line = modified_start, end_line = modified_end },
-+    inner_changes = {},
-+    line_pairs = {},
-+  }
-+end
-+
-+local function append_whitespace_changes(changes, original_lines, modified_lines, starts, count)
-+  for offset = 0, count - 1 do
-+    local original_index = starts.original + offset
-+    local modified_index = starts.modified + offset
-+    if original_lines[original_index] ~= modified_lines[modified_index] then
-+      append_change(changes, original_index, original_index + 1, modified_index, modified_index + 1)
-+    end
-+  end
-+end
-+
-+local function compute_line_changes(original_lines, modified_lines, options)
-+  local c_orig, orig_count = lua_to_c_strings(original_lines)
-+  local c_mod, mod_count = lua_to_c_strings(modified_lines)
-+  local hit_timeout = ffi.new("bool[1]")
-+  local c_diffs = lib.compute_line_alignments(c_orig, orig_count, c_mod, mod_count, options.max_computation_time_ms or 5000, hit_timeout)
-+  if c_diffs == nil then
-+    error("compute_line_alignments returned NULL")
-+  end
-+
-+  local changes = {}
-+  local previous_original = 0
-+  local previous_modified = 0
-+
-+  for index = 0, c_diffs.count - 1 do
-+    local line_diff = c_diffs.diffs[index]
-+    if not options.ignore_trim_whitespace then
-+      append_whitespace_changes(changes, original_lines, modified_lines, {
-+        original = previous_original + 1,
-+        modified = previous_modified + 1,
-+      }, line_diff.seq1_start - previous_original)
-+    end
-+
-+    append_change(changes, line_diff.seq1_start + 1, line_diff.seq1_end + 1, line_diff.seq2_start + 1, line_diff.seq2_end + 1)
-+    previous_original = line_diff.seq1_end
-+    previous_modified = line_diff.seq2_end
-+  end
-+
-+  if not options.ignore_trim_whitespace then
-+    append_whitespace_changes(changes, original_lines, modified_lines, {
-+      original = previous_original + 1,
-+      modified = previous_modified + 1,
-+    }, math.min(orig_count - previous_original, mod_count - previous_modified))
-+  end
-+
-+  lib.free_sequence_diff_array(c_diffs)
-+  return changes, hit_timeout[0]
-+end
-+
-+local function slice_lines(lines, line_range)
-+  local result = {}
-+  for line = line_range.start_line, line_range.end_line - 1 do
-+    result[#result + 1] = lines[line]
-+  end
-+  return result
-+end
-+
-+local function offset_char_range(range, line_offset)
-+  return {
-+    start_line = range.start_line + line_offset,
-+    start_col = range.start_col,
-+    end_line = range.end_line + line_offset,
-+    end_col = range.end_col,
-+  }
-+end
-+
-+local function refine_pair(original_line, modified_line, positions, options)
-+  local pair_diff = compute_native_diff({ original_line }, { modified_line }, {
-+    ignore_trim_whitespace = options.ignore_trim_whitespace,
-+    max_computation_time_ms = options.max_computation_time_ms,
-+    extend_to_subwords = options.extend_to_subwords,
-+    compute_moves = false,
-+  })
-+  local inner_changes = {}
-+
-+  for _, change in ipairs(pair_diff.changes) do
-+    for _, inner in ipairs(change.inner_changes) do
-+      inner_changes[#inner_changes + 1] = {
-+        original = offset_char_range(inner.original, positions.original - 1),
-+        modified = offset_char_range(inner.modified, positions.modified - 1),
-+      }
-+    end
-+  end
-+
-+  return inner_changes, pair_diff.hit_timeout
-+end
-+
-+local function apply_line_matcher(change, original_lines, modified_lines, matcher, options)
-+  local context = {
-+    original_lines = slice_lines(original_lines, change.original),
-+    modified_lines = slice_lines(modified_lines, change.modified),
-+    original_start_line = change.original.start_line,
-+    modified_start_line = change.modified.start_line,
-+  }
-+
-+  if #context.original_lines == 0 or #context.modified_lines == 0 then
-+    return false
-+  end
-+
-+  local hit_timeout = false
-+  local pairs = matcher(context)
-+  for _, pair in ipairs(pairs) do
-+    local positions = {
-+      original = change.original.start_line + pair.original_index - 1,
-+      modified = change.modified.start_line + pair.modified_index - 1,
-+    }
-+    change.line_pairs[#change.line_pairs + 1] = {
-+      original_line = positions.original,
-+      modified_line = positions.modified,
-+    }
-+
-+    local inner_changes, pair_hit_timeout = refine_pair(context.original_lines[pair.original_index], context.modified_lines[pair.modified_index], positions, options)
-+    vim.list_extend(change.inner_changes, inner_changes)
-+    hit_timeout = hit_timeout or pair_hit_timeout
-+  end
-+
-+  return hit_timeout
-+end
-+
-+-- Main API: Compute diff between two sets of lines
-+-- Returns Lua table representation of LinesDiff
-+function M.compute_diff(original_lines, modified_lines, options)
-+  options = options or {}
-+  local changes, hit_timeout = compute_line_changes(original_lines, modified_lines, options)
-+  local matcher = options.line_matcher
-+  if matcher == nil then
-+    matcher = require("codediff.config").options.diff.line_matcher
-+  end
-+
-+  for _, change in ipairs(changes) do
-+    hit_timeout = apply_line_matcher(change, original_lines, modified_lines, matcher, options) or hit_timeout
-+  end
-+
-+  local moves = {}
-+  if options.compute_moves then
-+    local move_diff = compute_native_diff(original_lines, modified_lines, options)
-+    moves = move_diff.moves
-+    hit_timeout = hit_timeout or move_diff.hit_timeout
-+  end
-+
-+  return {
-+    changes = changes,
-+    moves = moves,
-+    hit_timeout = hit_timeout,
-+  }
-+end
-+
- -- Get library version
- function M.get_version()
-   return ffi.string(lib.get_version())
-diff --git a/lua/codediff/line_matchers.lua b/lua/codediff/line_matchers.lua
-new file mode 100644
-index 0000000..20d3659
---- /dev/null
-+++ b/lua/codediff/line_matchers.lua
-@@ -0,0 +1,130 @@
-+local M = {}
-+
-+-- Inspired by CPython difflib.Differ._fancy_replace: https://github.com/python/cpython/blob/1736526023a3e616d1530815880bb3b28e3433c3/Lib/difflib.py#L896-L988
-+local DEFAULT_THRESHOLD = 0.75
-+local SEARCH_WINDOW = 10
-+
-+local function lcs_length(left, right)
-+  local previous = {}
-+  for right_index = 0, #right do
-+    previous[right_index] = 0
-+  end
-+
-+  for left_index = 1, #left do
-+    local current = { [0] = 0 }
-+    local left_char = left:sub(left_index, left_index)
-+    for right_index = 1, #right do
-+      if left_char == right:sub(right_index, right_index) then
-+        current[right_index] = previous[right_index - 1] + 1
-+      else
-+        current[right_index] = math.max(previous[right_index], current[right_index - 1])
-+      end
-+    end
-+    previous = current
-+  end
-+
-+  return previous[#right]
-+end
-+
-+local function similarity_score(left, right)
-+  if left == right then
-+    return 1
-+  end
-+  if #left == 0 or #right == 0 then
-+    return 0
-+  end
-+  return 2 * lcs_length(left, right) / (#left + #right)
-+end
-+
-+local function find_best_pair(context, range, threshold)
-+  local best
-+
-+  for original_index = range.original_start, range.original_end do
-+    local expected_modified = range.modified_start + original_index - range.original_start
-+    local modified_start = math.max(range.modified_start, expected_modified - SEARCH_WINDOW)
-+    local modified_end = math.min(range.modified_end, expected_modified + SEARCH_WINDOW)
-+
-+    for modified_index = modified_start, modified_end do
-+      local score = similarity_score(context.original_lines[original_index], context.modified_lines[modified_index])
-+      if score >= threshold and (not best or score > best.score) then
-+        best = {
-+          original_index = original_index,
-+          modified_index = modified_index,
-+          score = score,
-+        }
-+      end
-+    end
-+  end
-+
-+  return best
-+end
-+
-+local function collect_similar_pairs(context, range, threshold, pairs)
-+  if range.original_start > range.original_end or range.modified_start > range.modified_end then
-+    return
-+  end
-+
-+  local best = find_best_pair(context, range, threshold)
-+  if not best then
-+    return
-+  end
-+
-+  collect_similar_pairs(context, {
-+    original_start = range.original_start,
-+    original_end = best.original_index - 1,
-+    modified_start = range.modified_start,
-+    modified_end = best.modified_index - 1,
-+  }, threshold, pairs)
-+
-+  pairs[#pairs + 1] = {
-+    original_index = best.original_index,
-+    modified_index = best.modified_index,
-+  }
-+
-+  collect_similar_pairs(context, {
-+    original_start = best.original_index + 1,
-+    original_end = range.original_end,
-+    modified_start = best.modified_index + 1,
-+    modified_end = range.modified_end,
-+  }, threshold, pairs)
-+end
-+
-+-- Pair similar original and modified lines in order using an optional similarity threshold.
-+-- Example: left = "local old_name = 1", right = "local new_name = 1" gives 0.83.
-+function M.similarity(context, options)
-+  local threshold = options and options.threshold or DEFAULT_THRESHOLD
-+  local pairs = {}
-+
-+  collect_similar_pairs(context, {
-+    original_start = 1,
-+    original_end = #context.original_lines,
-+    modified_start = 1,
-+    modified_end = #context.modified_lines,
-+  }, threshold, pairs)
-+
-+  return pairs
-+end
-+
-+-- Pair original and modified lines by position only when both sides have equal line counts (GitHub-style).
-+-- Example: left = { "line1", "line2" }, right = { "line3", "line4" } pairs 1:1 and 2:2.
-+-- Example: left = { "line1" }, right = { "line2", "line3" } returns no pairs.
-+function M.equal_line_count(context)
-+  if #context.original_lines ~= #context.modified_lines then
-+    return {}
-+  end
-+
-+  local pairs = {}
-+  for index = 1, #context.original_lines do
-+    pairs[index] = {
-+      original_index = index,
-+      modified_index = index,
-+    }
-+  end
-+  return pairs
-+end
-+
-+function M.none(_context)
-+  return {}
-+end
-+
-+return M
 diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
-index cbede2e..dc5e369 100644
+index 30eab5a..26d32c2 100644
 --- a/lua/codediff/ui/core.lua
 +++ b/lua/codediff/ui/core.lua
-@@ -174,118 +174,48 @@ end
+@@ -166,118 +166,98 @@ end
  -- Step 3: Filler Line Calculation
  -- ============================================================================
  
 -local function calculate_fillers(mapping, original_lines, _modified_lines, last_orig_line, last_mod_line)
-+local function calculate_fillers(mapping)
-   local fillers = {}
+-  local fillers = {}
 -
 -  last_orig_line = last_orig_line or mapping.original.start_line
 -  last_mod_line = last_mod_line or mapping.modified.start_line
--
++local function append_filler_counts(fillers, original_count, modified_count, original_after_line, modified_after_line)
++  if original_count > modified_count then
++    fillers[#fillers + 1] = {
++      buffer = "modified",
++      after_line = modified_after_line,
++      count = original_count - modified_count,
++    }
++  elseif modified_count > original_count then
++    fillers[#fillers + 1] = {
++      buffer = "original",
++      after_line = original_after_line,
++      count = modified_count - original_count,
++    }
++  end
++end
+ 
 -  if not mapping.inner_changes or #mapping.inner_changes == 0 then
 -    local mapping_orig_lines = mapping.original.end_line - mapping.original.start_line
 -    local mapping_mod_lines = mapping.modified.end_line - mapping.modified.start_line
--
++local function append_filler(fillers, original_start, original_end, modified_start, modified_end)
++  append_filler_counts(fillers, original_end - original_start, modified_end - modified_start, original_end - 1, modified_end - 1)
++end
+ 
 -    if mapping_orig_lines > mapping_mod_lines then
 -      local diff = mapping_orig_lines - mapping_mod_lines
 -      table.insert(fillers, {
-+  local original_line = mapping.original.start_line
-+  local modified_line = mapping.modified.start_line
-+
-+  for _, pair in ipairs(mapping.line_pairs) do
-+    local original_count = pair.original_line - original_line
-+    local modified_count = pair.modified_line - modified_line
-+    if original_count > modified_count then
-+      fillers[#fillers + 1] = {
-         buffer = "modified",
+-        buffer = "modified",
 -        after_line = mapping.modified.start_line - 1,
 -        count = diff,
 -      })
 -    elseif mapping_mod_lines > mapping_orig_lines then
 -      local diff = mapping_mod_lines - mapping_orig_lines
 -      table.insert(fillers, {
-+        after_line = pair.modified_line - 1,
-+        count = original_count - modified_count,
-+      }
-+    elseif modified_count > original_count then
-+      fillers[#fillers + 1] = {
-         buffer = "original",
+-        buffer = "original",
 -        after_line = mapping.original.start_line - 1,
 -        count = diff,
 -      })
--    end
++local function mappings_cover_change(mapping)
++  local original_line = mapping.original.start_line
++  local modified_line = mapping.modified.start_line
++  for _, line_mapping in ipairs(mapping.line_mappings) do
++    if line_mapping.original.start_line ~= original_line or line_mapping.modified.start_line ~= modified_line then
++      return false
+     end
 -    return fillers, mapping.original.end_line, mapping.modified.end_line
--  end
--
++    original_line = line_mapping.original.end_line
++    modified_line = line_mapping.modified.end_line
+   end
++  return original_line == mapping.original.end_line and modified_line == mapping.modified.end_line
++end
+ 
 -  local alignments = {}
 -  local first = true
 -
@@ -670,12 +2306,13 @@ index cbede2e..dc5e369 100644
 -      })
 -      last_orig_line = orig_line_exclusive
 -      last_mod_line = mod_line_exclusive
-+        after_line = pair.original_line - 1,
-+        count = modified_count - original_count,
-+      }
-     end
-+    original_line = pair.original_line + 1
-+    modified_line = pair.modified_line + 1
+-    end
++local function append_inner_alignment(fillers, state, original_end, modified_end)
++  if original_end < state.original_line or modified_end < state.modified_line then
++    return
++  end
++  if not state.first and (original_end == state.original_line or modified_end == state.modified_line) then
++    return
    end
  
 -  handle_gap_alignment(mapping.original.start_line, mapping.modified.start_line)
@@ -704,36 +2341,47 @@ index cbede2e..dc5e369 100644
 -        mod_len = mod_range_len,
 -      })
 -    end
--
++  state.first = false
++  append_filler(fillers, state.original_line, original_end, state.modified_line, modified_end)
++  state.original_line = original_end
++  state.modified_line = modified_end
++end
+ 
 -    last_orig_line = orig_line_exclusive
 -    last_mod_line = mod_line_exclusive
-+  local original_count = mapping.original.end_line - original_line
-+  local modified_count = mapping.modified.end_line - modified_line
-+  if original_count > modified_count then
-+    fillers[#fillers + 1] = {
-+      buffer = "modified",
-+      after_line = mapping.modified.end_line - 1,
-+      count = original_count - modified_count,
-+    }
-+  elseif modified_count > original_count then
-+    fillers[#fillers + 1] = {
-+      buffer = "original",
-+      after_line = mapping.original.end_line - 1,
-+      count = modified_count - original_count,
-+    }
++local function calculate_inner_change_fillers(mapping, original_lines)
++  local original_count = mapping.original.end_line - mapping.original.start_line
++  local modified_count = mapping.modified.end_line - mapping.modified.start_line
++  if #mapping.inner_changes == 0 then
++    local fillers = {}
++    append_filler_counts(fillers, original_count, modified_count, mapping.original.start_line - 1, mapping.modified.start_line - 1)
++    return fillers
    end
  
--  for _, inner in ipairs(mapping.inner_changes) do
--    if inner.original.start_col > 1 and inner.modified.start_col > 1 then
++  local fillers = {}
++  local state = {
++    original_line = mapping.original.start_line,
++    modified_line = mapping.modified.start_line,
++    first = true,
++  }
+   for _, inner in ipairs(mapping.inner_changes) do
+     if inner.original.start_col > 1 and inner.modified.start_col > 1 then
 -      emit_alignment(inner.original.start_line, inner.modified.start_line)
--    end
--
++      append_inner_alignment(fillers, state, inner.original.start_line, inner.modified.start_line)
+     end
+ 
 -    local orig_line_len = original_lines[inner.original.end_line] and #original_lines[inner.original.end_line] or 0
 -    if inner.original.end_col <= orig_line_len then
 -      emit_alignment(inner.original.end_line, inner.modified.end_line)
--    end
--  end
--
++    local original_line_length = original_lines[inner.original.end_line] and #original_lines[inner.original.end_line] or 0
++    if inner.original.end_col <= original_line_length then
++      append_inner_alignment(fillers, state, inner.original.end_line, inner.modified.end_line)
+     end
+   end
++  append_inner_alignment(fillers, state, mapping.original.end_line, mapping.modified.end_line)
++  return fillers
++end
+ 
 -  emit_alignment(mapping.original.end_line, mapping.modified.end_line)
 -
 -  for _, align in ipairs(alignments) do
@@ -752,14 +2400,27 @@ index cbede2e..dc5e369 100644
 -        count = -line_diff,
 -      })
 -    end
--  end
--
++local function calculate_fillers(mapping, original_lines)
++  if mappings_cover_change(mapping) then
++    return calculate_inner_change_fillers(mapping, original_lines)
+   end
+ 
 -  return fillers, last_orig_line, last_mod_line
++  local fillers = {}
++  local original_line = mapping.original.start_line
++  local modified_line = mapping.modified.start_line
++  for _, line_mapping in ipairs(mapping.line_mappings) do
++    append_filler(fillers, original_line, line_mapping.original.start_line, modified_line, line_mapping.modified.start_line)
++    append_filler(fillers, line_mapping.original.start_line, line_mapping.original.end_line, line_mapping.modified.start_line, line_mapping.modified.end_line)
++    original_line = line_mapping.original.end_line
++    modified_line = line_mapping.modified.end_line
++  end
++  append_filler(fillers, original_line, mapping.original.end_line, modified_line, mapping.modified.end_line)
 +  return fillers
  end
  
  -- ============================================================================
-@@ -304,9 +234,6 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -296,9 +276,6 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
    local total_left_fillers = 0
    local total_right_fillers = 0
  
@@ -767,9 +2428,9 @@ index cbede2e..dc5e369 100644
 -  local last_mod_line = 1
 -
    for _, mapping in ipairs(lines_diff.changes) do
-     local orig_has_lines = has_lines(mapping.original)
-     local mod_has_lines = has_lines(mapping.modified)
-@@ -331,10 +258,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+     local orig_is_empty = (mapping.original.end_line <= mapping.original.start_line)
+     local mod_is_empty = (mapping.modified.end_line <= mapping.modified.start_line)
+@@ -323,10 +300,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
        end
      end
  
@@ -777,7 +2438,7 @@ index cbede2e..dc5e369 100644
 -
 -    last_orig_line = new_last_orig
 -    last_mod_line = new_last_mod
-+    local fillers = calculate_fillers(mapping)
++    local fillers = calculate_fillers(mapping, original_lines)
  
      for _, filler in ipairs(fillers) do
        if filler.buffer == "original" then
@@ -796,106 +2457,246 @@ index 78ef1cf..51d5ebd 100644
  
      if is_conflict then
        -- Add to conflict blocks for action handling
-diff --git a/tests/core/line_matchers_spec.lua b/tests/core/line_matchers_spec.lua
+diff --git a/tests/core/line_matcher_spec.lua b/tests/core/line_matcher_spec.lua
 new file mode 100644
-index 0000000..682c76f
+index 0000000..b919b77
 --- /dev/null
-+++ b/tests/core/line_matchers_spec.lua
-@@ -0,0 +1,89 @@
++++ b/tests/core/line_matcher_spec.lua
+@@ -0,0 +1,195 @@
++local config = require("codediff.config")
 +local diff = require("codediff.core.diff")
-+local line_matchers = require("codediff.line_matchers")
 +
-+local context = {
-+  original_lines = { "one", "two" },
-+  modified_lines = { "ONE", "TWO" },
-+  original_start_line = 4,
-+  modified_start_line = 7,
-+}
++local compute = function(original, modified, line_matcher, options)
++  return diff.compute_diff(
++    original,
++    modified,
++    vim.tbl_extend("force", options or {}, {
++      line_matcher = line_matcher,
++      max_computation_time_ms = 60000,
++    })
++  )
++end
 +
-+describe("Line matchers", function()
-+  local equal_line_count_cases = {
++describe("Native line matching", function()
++  after_each(function()
++    config.options = vim.deepcopy(config.defaults)
++  end)
++
++  it("defaults to native similarity matching", function()
++    assert.same({ strategy = "similarity", threshold = 0.75 }, config.defaults.diff.line_matcher)
++    local result = compute({ "local old_name = 1" }, { "local new_name = 1" }, nil)
++    assert.equal(1, #result.changes[1].line_mappings)
++  end)
++
++  local invalid_options = {
 +    {
-+      name = "pairs equal line counts by position",
-+      context = context,
-+      expected = {
-+        { original_index = 1, modified_index = 1 },
-+        { original_index = 2, modified_index = 2 },
-+      },
++      name = "rejects a non-table matcher",
++      value = "similarity",
++      pattern = "must be a table",
 +    },
 +    {
-+      name = "does not pair unequal line counts",
-+      context = {
-+        original_lines = { "one" },
-+        modified_lines = { "ONE", "extra" },
-+      },
-+      expected = {},
++      name = "rejects an unknown strategy",
++      value = { strategy = "unknown" },
++      pattern = "must be one of",
++    },
++    {
++      name = "rejects an unknown option",
++      value = { strategy = "similarity", window = 10 },
++      pattern = "unknown diff.line_matcher option",
++    },
++    {
++      name = "rejects a negative threshold",
++      value = { strategy = "similarity", threshold = -0.1 },
++      pattern = "between 0 and 1",
++    },
++    {
++      name = "rejects a threshold above one",
++      value = { strategy = "similarity", threshold = 1.1 },
++      pattern = "between 0 and 1",
++    },
++    {
++      name = "rejects a non-number threshold",
++      value = { strategy = "similarity", threshold = "high" },
++      pattern = "between 0 and 1",
++    },
++    {
++      name = "rejects a vscode threshold",
++      value = { strategy = "vscode", threshold = 0.5 },
++      pattern = "only valid for the similarity strategy",
++    },
++    {
++      name = "rejects an equal-line-count threshold",
++      value = { strategy = "equal_line_count", threshold = 0.5 },
++      pattern = "only valid for the similarity strategy",
 +    },
 +  }
 +
-+  for _, test_case in ipairs(equal_line_count_cases) do
++  for _, test_case in ipairs(invalid_options) do
 +    it(test_case.name, function()
-+      assert.same(test_case.expected, line_matchers.equal_line_count(test_case.context))
++      local success, message = pcall(config.setup, { diff = { line_matcher = test_case.value } })
++      assert.is_false(success)
++      assert.matches(test_case.pattern, message)
 +    end)
 +  end
 +
-+  it("uses a configurable similarity threshold", function()
-+    local similar_context = {
-+      original_lines = { "cat" },
-+      modified_lines = { "cut" },
-+    }
-+
-+    assert.same({}, line_matchers.similarity(similar_context))
-+    assert.same(
-+      { { original_index = 1, modified_index = 1 } },
-+      line_matchers.similarity(similar_context, {
-+        threshold = 0.6,
-+      })
-+    )
++  it("replaces strategy-specific options cleanly", function()
++    config.setup({ diff = { line_matcher = { strategy = "vscode" } } })
++    assert.same({ strategy = "vscode" }, config.options.diff.line_matcher)
 +  end)
 +
-+  it("returns ordered similarity pairs and leaves unrelated lines unpaired", function()
-+    local pairs = line_matchers.similarity({
-+      original_lines = { "local old_name = 1", "removed without match", "print(old_name)" },
-+      modified_lines = { "local new_name = 1", "print(new_name)", "unrelated insertion" },
-+    })
-+
-+    assert.same({
-+      { original_index = 1, modified_index = 1 },
-+      { original_index = 3, modified_index = 2 },
-+    }, pairs)
++  it("validates direct compute options", function()
++    local success, message = pcall(compute, { "old" }, { "new" }, { strategy = "vscode", threshold = 0.5 })
++    assert.is_false(success)
++    assert.matches("only valid for the similarity strategy", message)
 +  end)
 +
-+  it("passes changed block context to a custom matcher", function()
-+    local received_context
-+    local result = diff.compute_diff({ "before", "old value", "deleted" }, { "before", "new value", "inserted" }, {
-+      line_matcher = function(matcher_context)
-+        received_context = matcher_context
-+        return { { original_index = 1, modified_index = 1 } }
-+      end,
-+    })
++  local mapping_cases = {
++    {
++      name = "vscode maps a complete many-to-many block",
++      strategy = { strategy = "vscode" },
++      original = { "old one", "old two" },
++      modified = { "new one", "new two", "new three" },
++      expected = { { 1, 3, 1, 4 } },
++      has_inner_changes = true,
++    },
++    {
++      name = "equal_line_count maps equal blocks positionally",
++      strategy = { strategy = "equal_line_count" },
++      original = { "old one", "old two" },
++      modified = { "new one", "new two" },
++      expected = { { 1, 2, 1, 2 }, { 2, 3, 2, 3 } },
++      has_inner_changes = true,
++    },
++    {
++      name = "equal_line_count leaves unequal blocks unmatched",
++      strategy = { strategy = "equal_line_count" },
++      original = { "old one" },
++      modified = { "new one", "new two" },
++      expected = {},
++      has_inner_changes = false,
++    },
++    {
++      name = "similarity leaves unrelated lines unmatched",
++      strategy = { strategy = "similarity" },
++      original = { "aaaaaaaa" },
++      modified = { "zzzzzzzz" },
++      expected = {},
++      has_inner_changes = false,
++    },
++    {
++      name = "similarity maps ordered lines around an unmatched gap",
++      strategy = { strategy = "similarity" },
++      original = { "local old_name = 1", "removed without match", "print(old_name)" },
++      modified = { "local new_name = 1", "print(new_name)", "unrelated insertion" },
++      expected = { { 1, 2, 1, 2 }, { 3, 4, 2, 3 } },
++      has_inner_changes = true,
++    },
++  }
 +
-+    assert.same({ "old value", "deleted" }, received_context.original_lines)
-+    assert.same({ "new value", "inserted" }, received_context.modified_lines)
-+    assert.equal(2, received_context.original_start_line)
-+    assert.equal(2, received_context.modified_start_line)
-+    assert.same({ { original_line = 2, modified_line = 2 } }, result.changes[1].line_pairs)
-+    assert.is_true(#result.changes[1].inner_changes > 0)
++  for _, test_case in ipairs(mapping_cases) do
++    it(test_case.name, function()
++      local result = compute(test_case.original, test_case.modified, test_case.strategy)
++      local mappings = {}
++      for index, mapping in ipairs(result.changes[1].line_mappings) do
++        mappings[index] = {
++          mapping.original.start_line,
++          mapping.original.end_line,
++          mapping.modified.start_line,
++          mapping.modified.end_line,
++        }
++      end
++      assert.same(test_case.expected, mappings)
++      assert.equal(test_case.has_inner_changes, #result.changes[1].inner_changes > 0)
++    end)
++  end
++
++  it("honors similarity threshold boundaries", function()
++    local rejected = compute({ "cat" }, { "cut" }, { strategy = "similarity" })
++    local accepted = compute({ "cat" }, { "cut" }, { strategy = "similarity", threshold = 2 / 3 })
++    assert.equal(0, #rejected.changes[1].line_mappings)
++    assert.equal(1, #accepted.changes[1].line_mappings)
 +  end)
 +
-+  it("omits character changes when matching is disabled", function()
-+    local result = diff.compute_diff({ "old value" }, { "new value" }, {
-+      line_matcher = line_matchers.none,
-+    })
++  it("preserves original-major tie ordering", function()
++    local result = compute({ "alpha old", "alpha old" }, { "alpha new", "alpha new" }, { strategy = "similarity", threshold = 0.5 })
++    assert.same({ start_line = 1, end_line = 2 }, result.changes[1].line_mappings[1].original)
++    assert.same({ start_line = 1, end_line = 2 }, result.changes[1].line_mappings[1].modified)
++    assert.same({ start_line = 2, end_line = 3 }, result.changes[1].line_mappings[2].original)
++    assert.same({ start_line = 2, end_line = 3 }, result.changes[1].line_mappings[2].modified)
++  end)
 +
-+    assert.same({}, result.changes[1].line_pairs)
-+    assert.same({}, result.changes[1].inner_changes)
++  it("uses byte-based similarity for unicode input", function()
++    local result = compute({ "café" }, { "cafe" }, { strategy = "similarity", threshold = 0.6 })
++    assert.equal(1, #result.changes[1].line_mappings)
++  end)
++
++  it("leaves pure changes unmatched except for vscode", function()
++    local strategies = { "similarity", "equal_line_count" }
++    for _, strategy in ipairs(strategies) do
++      local insertion = compute({ "before", "after" }, { "before", "added", "after" }, { strategy = strategy })
++      local deletion = compute({ "before", "removed", "after" }, { "before", "after" }, { strategy = strategy })
++      assert.equal(0, #insertion.changes[1].line_mappings)
++      assert.equal(0, #deletion.changes[1].line_mappings)
++    end
++
++    local vscode = compute({ "before", "after" }, { "before", "added", "after" }, { strategy = "vscode" })
++    assert.equal(1, #vscode.changes[1].line_mappings)
++  end)
++
++  it("preserves ignored whitespace and subword options", function()
++    local whitespace = compute({ "  value" }, { "    value  " }, { strategy = "similarity" }, { ignore_trim_whitespace = true })
++    assert.equal(0, #whitespace.changes)
++
++    local subword = compute({ "local oldValueName = 1" }, { "local newValueName = 1" }, { strategy = "similarity" }, { extend_to_subwords = true })
++    assert.is_true(#subword.changes[1].inner_changes > 0)
++  end)
++
++  it("handles empty Neovim buffers", function()
++    for _, strategy in ipairs({ "similarity", "vscode", "equal_line_count" }) do
++      local result = compute({ "" }, { "content" }, { strategy = strategy })
++      assert.equal(1, #result.changes)
++    end
 +  end)
 +end)
+diff --git a/tests/ui/core_spec.lua b/tests/ui/core_spec.lua
+index 30f2d43..5847838 100644
+--- a/tests/ui/core_spec.lua
++++ b/tests/ui/core_spec.lua
+@@ -110,6 +110,29 @@ describe("Render Core", function()
+     vim.api.nvim_buf_delete(right_buf, {force = true})
+   end)
+ 
++  it("Aligns multiple VS Code-style line merges independently", function()
++    local left_buf = vim.api.nvim_create_buf(false, true)
++    local right_buf = vim.api.nvim_create_buf(false, true)
++    local original = { "one", "two", "three", "four" }
++    local modified = { "onetwo", "threefour" }
++
++    vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, original)
++    vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, modified)
++
++    local lines_diff = diff.compute_diff(original, modified, { line_matcher = { strategy = "vscode" } })
++    local rendered = core.render_diff(left_buf, right_buf, original, modified, lines_diff)
++    local fillers = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_filler, 0, -1, { details = true })
++
++    assert.equal(2, rendered.right_fillers)
++    assert.equal(2, #fillers)
++    assert.same({ 0, 1 }, { fillers[1][2], fillers[2][2] })
++    assert.equal(1, #fillers[1][4].virt_lines)
++    assert.equal(1, #fillers[2][4].virt_lines)
++
++    vim.api.nvim_buf_delete(left_buf, { force = true })
++    vim.api.nvim_buf_delete(right_buf, { force = true })
++  end)
++
+   -- Test 5: Character-level diff highlights
+   it("Renders character-level differences within modified lines", function()
+     local left_buf = vim.api.nvim_create_buf(false, true)
 diff --git a/tests/ui/inline_spec.lua b/tests/ui/inline_spec.lua
-index ccf8617..81b5bd3 100644
+index 35cfce0..69526ec 100644
 --- a/tests/ui/inline_spec.lua
 +++ b/tests/ui/inline_spec.lua
-@@ -106,7 +106,7 @@ describe("Inline Diff Rendering", function()
+@@ -105,7 +105,7 @@ describe("Inline Diff Rendering", function()
      local buf = vim.api.nvim_create_buf(false, true)
  
      local original = { "hello world" }
@@ -904,7 +2705,7 @@ index ccf8617..81b5bd3 100644
  
      vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
  
-@@ -236,7 +236,7 @@ describe("Inline Diff Rendering", function()
+@@ -235,7 +235,7 @@ describe("Inline Diff Rendering", function()
      local buf = vim.api.nvim_create_buf(false, true)
  
      local original = { "hello world" }
