@@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0\libvscode-diff"
+set "OUTPUT_PATH=%~1"
+if not defined OUTPUT_PATH set "OUTPUT_PATH=..\libvscode_diff.dll"
+set "BUILD_DIR=%~2"
+if not defined BUILD_DIR set "BUILD_DIR=build"
 
 REM Create build directory
-if not exist build mkdir build
-if not exist build\include mkdir build\include
+if not exist "!BUILD_DIR!" mkdir "!BUILD_DIR!"
+if not exist "!BUILD_DIR!\include" mkdir "!BUILD_DIR!\include"
 
 REM Generate version.h from VERSION file
 set /p VERSION=<..\VERSION
-powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content build\include\version.h"
+powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace ('@' + 'PROJECT_VERSION' + '@'), '!VERSION!' | Set-Content '!BUILD_DIR!\include\version.h'"
 
 echo Building vscode_diff (standalone mode)...
 echo Platform: Windows
@@ -73,7 +77,7 @@ if !errorlevel! == 0 (
 ) else (
     echo OpenMP: disabled
 )
-cl.exe /LD /O2 /W3 /std:c11 /DUTF8PROC_STATIC /DBUILDING_DLL !OMP_FLAGS! /Iinclude /Ibuild\include /Ivendor /Fobuild\ /Fdbuild\ /Fe:build\libvscode_diff.dll %SOURCES% /link /DLL /DEF:libvscode_diff.def
+cl.exe /LD /O2 /W3 /std:c11 /DUTF8PROC_STATIC /DBUILDING_DLL !OMP_FLAGS! /Iinclude /I"!BUILD_DIR!\include" /Ivendor /Fo"!BUILD_DIR!\" /Fd"!BUILD_DIR!\" /Fe:"!OUTPUT_PATH!" %SOURCES% /link /DLL /DEF:libvscode_diff.def
 goto :build_done
 
 :build_clang
@@ -90,7 +94,7 @@ if !errorlevel! == 0 (
     echo OpenMP: disabled
 )
 del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
-clang.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -Ibuild\include -Ivendor -o build\libvscode_diff.dll %SOURCES%
+clang.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -I"!BUILD_DIR!\include" -Ivendor -o "!OUTPUT_PATH!" %SOURCES%
 goto :build_done
 
 :build_gcc
@@ -107,7 +111,7 @@ if !errorlevel! == 0 (
     echo OpenMP: disabled
 )
 del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
-gcc.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -Ibuild\include -Ivendor -o build\libvscode_diff.dll %SOURCES%
+gcc.exe -shared -Wall -Wextra -std=c11 -O2 -DUTF8PROC_STATIC !OMP_FLAGS! -Iinclude -I"!BUILD_DIR!\include" -Ivendor -o "!OUTPUT_PATH!" %SOURCES%
 goto :build_done
 
 :build_done
@@ -117,11 +121,7 @@ if !errorlevel! neq 0 (
     exit /b 1
 )
 
-echo Installing to plugin root...
-copy /Y build\libvscode_diff.dll ..\libvscode_diff.dll >nul
-
 echo.
-echo [OK] Build successful: libvscode_diff.dll
-echo     Build artifacts in: libvscode-diff\build\
+echo [OK] Build successful: !OUTPUT_PATH!
 cd ..
 endlocal
