@@ -1,4 +1,4 @@
-From 4cc1281f6b8a66b55ec81b23c54f68b46a619bb9 Mon Sep 17 00:00:00 2001
+From 5756bd68c9ad097eb1b2e3c4d3391d262c5c60f0 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:25:25 +0100
 Subject: [PATCH] Added native line matcher implementation and tests
@@ -9,19 +9,20 @@ Subject: [PATCH] Added native line matcher implementation and tests
  doc/tags                                     |    1 +
  docs/performance.md                          |   19 +-
  libvscode-diff/CMakeLists.txt                |    3 +
- libvscode-diff/default_lines_diff_computer.c | 1122 +++++++-----------
+ libvscode-diff/default_lines_diff_computer.c | 1129 +++++++-----------
  libvscode-diff/include/line_matcher.h        |   14 +
  libvscode-diff/include/types.h               |   16 +
  libvscode-diff/src/line_matcher.c            |  380 ++++++
+ libvscode-diff/tests/test_compute_diff.c     |   52 +
  libvscode-diff/tests/test_line_matcher.c     |  175 +++
  lua/codediff/config.lua                      |   48 +-
  lua/codediff/core/diff.lua                   |   40 +-
  lua/codediff/ui/core.lua                     |  174 ++-
  lua/codediff/ui/merge_alignment.lua          |    4 +-
- tests/core/line_matcher_spec.lua             |  195 +++
+ tests/core/line_matcher_spec.lua             |  215 ++++
  tests/ui/core_spec.lua                       |   23 +
  tests/ui/inline_spec.lua                     |    4 +-
- 17 files changed, 1528 insertions(+), 806 deletions(-)
+ 18 files changed, 1607 insertions(+), 806 deletions(-)
  create mode 100644 libvscode-diff/include/line_matcher.h
  create mode 100644 libvscode-diff/src/line_matcher.c
  create mode 100644 libvscode-diff/tests/test_line_matcher.c
@@ -285,10 +286,10 @@ index f4f1249..dca3653 100644
  add_diff_test(test_dp_algorithm)
  add_diff_test(test_char_boundary_categories)
 diff --git a/libvscode-diff/default_lines_diff_computer.c b/libvscode-diff/default_lines_diff_computer.c
-index 1ebf8b8..11ddaa6 100644
+index 1ebf8b8..5e35e23 100644
 --- a/libvscode-diff/default_lines_diff_computer.c
 +++ b/libvscode-diff/default_lines_diff_computer.c
-@@ -12,311 +12,366 @@
+@@ -12,311 +12,373 @@
  // ============================================================================
  
  #include "default_lines_diff_computer.h"
@@ -779,6 +780,16 @@ index 1ebf8b8..11ddaa6 100644
 +    if (strcmp(original_lines[original_index], modified_lines[modified_index]) ==
 +        0) {
 +      continue;
++    }
++    SequenceDiff block = {
++        .seq1_start = original_index,
++        .seq1_end = original_index + 1,
++        .seq2_start = modified_index,
++        .seq2_end = modified_index + 1,
++    };
++    int change_index;
++    if (!append_change(changes, &block, &change_index)) {
++      return false;
      }
 -    
 -    for (int i = 0; i < equal_lines_count; i++) {
@@ -833,16 +844,13 @@ index 1ebf8b8..11ddaa6 100644
 -                *hit_timeout = true;
 -            }
 -        }
-+    SequenceDiff block = {
-+        .seq1_start = original_index,
-+        .seq1_end = original_index + 1,
-+        .seq2_start = modified_index,
-+        .seq2_end = modified_index + 1,
-+    };
-+    if (!process_block(changes, &block, original_lines, original_count,
-+                       modified_lines, modified_count,
-+                       consider_whitespace_changes, options, timeout,
-+                       hit_timeout)) {
++    if (*hit_timeout || timeout_expired(timeout)) {
++      *hit_timeout = true;
++    } else if (!append_line_mapping(
++                   &changes->mappings[change_index], &block, original_lines,
++                   original_count, modified_lines, modified_count,
++                   consider_whitespace_changes, options, timeout,
++                   hit_timeout)) {
 +      return false;
      }
 +  }
@@ -934,7 +942,7 @@ index 1ebf8b8..11ddaa6 100644
  
  /**
   * Compute diff between two files.
-@@ -338,396 +393,105 @@ static void scan_for_whitespace_changes(
+@@ -338,396 +400,105 @@ static void scan_for_whitespace_changes(
   * - No computeMoves implementation (Neovim UI limitation)
   * - No assertion validation (can be added later if needed)
   */
@@ -1426,7 +1434,7 @@ index 1ebf8b8..11ddaa6 100644
  }
  
  /**
-@@ -735,23 +499,13 @@ LinesDiff* compute_diff(
+@@ -735,23 +506,13 @@ LinesDiff* compute_diff(
   * 
   * @param diff LinesDiff to free (can be NULL)
   */
@@ -1457,7 +1465,7 @@ index 1ebf8b8..11ddaa6 100644
  }
  
  /**
-@@ -759,6 +513,4 @@ void free_lines_diff(LinesDiff* diff) {
+@@ -759,6 +520,4 @@ void free_lines_diff(LinesDiff* diff) {
   * Version is embedded at build time from VERSION file.
   */
  #include "version.h"
@@ -1919,6 +1927,76 @@ index 0000000..57bd063
 +  }
 +  return matches;
 +}
+diff --git a/libvscode-diff/tests/test_compute_diff.c b/libvscode-diff/tests/test_compute_diff.c
+index 0d215c4..cf03fc6 100644
+--- a/libvscode-diff/tests/test_compute_diff.c
++++ b/libvscode-diff/tests/test_compute_diff.c
+@@ -154,6 +154,57 @@ bool test_whitespace_changes() {
+   return true;
+ }
+ 
++bool test_trim_whitespace_refinement() {
++  printf("Running test_trim_whitespace_refinement...\n");
++
++  struct {
++    const char *original;
++    const char *modified;
++  } cases[] = {
++      {"    ", ""},
++      {"  x", "x"},
++      {"x", "  x"},
++      {"x  ", "x"},
++      {"x", "x  "},
++      {"  value  ", "value"},
++  };
++  LineMatcherStrategy strategies[] = {
++      LINE_MATCHER_SIMILARITY,
++      LINE_MATCHER_VSCODE,
++      LINE_MATCHER_EQUAL_LINE_COUNT,
++  };
++
++  int case_count = (int)(sizeof(cases) / sizeof(cases[0]));
++  int strategy_count = (int)(sizeof(strategies) / sizeof(strategies[0]));
++  for (int case_index = 0; case_index < case_count; case_index++) {
++    for (int strategy_index = 0; strategy_index < strategy_count;
++         strategy_index++) {
++      const char *original[] = {"before", cases[case_index].original, "after"};
++      const char *modified[] = {"before", cases[case_index].modified, "after"};
++      DiffOptions options = {
++          .ignore_trim_whitespace = false,
++          .max_computation_time_ms = 0,
++          .compute_moves = false,
++          .extend_to_subwords = false,
++          .line_matcher_strategy = strategies[strategy_index],
++          .line_matcher_threshold = 0.75,
++      };
++      LinesDiff *result = compute_diff(original, 3, modified, 3, &options);
++
++      ASSERT(result != NULL, "Result should not be NULL");
++      ASSERT_EQ(result->changes.count, 1, "Should have 1 whitespace change");
++      ASSERT_EQ(result->changes.mappings[0].line_mapping_count, 1,
++                "Should map trim-equivalent lines");
++      ASSERT(result->changes.mappings[0].inner_change_count > 0,
++             "Should refine trim whitespace characters");
++      free_lines_diff(result);
++    }
++  }
++
++  printf("  ✓ PASSED\n");
++  return true;
++}
++
+ bool test_ignore_whitespace() {
+   printf("Running test_ignore_whitespace...\n");
+ 
+@@ -205,6 +256,7 @@ int main(void) {
+   RUN_TEST(test_simple_change);
+   RUN_TEST(test_multiline_diff);
+   RUN_TEST(test_whitespace_changes);
++  RUN_TEST(test_trim_whitespace_refinement);
+   RUN_TEST(test_ignore_whitespace);
+ 
+   printf("═══════════════════════════════════════════════════════════\n");
 diff --git a/libvscode-diff/tests/test_line_matcher.c b/libvscode-diff/tests/test_line_matcher.c
 new file mode 100644
 index 0000000..f4ced82
@@ -2498,10 +2576,10 @@ index 78ef1cf..51d5ebd 100644
        -- Add to conflict blocks for action handling
 diff --git a/tests/core/line_matcher_spec.lua b/tests/core/line_matcher_spec.lua
 new file mode 100644
-index 0000000..b919b77
+index 0000000..8dded93
 --- /dev/null
 +++ b/tests/core/line_matcher_spec.lua
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,215 @@
 +local config = require("codediff.config")
 +local diff = require("codediff.core.diff")
 +
@@ -2668,6 +2746,26 @@ index 0000000..b919b77
 +    local result = compute({ "café" }, { "cafe" }, { strategy = "similarity", threshold = 0.6 })
 +    assert.equal(1, #result.changes[1].line_mappings)
 +  end)
++
++  local trim_whitespace_cases = {
++    { name = "whitespace-only lines", original = "    ", modified = "" },
++    { name = "leading whitespace removal", original = "  x", modified = "x" },
++    { name = "leading whitespace addition", original = "x", modified = "  x" },
++    { name = "trailing whitespace removal", original = "x  ", modified = "x" },
++    { name = "trailing whitespace addition", original = "x", modified = "x  " },
++    { name = "leading and trailing whitespace", original = "  value  ", modified = "value" },
++  }
++
++  for _, test_case in ipairs(trim_whitespace_cases) do
++    it("refines " .. test_case.name .. " for every matcher", function()
++      for _, strategy in ipairs({ "similarity", "vscode", "equal_line_count" }) do
++        local result = compute({ "before", test_case.original, "after" }, { "before", test_case.modified, "after" }, { strategy = strategy })
++        assert.equal(1, #result.changes)
++        assert.equal(1, #result.changes[1].line_mappings)
++        assert.is_true(#result.changes[1].inner_changes > 0)
++      end
++    end)
++  end
 +
 +  it("leaves pure changes unmatched except for vscode", function()
 +    local strategies = { "similarity", "equal_line_count" }

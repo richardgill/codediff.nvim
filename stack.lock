@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = f83da36f1c238531131c28a8982824aaf5959543
-expectedTree = d25f1ba32ab32bfffcb3df77ef6aa1fff219bb43
+expectedHead = 9c72e2f9599e6bc74d99f3dd6a77d4dbfcbb076a
+expectedTree = 09150962e99988e0508591635fc373590097c005
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -114,7 +114,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 [patch "intraline-line-matching"]
 description = feat: add native line matching strategies
 file = patches/014-intraline-line-matching.patch
-originCommit = d3d3d9aa0183bc468a74cc1127933cdfdf98374c
+originCommit = 3c961f0e4b70aa367965345e03e68dfadbfe6648
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/459
 
 [patch "native-gutter-signs"]

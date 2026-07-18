@@ -1,4 +1,4 @@
-From 259ff8f501f5c4a69f5ccec022e20af6c93f6acf Mon Sep 17 00:00:00 2001
+From cb57dee62f7f71b6949fb30ca8aa5539f4c46036 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 07:25:57 +0100
 Subject: [PATCH] feat(explorer): add optional line change statistics
