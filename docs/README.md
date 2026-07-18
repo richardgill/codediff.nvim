@@ -8,6 +8,7 @@
 ## Building & Contributing
 
 - **[BUILD.md](BUILD.md)** — Build system guide: CMake, Makefile targets, standalone scripts for users without CMake
+- **[BENCHMARKS.md](BENCHMARKS.md)** — Run and compare local performance benchmark suites
 - **[VERSION_MANAGEMENT.md](VERSION_MANAGEMENT.md)** — Semantic versioning workflow and automated version bumping
 - **[dependency-distribution.md](dependency-distribution.md)** — How OpenMP/libgomp is bundled so users don't need system packages
 
