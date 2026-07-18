@@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
     fi
 fi
 
+OUTPUT_PATH="${1:-../libvscode_diff.$LIB_EXT}"
+BUILD_DIR="${2:-build}"
+
 echo "Building vscode_diff (standalone mode)..."
 echo "Compiler: $CC"
 echo "Platform: $PLATFORM"
 
 # Compiler flags
-CFLAGS="-Wall -Wextra -std=c11 -O2 -DNDEBUG -DUTF8PROC_STATIC -D_POSIX_C_SOURCE=199309L -Iinclude -Ibuild/include -Ivendor -fPIC"
-LDFLAGS="-shared"
+CFLAGS=(-Wall -Wextra -std=c11 -O2 -DNDEBUG -DUTF8PROC_STATIC -D_POSIX_C_SOURCE=199309L -Iinclude "-I$BUILD_DIR/include" -Ivendor -fPIC)
+LDFLAGS=(-shared)
 
 # Add -lm for math library on Unix
 if [[ "$PLATFORM" != "Darwin" ]]; then
-    LDFLAGS="$LDFLAGS -lm"
+    LDFLAGS+=(-lm)
 fi
 
 # Detect OpenMP support
@@ -52,18 +55,18 @@ if [[ "$PLATFORM" == "Darwin" ]]; then
         LIBOMP_PREFIX=$(brew --prefix libomp 2>/dev/null || true)
         if [ -n "$LIBOMP_PREFIX" ] && [ -f "$LIBOMP_PREFIX/lib/libomp.dylib" ]; then
             USE_OPENMP=1
-            CFLAGS="$CFLAGS -Xpreprocessor -fopenmp -I$LIBOMP_PREFIX/include -DUSE_OPENMP"
-            LDFLAGS="$LDFLAGS -L$LIBOMP_PREFIX/lib -lomp"
+            CFLAGS+=(-Xpreprocessor -fopenmp "-I$LIBOMP_PREFIX/include" -DUSE_OPENMP)
+            LDFLAGS+=("-L$LIBOMP_PREFIX/lib" -lomp)
             echo "OpenMP: enabled (Homebrew libomp)"
         fi
     fi
 else
     # Linux: Check if compiler supports OpenMP
     echo "int main() { return 0; }" > /tmp/omp_test.c
-    if $CC -fopenmp /tmp/omp_test.c -o /tmp/omp_test 2>/dev/null; then
+    if "$CC" -fopenmp /tmp/omp_test.c -o /tmp/omp_test 2>/dev/null; then
         USE_OPENMP=1
-        CFLAGS="$CFLAGS -fopenmp -DUSE_OPENMP"
-        LDFLAGS="$LDFLAGS -fopenmp"
+        CFLAGS+=(-fopenmp -DUSE_OPENMP)
+        LDFLAGS+=(-fopenmp)
         echo "OpenMP: enabled"
     fi
     rm -f /tmp/omp_test.c /tmp/omp_test
@@ -74,34 +77,33 @@ if [ "$USE_OPENMP" -eq 0 ]; then
 fi
 
 # Source files (including bundled utf8proc)
-SOURCES="\
-default_lines_diff_computer.c \
-src/char_level.c \
-src/line_level.c \
-src/myers.c \
-src/optimize.c \
-src/sequence.c \
-src/range_mapping.c \
-src/string_hash_map.c \
-src/utils.c \
-src/print_utils.c \
-src/utf8_utils.c \
-src/compute_moved_lines.c \
-vendor/utf8proc.c"
+SOURCES=(
+    default_lines_diff_computer.c
+    src/char_level.c
+    src/line_level.c
+    src/line_matcher.c
+    src/myers.c
+    src/optimize.c
+    src/sequence.c
+    src/range_mapping.c
+    src/string_hash_map.c
+    src/utils.c
+    src/print_utils.c
+    src/utf8_utils.c
+    src/compute_moved_lines.c
+    vendor/utf8proc.c
+)
 
 # Build
-mkdir -p build
-mkdir -p build/include
+mkdir -p "$BUILD_DIR/include"
+mkdir -p "$(dirname "$OUTPUT_PATH")"
 
 # Generate version.h
 VERSION=$(cat ../VERSION | tr -d '[:space:]')
-sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > build/include/version.h
+sed 's/@'"PROJECT_VERSION"'@/'"$VERSION"'/g' include/version.h.in > "$BUILD_DIR/include/version.h"
 
 echo "Compiling..."
-$CC $CFLAGS $LDFLAGS -o libvscode_diff.$LIB_EXT $SOURCES
+"$CC" "${CFLAGS[@]}" "${LDFLAGS[@]}" -o "$OUTPUT_PATH" "${SOURCES[@]}"
 
-echo "Installing to plugin root..."
-cp libvscode_diff.$LIB_EXT ../libvscode_diff.$LIB_EXT
-
-echo "✓ Build successful: libvscode_diff.$LIB_EXT"
+echo "✓ Build successful: $OUTPUT_PATH"
 cd ..
