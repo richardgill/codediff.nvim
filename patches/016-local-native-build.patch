@@ -87,7 +87,7 @@ index fb99b03..23fe830 100644
  REM Generate version.h from VERSION file
  set /p VERSION=<..\VERSION
 -powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content build\include\version.h"
-+powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content '!BUILD_DIR!\include\version.h'"
++powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace ('@' + 'PROJECT_VERSION' + '@'), '!VERSION!' | Set-Content '!BUILD_DIR!\include\version.h'"
  
  echo Building vscode_diff (standalone mode)...
  echo Platform: Windows
@@ -235,7 +235,7 @@ index fd09ca3..4e5c4fb 100755
  # Generate version.h
  VERSION=$(cat ../VERSION | tr -d '[:space:]')
 -sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > build/include/version.h
-+sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > "$BUILD_DIR/include/version.h"
++sed 's/@'"PROJECT_VERSION"'@/'"$VERSION"'/g' include/version.h.in > "$BUILD_DIR/include/version.h"
  
  echo "Compiling..."
 -$CC $CFLAGS $LDFLAGS -o libvscode_diff.$LIB_EXT $SOURCES
@@ -269,7 +269,7 @@ index fb99b03..23fe830 100644
  REM Generate version.h from VERSION file
  set /p VERSION=<..\VERSION
 -powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content build\include\version.h"
-+powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace '@''PROJECT_VERSION@', '!VERSION!' | Set-Content '!BUILD_DIR!\include\version.h'"
++powershell -NoLogo -NoProfile -Command "(Get-Content include\version.h.in) -replace ('@' + 'PROJECT_VERSION' + '@'), '!VERSION!' | Set-Content '!BUILD_DIR!\include\version.h'"
  
  echo Building vscode_diff (standalone mode)...
  echo Platform: Windows
@@ -417,7 +417,7 @@ index fd09ca3..4e5c4fb 100644
  # Generate version.h
  VERSION=$(cat ../VERSION | tr -d '[:space:]')
 -sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > build/include/version.h
-+sed "s/@''PROJECT_VERSION@/$VERSION/g" include/version.h.in > "$BUILD_DIR/include/version.h"
++sed 's/@'"PROJECT_VERSION"'@/'"$VERSION"'/g' include/version.h.in > "$BUILD_DIR/include/version.h"
  
  echo "Compiling..."
 -$CC $CFLAGS $LDFLAGS -o libvscode_diff.$LIB_EXT $SOURCES

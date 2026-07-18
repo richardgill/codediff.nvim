@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 9870def78cb5698506022b992164d70376a7e4e8
-expectedTree = 753038027ef36e6afe52b57409c4a7b0d6c23994
+expectedHead = 4748c18b763faa4766eaeb6a605782ce912942a9
+expectedTree = 8e261cb5aef3cd9804751a905ff09030da508f1d
 testCommand = make test
 publishRemote = origin
 publishBranch = main
