@@ -90,6 +90,10 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       disable_inlay_hints = true,         -- Disable inlay hints in diff windows for cleaner view
       max_computation_time_ms = 5000,     -- Maximum time for diff computation (VSCode default)
       ignore_trim_whitespace = false,     -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
+      line_matcher = {
+        strategy = "similarity",          -- "similarity" (default), "vscode", or "equal_line_count"
+        threshold = 0.75,                 -- Similarity-only byte-LCS threshold, from 0 to 1
+      },
       hide_merge_artifacts = false,       -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
       original_position = "left",         -- Position of original (old) content: "left" or "right"
       conflict_ours_position = "right",   -- Position of ours (:2) in conflict view: "left" or "right"
@@ -223,6 +227,55 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 ```
 
 `diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
+
+### Native line matching
+
+CodeDiff provides several line-matching strategies implemented in the native diff engine.
+
+Line matching determines which changed lines in the old and new versions correspond to each other. Paired lines receive character-level refinement, while unmatched lines remain line-level changes.
+
+Three strategies are available:
+
+1. **`similarity` (default)**
+
+   Pairs similar lines while leaving unrelated lines as line-level changes.
+
+   The score is `2 * LCS(left, right) / (#left + #right)`. For example, `local old_name = 1` and `local new_name = 1` score approximately 0.83. With the default threshold of 0.75, these lines are paired. Increasing the threshold requires a closer match; decreasing it allows less similar lines to be paired.
+
+   ```lua
+   diff = {
+     line_matcher = {
+       strategy = "similarity",
+       threshold = 0.75,
+     },
+   }
+   ```
+
+2. **`vscode`**
+
+   Refines each complete changed block. Use this to preserve CodeDiff's previous behavior, including split and merged lines.
+
+   ```lua
+   diff = {
+     line_matcher = {
+       strategy = "vscode",
+     },
+   }
+   ```
+
+3. **`equal_line_count`**
+
+   Uses GitHub-style line matching: lines are paired by position only when both sides of a changed block contain the same number of lines. Blocks with unequal counts remain line-level changes.
+
+   ```lua
+   diff = {
+     line_matcher = {
+       strategy = "equal_line_count",
+     },
+   }
+   ```
+
+Custom Lua matcher callbacks are not supported.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 
