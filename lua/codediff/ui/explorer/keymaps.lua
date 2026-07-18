@@ -2,9 +2,52 @@
 local config = require("codediff.config")
 local actions_module = require("codediff.ui.explorer.actions")
 local refresh_module = require("codediff.ui.explorer.refresh")
+local nodes_module = require("codediff.ui.explorer.nodes")
 local tree_utils = require("codediff.ui.lib.tree_utils")
 
 local M = {}
+
+local function is_explorer_alive(explorer)
+  if not explorer or not explorer.bufnr or not vim.api.nvim_buf_is_valid(explorer.bufnr) then
+    return false
+  end
+  return not explorer.tabpage or vim.api.nvim_tabpage_is_valid(explorer.tabpage)
+end
+
+local function custom_keymap_context(explorer, node)
+  return {
+    entry = nodes_module.get_entry(node),
+    redraw = function()
+      if is_explorer_alive(explorer) then
+        explorer.tree:render()
+      end
+    end,
+    refresh = function()
+      if is_explorer_alive(explorer) then
+        refresh_module.refresh(explorer)
+      end
+    end,
+  }
+end
+
+local function setup_custom_keymaps(explorer, custom_keymaps, map_options)
+  for _, keymap in ipairs(custom_keymaps or {}) do
+    vim.keymap.set(
+      "n",
+      keymap.key,
+      function()
+        local node = explorer.tree:get_node()
+        if node then
+          keymap.callback(custom_keymap_context(explorer, node))
+        end
+      end,
+      vim.tbl_extend("force", map_options, {
+        buffer = explorer.bufnr,
+        desc = keymap.desc,
+      })
+    )
+  end
+end
 
 -- Setup keymaps for explorer panel
 -- @param explorer: explorer object with tree, split, git_root, on_file_select, etc.
@@ -178,6 +221,8 @@ function M.setup(explorer)
     keymaps = explorer_keymaps,
     bufnr = split.bufnr,
   })
+
+  setup_custom_keymaps(explorer, explorer_keymaps.custom, map_options)
 
   -- Note: next_file/prev_file keymaps are set via view/keymaps.lua:setup_all_keymaps()
   -- which uses set_tab_keymap to set them on all buffers including explorer
