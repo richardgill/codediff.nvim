@@ -1,9 +1,27 @@
 -- Test: render/core.lua - Core diff rendering logic
 -- Critical tests for the heart of diff visualization
 
+local config = require("codediff.config")
 local core = require("codediff.ui.core")
 local highlights = require("codediff.ui.highlights")
 local diff = require('codediff.core.diff')
+
+local function assert_ranged_line_highlight(bufnr, expected)
+  local marks = vim.api.nvim_buf_get_extmarks(bufnr, highlights.ns_highlight, 0, -1, { details = true })
+  local line_marks = {}
+  for _, mark in ipairs(marks) do
+    if mark[4].hl_eol then
+      table.insert(line_marks, mark)
+    end
+  end
+
+  assert.equal(1, #line_marks)
+  assert.equal(expected.start_row, line_marks[1][2])
+  assert.equal(expected.end_row, line_marks[1][4].end_row)
+  assert.equal(expected.hl_group, line_marks[1][4].hl_group)
+  assert.is_true(line_marks[1][4].hl_eol)
+  assert.equal(config.options.diff.highlight_priority, line_marks[1][4].priority)
+end
 
 describe("Render Core", function()
   before_each(function()
@@ -170,8 +188,11 @@ describe("Render Core", function()
     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
 
     -- Right should have highlights for added lines
-    local right_marks = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_highlight, 0, -1, {})
-    assert.is_true(#right_marks >= 3, "Should have highlights for 3 added lines")
+    assert_ranged_line_highlight(right_buf, {
+      start_row = 1,
+      end_row = 4,
+      hl_group = "CodeDiffLineInsert",
+    })
 
     -- Left should have fillers
     local left_fillers = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_filler, 0, -1, {})
@@ -196,8 +217,11 @@ describe("Render Core", function()
     core.render_diff(left_buf, right_buf, original, modified, lines_diff)
 
     -- Left should have highlights for deleted lines
-    local left_marks = vim.api.nvim_buf_get_extmarks(left_buf, highlights.ns_highlight, 0, -1, {})
-    assert.is_true(#left_marks >= 3, "Should have highlights for 3 deleted lines")
+    assert_ranged_line_highlight(left_buf, {
+      start_row = 1,
+      end_row = 4,
+      hl_group = "CodeDiffLineDelete",
+    })
 
     -- Right should have fillers
     local right_fillers = vim.api.nvim_buf_get_extmarks(right_buf, highlights.ns_filler, 0, -1, {})
