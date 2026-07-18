@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LOCK_PATH = ROOT / "stack.lock"
 BUILD_REF = "refs/fork-stack/build"
+RUNTIME_DIR = ROOT.parent / "runtime"
 UPDATE_DIR = ROOT.parent / "fork-stack-update"
 STATE_PATH = Path(
     subprocess.run(
@@ -106,6 +107,11 @@ def remove_worktree(path):
 def run_checks(worktree, command):
     if command:
         subprocess.run(shlex.split(command), cwd=worktree, check=True)
+
+
+def sync_runtime(head):
+    if RUNTIME_DIR.exists():
+        git(["checkout", "--quiet", "--force", "--detach", head], cwd=RUNTIME_DIR)
 
 
 def pull_requests(config, names):
@@ -231,6 +237,8 @@ def rebuild(run_tests=True, verify=True):
         if verify and tree != stack["expectedTree"]:
             raise RuntimeError(f"Expected tree {stack['expectedTree']}, built {tree}")
         git(["update-ref", BUILD_REF, head])
+        if verify:
+            sync_runtime(head)
         print(f"HEAD {head}")
         print(f"tree {tree}")
         return head, tree
