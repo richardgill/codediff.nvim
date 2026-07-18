@@ -13,6 +13,7 @@ local harness = dofile("benchmarks/harness.lua")
 local fixture
 local base_tabpage
 local original_cwd = vim.fn.getcwd()
+local RAPID_NAVIGATION_COUNT = 15
 
 local git = function(arguments)
   local command = { "git", "-C", fixture.dir }
@@ -66,13 +67,16 @@ local reset_to_base_tab = function()
   vim.fn.chdir(fixture.dir)
 end
 
-local get_ready_view = function(tabpage, previous_path)
+local get_ready_view = function(tabpage, previous_path, expected_path)
   local explorer = lifecycle.get_explorer(tabpage)
   local session = lifecycle.get_session(tabpage)
   if not explorer or not session or not session.stored_diff_result then
     return nil
   end
   if previous_path and explorer.current_file_path == previous_path then
+    return nil
+  end
+  if expected_path and explorer.current_file_path ~= expected_path then
     return nil
   end
   if not explorer.current_file_path or not session.modified_path then
@@ -94,11 +98,11 @@ local get_ready_view = function(tabpage, previous_path)
   }
 end
 
-local wait_for_view = function(tabpage, previous_path)
+local wait_for_view = function(tabpage, previous_path, expected_path)
   local view
   local ready = vim.wait(8000, function()
     if tabpage then
-      view = get_ready_view(tabpage, previous_path)
+      view = get_ready_view(tabpage, previous_path, expected_path)
       return view ~= nil
     end
     for _, candidate in ipairs(vim.api.nvim_list_tabpages()) do
@@ -175,6 +179,32 @@ local run_next_file = function(context)
   return wait_for_view(context.tabpage, context.previous_path)
 end
 
+local setup_rapid_next_files = function()
+  local view = current_view()
+  focus_modified(view)
+  local current_index = tonumber(view.explorer.current_file_path:match("file%-(%d+)%.txt"))
+  assert(current_index, "unexpected benchmark fixture path")
+  local expected_index = (current_index - 1 + RAPID_NAVIGATION_COUNT) % fixture.file_count + 1
+  return {
+    action = get_action(view.session.modified_bufnr, "]f"),
+    tabpage = view.tabpage,
+    expected_path = string.format("file-%02d.txt", expected_index),
+  }
+end
+
+local run_rapid_next_files = function(context)
+  for _ = 1, RAPID_NAVIGATION_COUNT do
+    context.action()
+  end
+  return wait_for_view(context.tabpage, nil, context.expected_path)
+end
+
+local validate_rapid_next_files = function(result, context)
+  validate_rendered_view(result)
+  assert(result.view.explorer.current_file_path == context.expected_path, "rapid navigation selected the wrong file")
+  assert(result.view.session.modified_path:find(context.expected_path, 1, true), "rapid navigation rendered the wrong file")
+end
+
 local setup_gf = function()
   local view = current_view()
   local base_window = vim.api.nvim_tabpage_get_win(base_tabpage)
@@ -238,6 +268,12 @@ local cases = {
     setup = setup_next_file,
     run = run_next_file,
     validate = validate_rendered_view,
+  },
+  {
+    name = "rapid-next-files-to-render",
+    setup = setup_rapid_next_files,
+    run = run_rapid_next_files,
+    validate = validate_rapid_next_files,
   },
   {
     name = "gf-to-buffer",
