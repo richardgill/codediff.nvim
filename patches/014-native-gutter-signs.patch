@@ -1,4 +1,4 @@
-From 2efe08ee5347256dc7913a2ad74457473486ffd5 Mon Sep 17 00:00:00 2001
+From 93d933741202de10dd258391ba54ab605ce718e8 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 20:18:52 +0100
 Subject: [PATCH] Added native gutter signs support
@@ -6,7 +6,7 @@ Subject: [PATCH] Added native gutter signs support
 ---
  README.md                               |  41 ++++
  doc/codediff.txt                        |  54 +++++
- doc/tags                                |   1 +
+ doc/tags                                |   3 +-
  docs/native-gutter-signs-blocker.md     |   9 +
  lua/codediff/config.lua                 |   1 +
  lua/codediff/ui/core.lua                |   5 +
@@ -22,13 +22,13 @@ Subject: [PATCH] Added native gutter signs support
  tests/ui/highlights_spec.lua            |  26 +++
  tests/ui/view/move_rendering_spec.lua   | 110 ++--------
  tests/ui/welcome_spec.lua               |   8 +-
- 18 files changed, 629 insertions(+), 122 deletions(-)
+ 18 files changed, 630 insertions(+), 123 deletions(-)
  create mode 100644 docs/native-gutter-signs-blocker.md
  create mode 100644 lua/codediff/ui/gutter_signs.lua
  create mode 100644 tests/ui/gutter_signs_spec.lua
 
 diff --git a/README.md b/README.md
-index edda6af..96779c1 100644
+index 2cf3e8d..b93cf38 100644
 --- a/README.md
 +++ b/README.md
 @@ -108,6 +108,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -39,7 +39,7 @@ index edda6af..96779c1 100644
        compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
        compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
        compact_sync_folds = true,          -- Sync fold open/close across panes (mirrors Vim diff mode behavior)
-@@ -311,6 +312,39 @@ require("codediff").setup({
+@@ -420,6 +421,39 @@ Matchers run synchronously during rendering and automatic refreshes. Custom call
  
  The C library will be downloaded automatically on first use. No `build` step needed!
  
@@ -79,7 +79,7 @@ index edda6af..96779c1 100644
  ### Managing Library Installation
  
  The plugin automatically manages the C library installation:
-@@ -705,6 +739,13 @@ The plugin defines these diff highlight groups:
+@@ -814,6 +848,13 @@ The plugin defines these diff highlight groups:
  - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
  - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
  
@@ -94,10 +94,10 @@ index edda6af..96779c1 100644
  <summary><b>📸 Visual Examples</b> (click to collapse)</summary>
  
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 373259e..15d3d98 100644
+index 3db2048..9535989 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
-@@ -217,6 +217,7 @@ Setup entry point:
+@@ -263,6 +263,7 @@ Setup entry point:
        jump_to_first_change = true,
        highlight_added_deleted_files = true,
        highlight_priority = 100,
@@ -105,9 +105,9 @@ index 373259e..15d3d98 100644
        compute_moves = false,
        compact_context_lines = 3,
        compact_sync_folds = true,
-@@ -413,6 +414,51 @@ A formatter can replace only the line type it needs:
-   })
- <
+@@ -496,6 +497,51 @@ are installed after built-in mappings, so the same key replaces the built-in
+ mapping.
+ 
  
 +==============================================================================
 +NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
@@ -157,7 +157,7 @@ index 373259e..15d3d98 100644
  ==============================================================================
  HIGHLIGHT GROUPS                                     *codediff-highlight-groups*
  
-@@ -432,6 +478,14 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
+@@ -515,6 +561,14 @@ CodeDiff defines highlight groups matching VSCode's diff colors:
  - CodeDiffHelpSep - separators in keymap help (links to NonText)
  - CodeDiffHelpDesc - descriptions in keymap help (links to Normal)
  
@@ -173,13 +173,17 @@ index 373259e..15d3d98 100644
  - Uses DiffAdd, DiffChange, and DiffDelete for line-level highlights
  - Added and untracked files use line_insert across the full file
 diff --git a/doc/tags b/doc/tags
-index 5ee5d4c..5b7dbf7 100644
+index cadc6be..0878792 100644
 --- a/doc/tags
 +++ b/doc/tags
-@@ -6,6 +6,7 @@ codediff-commands	codediff.txt	/*codediff-commands*
+@@ -5,9 +5,10 @@ codediff	codediff.txt	/*codediff*
+ codediff-commands	codediff.txt	/*codediff-commands*
  codediff-configuration	codediff.txt	/*codediff-configuration*
  codediff-events	codediff.txt	/*codediff-events*
- codediff-filler-text	codediff.txt	/*codediff-filler-text*
+-codediff-filler-text	codediff.txt	/*codediff-filler-text*
+ codediff-explorer-custom-keymaps	codediff.txt	/*codediff-explorer-custom-keymaps*
+ codediff-explorer-line-formatters	codediff.txt	/*codediff-explorer-line-formatters*
++codediff-filler-text	codediff.txt	/*codediff-filler-text*
 +codediff-gutter-signs	codediff.txt	/*codediff-gutter-signs*
  codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
  codediff-history	codediff.txt	/*codediff-history*
@@ -200,10 +204,10 @@ index 0000000..dec3e5b
 +
 +Neovim 0.11 introduced the experimental `nvim__ns_set()` API, which can scope persistent extmark namespaces to windows. CodeDiff does not depend on that private-style API; window-local signs can be reconsidered when Neovim exposes a stable supported mechanism.
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 32f7150..2286d9c 100644
+index 3c48446..f4d1cb0 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
-@@ -53,6 +53,7 @@ M.defaults = {
+@@ -56,6 +56,7 @@ M.defaults = {
      jump_to_first_change = true, -- Auto-scroll to first change when opening a diff: true = jump to first hunk, false = stay at same line
      highlight_added_deleted_files = true, -- Tint the full contents of added, untracked, and deleted files
      highlight_priority = 100, -- Priority for line-level diff highlights (increase to override LSP highlights)
@@ -212,7 +216,7 @@ index 32f7150..2286d9c 100644
      compact_context_lines = 3, -- Number of context lines around hunks in compact mode
      compact_sync_folds = true, -- Sync fold open/close across panes in compact mode (mirrors Vim diff mode behavior)
 diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
-index 4b4f80c..0dcc38e 100644
+index aa4c113..5214bcb 100644
 --- a/lua/codediff/ui/core.lua
 +++ b/lua/codediff/ui/core.lua
 @@ -5,6 +5,7 @@ local config = require("codediff.config")
@@ -223,7 +227,7 @@ index 4b4f80c..0dcc38e 100644
  
  -- Namespace references
  local ns_highlight = highlights.ns_highlight
-@@ -205,6 +206,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -152,6 +153,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
    vim.api.nvim_buf_clear_namespace(right_bufnr, ns_highlight, 0, -1)
    vim.api.nvim_buf_clear_namespace(left_bufnr, ns_filler, 0, -1)
    vim.api.nvim_buf_clear_namespace(right_bufnr, ns_filler, 0, -1)
@@ -231,7 +235,7 @@ index 4b4f80c..0dcc38e 100644
  
    local total_left_fillers = 0
    local total_right_fillers = 0
-@@ -334,6 +336,7 @@ function M.render_single_buffer(bufnr, diff, side, counterpart_lines)
+@@ -277,6 +279,7 @@ function M.render_single_buffer(bufnr, diff, side, counterpart_lines)
    -- Clear existing highlights
    vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
    vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
@@ -239,7 +243,7 @@ index 4b4f80c..0dcc38e 100644
  
    -- Get buffer lines for character highlight calculations
    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-@@ -401,6 +404,8 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+@@ -345,6 +348,8 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
    vim.api.nvim_buf_clear_namespace(right_bufnr, ns_highlight, 0, -1)
    vim.api.nvim_buf_clear_namespace(right_bufnr, ns_filler, 0, -1)
    vim.api.nvim_buf_clear_namespace(right_bufnr, ns_conflict, 0, -1)
@@ -422,7 +426,7 @@ index a9e875b..9475ee1 100644
    local move_fallback = diff_change_bg or 0x4f5258
    local line_move_color = resolve_color(opts.line_move, move_fallback, base256_color(0, 0, 2))
 diff --git a/lua/codediff/ui/inline.lua b/lua/codediff/ui/inline.lua
-index 5b2bbbb..d19e8b0 100644
+index a978718..8c4de14 100644
 --- a/lua/codediff/ui/inline.lua
 +++ b/lua/codediff/ui/inline.lua
 @@ -5,6 +5,7 @@ local M = {}
@@ -433,7 +437,7 @@ index 5b2bbbb..d19e8b0 100644
  
  -- Dedicated namespace for inline diff (separate from side-by-side namespaces)
  M.ns_inline = vim.api.nvim_create_namespace("codediff-inline")
-@@ -263,6 +264,7 @@ end
+@@ -271,6 +272,7 @@ end
  function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines, opts)
    -- Clear previous inline decorations
    vim.api.nvim_buf_clear_namespace(bufnr, M.ns_inline, 0, -1)
@@ -441,7 +445,7 @@ index 5b2bbbb..d19e8b0 100644
    -- Clear merged highlight cache on re-render (colorscheme may have changed)
    merged_hl_cache = {}
  
-@@ -353,6 +355,7 @@ end
+@@ -371,6 +373,7 @@ end
  function M.clear(bufnr)
    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
      vim.api.nvim_buf_clear_namespace(bufnr, M.ns_inline, 0, -1)

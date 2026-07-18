@@ -1,11 +1,12 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 01e15f0d46552cfdc908f5054d94b1ce8410f32c
-expectedTree = c9149575f3a4044c22fb7e7b900c6ff8dfd546ca
+expectedHead = 3ac2074cb9ca9d3bc5cdf61a67815d2402642ecb
+expectedTree = c75fcc77c7b3a721d927ac18b52bf3dbc5118a17
 testCommand = make test
-publishRemote = upstream
+publishRemote = origin
 publishBranch = main
 repository = richardgill/codediff.nvim
+noticePatch = fork-notice
 patches =
     explorer-gf
     zero-hunk-navigation
@@ -17,6 +18,7 @@ patches =
     configurable-fillers
     highlight-attributes
     explorer-line-statistics
+    intraline-line-matching
     pure-line-char-highlights
     native-gutter-signs
     fork-notice
@@ -68,8 +70,13 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/447
 
 [patch "explorer-line-statistics"]
 file = patches/011-explorer-line-statistics.patch
-originCommit = 15f8a5de2192ec1bfbb6a39cbc440f1c462d4d82
+originCommit = 1c53d1d58fa3bd701859babb03a4680e495cc0ce
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
+
+[patch "intraline-line-matching"]
+file = patches/015-intraline-line-matching.patch
+originCommit = 40841009068cbae524e37a1dd0a2f1950d35af25
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/452
 
 [patch "pure-line-char-highlights"]
 file = patches/012-pure-line-char-highlights.patch

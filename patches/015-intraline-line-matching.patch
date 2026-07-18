@@ -1,0 +1,914 @@
+From 7d293f9478b25dfb44ab9a7b398d60fc5a706112 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Sat, 18 Jul 2026 07:49:52 +0100
+Subject: [PATCH] feat: add configurable line pairing for intraline highlights
+
+---
+ README.md                           |  85 ++++++++++++
+ doc/codediff.txt                    |  46 +++++++
+ doc/tags                            |   1 +
+ libvscode-diff/libvscode_diff.def   |  12 +-
+ lua/codediff/config.lua             |   3 +
+ lua/codediff/core/diff.lua          | 193 +++++++++++++++++++++++++++-
+ lua/codediff/line_matchers.lua      | 130 +++++++++++++++++++
+ lua/codediff/ui/core.lua            | 146 +++++----------------
+ lua/codediff/ui/merge_alignment.lua |   4 +-
+ tests/core/line_matchers_spec.lua   |  89 +++++++++++++
+ tests/ui/inline_spec.lua            |   4 +-
+ 11 files changed, 585 insertions(+), 128 deletions(-)
+ create mode 100644 lua/codediff/line_matchers.lua
+ create mode 100644 tests/core/line_matchers_spec.lua
+
+diff --git a/README.md b/README.md
+index 9bc5452..dc1672c 100644
+--- a/README.md
++++ b/README.md
+@@ -327,6 +327,91 @@ require("codediff").setup({
+ ```
+ 
+ `redraw()` only reruns the configured formatters against the existing tree. It does not replace nodes or change selection or fold state, and runs no Git commands. `refresh()` performs the normal asynchronous Git refresh and rebuilds the explorer. Both safely become no-ops after the explorer closes. Custom mappings are installed after built-in mappings, so the same key replaces the built-in mapping.
++### Intraline line matching
++
++CodeDiff uses a callback to pair original and modified lines within each changed block. Paired lines use `CodeDiffLineDelete`/`CodeDiffLineInsert`, with changed text additionally using `CodeDiffCharDelete`/`CodeDiffCharInsert`. Unpaired lines use only `CodeDiffLineDelete` or `CodeDiffLineInsert`. Similarity matching with a `0.75` threshold is the default:
++
++```lua
++local line_matchers = require("codediff.line_matchers")
++
++require("codediff").setup({
++  diff = {
++    line_matcher = line_matchers.similarity,
++  },
++})
++```
++
++Wrap the default matcher to choose a threshold from `0.0` to `1.0`; lower values pair more lines:
++
++```lua
++require("codediff").setup({
++  diff = {
++    line_matcher = function(context)
++      return line_matchers.similarity(context, {
++        threshold = 0.6,
++      })
++    end,
++  },
++})
++```
++
++For GitHub-style matching, pair lines by position only when both sides of a changed block have the same line count:
++
++```lua
++require("codediff").setup({
++  diff = {
++    line_matcher = line_matchers.equal_line_count,
++  },
++})
++```
++
++To disable character-level matching while retaining line-level highlights:
++
++```lua
++require("codediff").setup({
++  diff = {
++    line_matcher = line_matchers.none,
++  },
++})
++```
++
++Custom callbacks receive one changed block and return ordered, non-crossing pairs of 1-based indices:
++
++```lua
++---@class CodeDiffLineMatcherContext
++---@field original_lines string[]
++---@field modified_lines string[]
++---@field original_start_line integer
++---@field modified_start_line integer
++
++---@class CodeDiffLinePair
++---@field original_index integer
++---@field modified_index integer
++
++---@alias CodeDiffLineMatcher fun(context: CodeDiffLineMatcherContext): CodeDiffLinePair[]
++```
++
++For example:
++
++```lua
++local function match_by_position(context)
++  local pair_count = math.min(#context.original_lines, #context.modified_lines)
++  local pairs = {}
++
++  for index = 1, pair_count do
++    pairs[index] = {
++      original_index = index,
++      modified_index = index,
++    }
++  end
++
++  return pairs
++end
++```
++
++Each line may appear in at most one pair. Omitted lines remain unpaired. Paired lines retain `CodeDiffLineInsert` or `CodeDiffLineDelete` and receive `CodeDiffCharInsert` or `CodeDiffCharDelete` over changed characters. Unpaired lines receive only their line-level highlight. Pure insertions and deletions do not invoke the matcher.
++
++Matchers run synchronously during rendering and automatic refreshes. Custom callbacks should avoid I/O and return quickly. `diff.max_computation_time_ms` cannot interrupt custom Lua code.
+ 
+ The C library will be downloaded automatically on first use. No `build` step needed!
+ 
+diff --git a/doc/codediff.txt b/doc/codediff.txt
+index 8eaabfa..3db2048 100644
+--- a/doc/codediff.txt
++++ b/doc/codediff.txt
+@@ -149,6 +149,51 @@ the alignment rows blank:
+ 
+ Non-empty patterns use the CodeDiffFiller highlight group. Inline deleted
+ lines and move annotations are not filler rows and are unaffected.
++                                              *codediff-line-matching*
++Intraline line matching~
++
++CodeDiff uses a callback to pair original and modified lines within each
++changed block. Paired lines use CodeDiffLineDelete/CodeDiffLineInsert, with
++changed text additionally using CodeDiffCharDelete/CodeDiffCharInsert.
++Unpaired lines use only CodeDiffLineDelete or CodeDiffLineInsert. Similarity
++matching with a 0.75 threshold is the default:
++>lua
++  local line_matchers = require("codediff.line_matchers")
++
++  require("codediff").setup({
++    diff = { line_matcher = line_matchers.similarity },
++  })
++<
++
++Wrap the default matcher to change its threshold:
++>lua
++  require("codediff").setup({
++    diff = {
++      line_matcher = function(context)
++        return line_matchers.similarity(context, { threshold = 0.6 })
++      end,
++    },
++  })
++<
++
++Other built-ins:
++>lua
++  line_matchers.equal_line_count  -- GitHub-style: pair positionally only for equal counts
++  line_matchers.none              -- Disable character-level matching
++<
++
++A custom matcher receives `original_lines`, `modified_lines`,
++`original_start_line`, and `modified_start_line`. It returns ordered pairs:
++>lua
++  return {
++    { original_index = 1, modified_index = 1 },
++    { original_index = 3, modified_index = 2 },
++  }
++<
++
++Indices are 1-based within the callback's line arrays. Paired lines receive
++line-level and changed-character highlights. Unpaired lines receive only
++line-level highlights.
+ 
+                                                       *codediff-moved-code*
+ Moved code detection~
+@@ -210,6 +255,7 @@ Setup entry point:
+       filler_text = "╱",
+       disable_inlay_hints = true,
+       max_computation_time_ms = 5000,
++      line_matcher = require("codediff.line_matchers").similarity,
+       hide_merge_artifacts = false,
+       conflict_result_position = "bottom",
+       conflict_result_height = 30,
+diff --git a/doc/tags b/doc/tags
+index 54349e1..cadc6be 100644
+--- a/doc/tags
++++ b/doc/tags
+@@ -12,6 +12,7 @@ codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
+ codediff-history	codediff.txt	/*codediff-history*
+ codediff-history-line-range	codediff.txt	/*codediff-history-line-range*
+ codediff-layout	codediff.txt	/*codediff-layout*
++codediff-line-matching	codediff.txt	/*codediff-line-matching*
+ codediff-lua-api	codediff.txt	/*codediff-lua-api*
+ codediff-moved-code	codediff.txt	/*codediff-moved-code*
+ codediff-quickstart	codediff.txt	/*codediff-quickstart*
+diff --git a/libvscode-diff/libvscode_diff.def b/libvscode-diff/libvscode_diff.def
+index b253cee..c7e11f8 100644
+--- a/libvscode-diff/libvscode_diff.def
++++ b/libvscode-diff/libvscode_diff.def
+@@ -1,5 +1,7 @@
+-LIBRARY vscode_diff
+-EXPORTS
+-    compute_diff
+-    free_lines_diff
+-    get_version
++LIBRARY vscode_diff
++EXPORTS
++    compute_diff
++    compute_line_alignments
++    free_lines_diff
++    free_sequence_diff_array
++    get_version
+diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
+index 741fda7..212e32c 100644
+--- a/lua/codediff/config.lua
++++ b/lua/codediff/config.lua
+@@ -2,6 +2,8 @@
+ local M = {}
+ local explorer_formatters = require("codediff.ui.explorer.formatters")
+ 
++local line_matchers = require("codediff.line_matchers")
++
+ M.defaults = {
+   -- Highlight configuration
+   highlights = {
+@@ -36,6 +38,7 @@ M.defaults = {
+     disable_inlay_hints = true, -- Disable inlay hints in diff windows for cleaner view
+     max_computation_time_ms = 5000, -- Maximum time for diff computation (5 seconds, VSCode default)
+     ignore_trim_whitespace = false, -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
++    line_matcher = line_matchers.similarity, -- Pair similar changed lines for character-level highlights
+     hide_merge_artifacts = false, -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
+     original_position = "left", -- Position of original (old) content: "left" or "right"
+     conflict_ours_position = "right", -- Position of ours (:2) in conflict view: "left" or "right" (independent of original_position)
+diff --git a/lua/codediff/core/diff.lua b/lua/codediff/core/diff.lua
+index b2fbe1f..0b40aa7 100644
+--- a/lua/codediff/core/diff.lua
++++ b/lua/codediff/core/diff.lua
+@@ -65,6 +65,19 @@ end
+ -- FFI type definitions matching C types.h
+ ffi.cdef([[
+   // Basic range types
++  typedef struct {
++    int seq1_start;
++    int seq1_end;
++    int seq2_start;
++    int seq2_end;
++  } SequenceDiff;
++
++  typedef struct {
++    SequenceDiff* diffs;
++    int count;
++    int capacity;
++  } SequenceDiffArray;
++
+   typedef struct {
+     int start_line;  // 1-based, inclusive
+     int end_line;    // 1-based, EXCLUSIVE
+@@ -131,7 +144,17 @@ ffi.cdef([[
+     const DiffOptions* options
+   );
+ 
++  SequenceDiffArray* compute_line_alignments(
++    const char** original_lines,
++    int original_count,
++    const char** modified_lines,
++    int modified_count,
++    int timeout_ms,
++    bool* hit_timeout
++  );
++
+   void free_lines_diff(LinesDiff* diff);
++  void free_sequence_diff_array(SequenceDiffArray* diff);
+   const char* get_version(void);
+ ]])
+ 
+@@ -227,11 +250,7 @@ local function lines_diff_to_lua(c_diff)
+   }
+ end
+ 
+--- Main API: Compute diff between two sets of lines
+--- Returns Lua table representation of LinesDiff
+-function M.compute_diff(original_lines, modified_lines, options)
+-  options = options or {}
+-
++local function compute_native_diff(original_lines, modified_lines, options)
+   -- Convert Lua lines to C arrays
+   local c_orig, orig_count = lua_to_c_strings(original_lines)
+   local c_mod, mod_count = lua_to_c_strings(modified_lines)
+@@ -247,7 +266,6 @@ function M.compute_diff(original_lines, modified_lines, options)
+ 
+   -- Call C function
+   local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
+-
+   if c_diff == nil then
+     error("compute_diff returned NULL")
+   end
+@@ -257,10 +275,171 @@ function M.compute_diff(original_lines, modified_lines, options)
+ 
+   -- Free C memory
+   lib.free_lines_diff(c_diff)
+-
+   return lua_diff
+ end
+ 
++local function append_change(changes, original_start, original_end, modified_start, modified_end)
++  local previous = changes[#changes]
++  if previous and previous.original.end_line >= original_start and previous.modified.end_line >= modified_start then
++    previous.original.end_line = math.max(previous.original.end_line, original_end)
++    previous.modified.end_line = math.max(previous.modified.end_line, modified_end)
++    return
++  end
++
++  changes[#changes + 1] = {
++    original = { start_line = original_start, end_line = original_end },
++    modified = { start_line = modified_start, end_line = modified_end },
++    inner_changes = {},
++    line_pairs = {},
++  }
++end
++
++local function append_whitespace_changes(changes, original_lines, modified_lines, starts, count)
++  for offset = 0, count - 1 do
++    local original_index = starts.original + offset
++    local modified_index = starts.modified + offset
++    if original_lines[original_index] ~= modified_lines[modified_index] then
++      append_change(changes, original_index, original_index + 1, modified_index, modified_index + 1)
++    end
++  end
++end
++
++local function compute_line_changes(original_lines, modified_lines, options)
++  local c_orig, orig_count = lua_to_c_strings(original_lines)
++  local c_mod, mod_count = lua_to_c_strings(modified_lines)
++  local hit_timeout = ffi.new("bool[1]")
++  local c_diffs = lib.compute_line_alignments(c_orig, orig_count, c_mod, mod_count, options.max_computation_time_ms or 5000, hit_timeout)
++  if c_diffs == nil then
++    error("compute_line_alignments returned NULL")
++  end
++
++  local changes = {}
++  local previous_original = 0
++  local previous_modified = 0
++
++  for index = 0, c_diffs.count - 1 do
++    local line_diff = c_diffs.diffs[index]
++    if not options.ignore_trim_whitespace then
++      append_whitespace_changes(changes, original_lines, modified_lines, {
++        original = previous_original + 1,
++        modified = previous_modified + 1,
++      }, line_diff.seq1_start - previous_original)
++    end
++
++    append_change(changes, line_diff.seq1_start + 1, line_diff.seq1_end + 1, line_diff.seq2_start + 1, line_diff.seq2_end + 1)
++    previous_original = line_diff.seq1_end
++    previous_modified = line_diff.seq2_end
++  end
++
++  if not options.ignore_trim_whitespace then
++    append_whitespace_changes(changes, original_lines, modified_lines, {
++      original = previous_original + 1,
++      modified = previous_modified + 1,
++    }, math.min(orig_count - previous_original, mod_count - previous_modified))
++  end
++
++  lib.free_sequence_diff_array(c_diffs)
++  return changes, hit_timeout[0]
++end
++
++local function slice_lines(lines, line_range)
++  local result = {}
++  for line = line_range.start_line, line_range.end_line - 1 do
++    result[#result + 1] = lines[line]
++  end
++  return result
++end
++
++local function offset_char_range(range, line_offset)
++  return {
++    start_line = range.start_line + line_offset,
++    start_col = range.start_col,
++    end_line = range.end_line + line_offset,
++    end_col = range.end_col,
++  }
++end
++
++local function refine_pair(original_line, modified_line, positions, options)
++  local pair_diff = compute_native_diff({ original_line }, { modified_line }, {
++    ignore_trim_whitespace = options.ignore_trim_whitespace,
++    max_computation_time_ms = options.max_computation_time_ms,
++    extend_to_subwords = options.extend_to_subwords,
++    compute_moves = false,
++  })
++  local inner_changes = {}
++
++  for _, change in ipairs(pair_diff.changes) do
++    for _, inner in ipairs(change.inner_changes) do
++      inner_changes[#inner_changes + 1] = {
++        original = offset_char_range(inner.original, positions.original - 1),
++        modified = offset_char_range(inner.modified, positions.modified - 1),
++      }
++    end
++  end
++
++  return inner_changes, pair_diff.hit_timeout
++end
++
++local function apply_line_matcher(change, original_lines, modified_lines, matcher, options)
++  local context = {
++    original_lines = slice_lines(original_lines, change.original),
++    modified_lines = slice_lines(modified_lines, change.modified),
++    original_start_line = change.original.start_line,
++    modified_start_line = change.modified.start_line,
++  }
++
++  if #context.original_lines == 0 or #context.modified_lines == 0 then
++    return false
++  end
++
++  local hit_timeout = false
++  local pairs = matcher(context)
++  for _, pair in ipairs(pairs) do
++    local positions = {
++      original = change.original.start_line + pair.original_index - 1,
++      modified = change.modified.start_line + pair.modified_index - 1,
++    }
++    change.line_pairs[#change.line_pairs + 1] = {
++      original_line = positions.original,
++      modified_line = positions.modified,
++    }
++
++    local inner_changes, pair_hit_timeout = refine_pair(context.original_lines[pair.original_index], context.modified_lines[pair.modified_index], positions, options)
++    vim.list_extend(change.inner_changes, inner_changes)
++    hit_timeout = hit_timeout or pair_hit_timeout
++  end
++
++  return hit_timeout
++end
++
++-- Main API: Compute diff between two sets of lines
++-- Returns Lua table representation of LinesDiff
++function M.compute_diff(original_lines, modified_lines, options)
++  options = options or {}
++  local changes, hit_timeout = compute_line_changes(original_lines, modified_lines, options)
++  local matcher = options.line_matcher
++  if matcher == nil then
++    matcher = require("codediff.config").options.diff.line_matcher
++  end
++
++  for _, change in ipairs(changes) do
++    hit_timeout = apply_line_matcher(change, original_lines, modified_lines, matcher, options) or hit_timeout
++  end
++
++  local moves = {}
++  if options.compute_moves then
++    local move_diff = compute_native_diff(original_lines, modified_lines, options)
++    moves = move_diff.moves
++    hit_timeout = hit_timeout or move_diff.hit_timeout
++  end
++
++  return {
++    changes = changes,
++    moves = moves,
++    hit_timeout = hit_timeout,
++  }
++end
++
+ -- Get library version
+ function M.get_version()
+   return ffi.string(lib.get_version())
+diff --git a/lua/codediff/line_matchers.lua b/lua/codediff/line_matchers.lua
+new file mode 100644
+index 0000000..20d3659
+--- /dev/null
++++ b/lua/codediff/line_matchers.lua
+@@ -0,0 +1,130 @@
++local M = {}
++
++-- Inspired by CPython difflib.Differ._fancy_replace: https://github.com/python/cpython/blob/1736526023a3e616d1530815880bb3b28e3433c3/Lib/difflib.py#L896-L988
++local DEFAULT_THRESHOLD = 0.75
++local SEARCH_WINDOW = 10
++
++local function lcs_length(left, right)
++  local previous = {}
++  for right_index = 0, #right do
++    previous[right_index] = 0
++  end
++
++  for left_index = 1, #left do
++    local current = { [0] = 0 }
++    local left_char = left:sub(left_index, left_index)
++    for right_index = 1, #right do
++      if left_char == right:sub(right_index, right_index) then
++        current[right_index] = previous[right_index - 1] + 1
++      else
++        current[right_index] = math.max(previous[right_index], current[right_index - 1])
++      end
++    end
++    previous = current
++  end
++
++  return previous[#right]
++end
++
++local function similarity_score(left, right)
++  if left == right then
++    return 1
++  end
++  if #left == 0 or #right == 0 then
++    return 0
++  end
++  return 2 * lcs_length(left, right) / (#left + #right)
++end
++
++local function find_best_pair(context, range, threshold)
++  local best
++
++  for original_index = range.original_start, range.original_end do
++    local expected_modified = range.modified_start + original_index - range.original_start
++    local modified_start = math.max(range.modified_start, expected_modified - SEARCH_WINDOW)
++    local modified_end = math.min(range.modified_end, expected_modified + SEARCH_WINDOW)
++
++    for modified_index = modified_start, modified_end do
++      local score = similarity_score(context.original_lines[original_index], context.modified_lines[modified_index])
++      if score >= threshold and (not best or score > best.score) then
++        best = {
++          original_index = original_index,
++          modified_index = modified_index,
++          score = score,
++        }
++      end
++    end
++  end
++
++  return best
++end
++
++local function collect_similar_pairs(context, range, threshold, pairs)
++  if range.original_start > range.original_end or range.modified_start > range.modified_end then
++    return
++  end
++
++  local best = find_best_pair(context, range, threshold)
++  if not best then
++    return
++  end
++
++  collect_similar_pairs(context, {
++    original_start = range.original_start,
++    original_end = best.original_index - 1,
++    modified_start = range.modified_start,
++    modified_end = best.modified_index - 1,
++  }, threshold, pairs)
++
++  pairs[#pairs + 1] = {
++    original_index = best.original_index,
++    modified_index = best.modified_index,
++  }
++
++  collect_similar_pairs(context, {
++    original_start = best.original_index + 1,
++    original_end = range.original_end,
++    modified_start = best.modified_index + 1,
++    modified_end = range.modified_end,
++  }, threshold, pairs)
++end
++
++-- Pair similar original and modified lines in order using an optional similarity threshold.
++-- Example: left = "local old_name = 1", right = "local new_name = 1" gives 0.83.
++function M.similarity(context, options)
++  local threshold = options and options.threshold or DEFAULT_THRESHOLD
++  local pairs = {}
++
++  collect_similar_pairs(context, {
++    original_start = 1,
++    original_end = #context.original_lines,
++    modified_start = 1,
++    modified_end = #context.modified_lines,
++  }, threshold, pairs)
++
++  return pairs
++end
++
++-- Pair original and modified lines by position only when both sides have equal line counts (GitHub-style).
++-- Example: left = { "line1", "line2" }, right = { "line3", "line4" } pairs 1:1 and 2:2.
++-- Example: left = { "line1" }, right = { "line2", "line3" } returns no pairs.
++function M.equal_line_count(context)
++  if #context.original_lines ~= #context.modified_lines then
++    return {}
++  end
++
++  local pairs = {}
++  for index = 1, #context.original_lines do
++    pairs[index] = {
++      original_index = index,
++      modified_index = index,
++    }
++  end
++  return pairs
++end
++
++function M.none(_context)
++  return {}
++end
++
++return M
+diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
+index cbede2e..dc5e369 100644
+--- a/lua/codediff/ui/core.lua
++++ b/lua/codediff/ui/core.lua
+@@ -174,118 +174,48 @@ end
+ -- Step 3: Filler Line Calculation
+ -- ============================================================================
+ 
+-local function calculate_fillers(mapping, original_lines, _modified_lines, last_orig_line, last_mod_line)
++local function calculate_fillers(mapping)
+   local fillers = {}
+-
+-  last_orig_line = last_orig_line or mapping.original.start_line
+-  last_mod_line = last_mod_line or mapping.modified.start_line
+-
+-  if not mapping.inner_changes or #mapping.inner_changes == 0 then
+-    local mapping_orig_lines = mapping.original.end_line - mapping.original.start_line
+-    local mapping_mod_lines = mapping.modified.end_line - mapping.modified.start_line
+-
+-    if mapping_orig_lines > mapping_mod_lines then
+-      local diff = mapping_orig_lines - mapping_mod_lines
+-      table.insert(fillers, {
++  local original_line = mapping.original.start_line
++  local modified_line = mapping.modified.start_line
++
++  for _, pair in ipairs(mapping.line_pairs) do
++    local original_count = pair.original_line - original_line
++    local modified_count = pair.modified_line - modified_line
++    if original_count > modified_count then
++      fillers[#fillers + 1] = {
+         buffer = "modified",
+-        after_line = mapping.modified.start_line - 1,
+-        count = diff,
+-      })
+-    elseif mapping_mod_lines > mapping_orig_lines then
+-      local diff = mapping_mod_lines - mapping_orig_lines
+-      table.insert(fillers, {
++        after_line = pair.modified_line - 1,
++        count = original_count - modified_count,
++      }
++    elseif modified_count > original_count then
++      fillers[#fillers + 1] = {
+         buffer = "original",
+-        after_line = mapping.original.start_line - 1,
+-        count = diff,
+-      })
+-    end
+-    return fillers, mapping.original.end_line, mapping.modified.end_line
+-  end
+-
+-  local alignments = {}
+-  local first = true
+-
+-  local function handle_gap_alignment(orig_line_exclusive, mod_line_exclusive)
+-    local orig_gap = orig_line_exclusive - last_orig_line
+-    local mod_gap = mod_line_exclusive - last_mod_line
+-
+-    if orig_gap > 0 or mod_gap > 0 then
+-      table.insert(alignments, {
+-        orig_start = last_orig_line,
+-        orig_end = orig_line_exclusive,
+-        mod_start = last_mod_line,
+-        mod_end = mod_line_exclusive,
+-        orig_len = orig_gap,
+-        mod_len = mod_gap,
+-      })
+-      last_orig_line = orig_line_exclusive
+-      last_mod_line = mod_line_exclusive
++        after_line = pair.original_line - 1,
++        count = modified_count - original_count,
++      }
+     end
++    original_line = pair.original_line + 1
++    modified_line = pair.modified_line + 1
+   end
+ 
+-  handle_gap_alignment(mapping.original.start_line, mapping.modified.start_line)
+-
+-  local function emit_alignment(orig_line_exclusive, mod_line_exclusive)
+-    if orig_line_exclusive < last_orig_line or mod_line_exclusive < last_mod_line then
+-      return
+-    end
+-
+-    if first then
+-      first = false
+-    elseif orig_line_exclusive == last_orig_line or mod_line_exclusive == last_mod_line then
+-      return
+-    end
+-
+-    local orig_range_len = orig_line_exclusive - last_orig_line
+-    local mod_range_len = mod_line_exclusive - last_mod_line
+-
+-    if orig_range_len > 0 or mod_range_len > 0 then
+-      table.insert(alignments, {
+-        orig_start = last_orig_line,
+-        orig_end = orig_line_exclusive,
+-        mod_start = last_mod_line,
+-        mod_end = mod_line_exclusive,
+-        orig_len = orig_range_len,
+-        mod_len = mod_range_len,
+-      })
+-    end
+-
+-    last_orig_line = orig_line_exclusive
+-    last_mod_line = mod_line_exclusive
++  local original_count = mapping.original.end_line - original_line
++  local modified_count = mapping.modified.end_line - modified_line
++  if original_count > modified_count then
++    fillers[#fillers + 1] = {
++      buffer = "modified",
++      after_line = mapping.modified.end_line - 1,
++      count = original_count - modified_count,
++    }
++  elseif modified_count > original_count then
++    fillers[#fillers + 1] = {
++      buffer = "original",
++      after_line = mapping.original.end_line - 1,
++      count = modified_count - original_count,
++    }
+   end
+ 
+-  for _, inner in ipairs(mapping.inner_changes) do
+-    if inner.original.start_col > 1 and inner.modified.start_col > 1 then
+-      emit_alignment(inner.original.start_line, inner.modified.start_line)
+-    end
+-
+-    local orig_line_len = original_lines[inner.original.end_line] and #original_lines[inner.original.end_line] or 0
+-    if inner.original.end_col <= orig_line_len then
+-      emit_alignment(inner.original.end_line, inner.modified.end_line)
+-    end
+-  end
+-
+-  emit_alignment(mapping.original.end_line, mapping.modified.end_line)
+-
+-  for _, align in ipairs(alignments) do
+-    local line_diff = align.mod_len - align.orig_len
+-
+-    if line_diff > 0 then
+-      table.insert(fillers, {
+-        buffer = "original",
+-        after_line = align.orig_end - 1,
+-        count = line_diff,
+-      })
+-    elseif line_diff < 0 then
+-      table.insert(fillers, {
+-        buffer = "modified",
+-        after_line = align.mod_end - 1,
+-        count = -line_diff,
+-      })
+-    end
+-  end
+-
+-  return fillers, last_orig_line, last_mod_line
++  return fillers
+ end
+ 
+ -- ============================================================================
+@@ -304,9 +234,6 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+   local total_left_fillers = 0
+   local total_right_fillers = 0
+ 
+-  local last_orig_line = 1
+-  local last_mod_line = 1
+-
+   for _, mapping in ipairs(lines_diff.changes) do
+     local orig_has_lines = has_lines(mapping.original)
+     local mod_has_lines = has_lines(mapping.modified)
+@@ -331,10 +258,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+       end
+     end
+ 
+-    local fillers, new_last_orig, new_last_mod = calculate_fillers(mapping, original_lines, modified_lines, last_orig_line, last_mod_line)
+-
+-    last_orig_line = new_last_orig
+-    last_mod_line = new_last_mod
++    local fillers = calculate_fillers(mapping)
+ 
+     for _, filler in ipairs(fillers) do
+       if filler.buffer == "original" then
+diff --git a/lua/codediff/ui/merge_alignment.lua b/lua/codediff/ui/merge_alignment.lua
+index 78ef1cf..51d5ebd 100644
+--- a/lua/codediff/ui/merge_alignment.lua
++++ b/lua/codediff/ui/merge_alignment.lua
+@@ -428,9 +428,7 @@ function M.compute_merge_fillers_and_conflicts(base_to_input1_diff, base_to_inpu
+   for _, ma in ipairs(mapping_alignments) do
+     -- A region is conflicting if BOTH sides have changes (inner1 and inner2 both non-empty)
+     -- OR if both sides have changes (checked by looking at if the ranges differ from base)
+-    local has_left_changes = #ma.inner1 > 0 or (ma.output1_range.end_line - ma.output1_range.start_line) ~= (ma.base_range.end_line - ma.base_range.start_line)
+-    local has_right_changes = #ma.inner2 > 0 or (ma.output2_range.end_line - ma.output2_range.start_line) ~= (ma.base_range.end_line - ma.base_range.start_line)
+-    local is_conflict = has_left_changes and has_right_changes
++    local is_conflict = ma.has_input1 and ma.has_input2
+ 
+     if is_conflict then
+       -- Add to conflict blocks for action handling
+diff --git a/tests/core/line_matchers_spec.lua b/tests/core/line_matchers_spec.lua
+new file mode 100644
+index 0000000..682c76f
+--- /dev/null
++++ b/tests/core/line_matchers_spec.lua
+@@ -0,0 +1,89 @@
++local diff = require("codediff.core.diff")
++local line_matchers = require("codediff.line_matchers")
++
++local context = {
++  original_lines = { "one", "two" },
++  modified_lines = { "ONE", "TWO" },
++  original_start_line = 4,
++  modified_start_line = 7,
++}
++
++describe("Line matchers", function()
++  local equal_line_count_cases = {
++    {
++      name = "pairs equal line counts by position",
++      context = context,
++      expected = {
++        { original_index = 1, modified_index = 1 },
++        { original_index = 2, modified_index = 2 },
++      },
++    },
++    {
++      name = "does not pair unequal line counts",
++      context = {
++        original_lines = { "one" },
++        modified_lines = { "ONE", "extra" },
++      },
++      expected = {},
++    },
++  }
++
++  for _, test_case in ipairs(equal_line_count_cases) do
++    it(test_case.name, function()
++      assert.same(test_case.expected, line_matchers.equal_line_count(test_case.context))
++    end)
++  end
++
++  it("uses a configurable similarity threshold", function()
++    local similar_context = {
++      original_lines = { "cat" },
++      modified_lines = { "cut" },
++    }
++
++    assert.same({}, line_matchers.similarity(similar_context))
++    assert.same(
++      { { original_index = 1, modified_index = 1 } },
++      line_matchers.similarity(similar_context, {
++        threshold = 0.6,
++      })
++    )
++  end)
++
++  it("returns ordered similarity pairs and leaves unrelated lines unpaired", function()
++    local pairs = line_matchers.similarity({
++      original_lines = { "local old_name = 1", "removed without match", "print(old_name)" },
++      modified_lines = { "local new_name = 1", "print(new_name)", "unrelated insertion" },
++    })
++
++    assert.same({
++      { original_index = 1, modified_index = 1 },
++      { original_index = 3, modified_index = 2 },
++    }, pairs)
++  end)
++
++  it("passes changed block context to a custom matcher", function()
++    local received_context
++    local result = diff.compute_diff({ "before", "old value", "deleted" }, { "before", "new value", "inserted" }, {
++      line_matcher = function(matcher_context)
++        received_context = matcher_context
++        return { { original_index = 1, modified_index = 1 } }
++      end,
++    })
++
++    assert.same({ "old value", "deleted" }, received_context.original_lines)
++    assert.same({ "new value", "inserted" }, received_context.modified_lines)
++    assert.equal(2, received_context.original_start_line)
++    assert.equal(2, received_context.modified_start_line)
++    assert.same({ { original_line = 2, modified_line = 2 } }, result.changes[1].line_pairs)
++    assert.is_true(#result.changes[1].inner_changes > 0)
++  end)
++
++  it("omits character changes when matching is disabled", function()
++    local result = diff.compute_diff({ "old value" }, { "new value" }, {
++      line_matcher = line_matchers.none,
++    })
++
++    assert.same({}, result.changes[1].line_pairs)
++    assert.same({}, result.changes[1].inner_changes)
++  end)
++end)
+diff --git a/tests/ui/inline_spec.lua b/tests/ui/inline_spec.lua
+index ccf8617..81b5bd3 100644
+--- a/tests/ui/inline_spec.lua
++++ b/tests/ui/inline_spec.lua
+@@ -106,7 +106,7 @@ describe("Inline Diff Rendering", function()
+     local buf = vim.api.nvim_create_buf(false, true)
+ 
+     local original = { "hello world" }
+-    local modified = { "hello earth" }
++    local modified = { "hello whirl" }
+ 
+     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
+ 
+@@ -236,7 +236,7 @@ describe("Inline Diff Rendering", function()
+     local buf = vim.api.nvim_create_buf(false, true)
+ 
+     local original = { "hello world" }
+-    local modified = { "hello earth" }
++    local modified = { "hello whirl" }
+ 
+     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
+ 

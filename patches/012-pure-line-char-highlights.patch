@@ -1,4 +1,4 @@
-From e1dd1a5aeaa725af33e5c47d2cb59c86198340d4 Mon Sep 17 00:00:00 2001
+From 9ac4612a320bffd48caaf2539de9a141f8c953e9 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 17:42:10 +0100
 Subject: [PATCH] fix: reserve character highlights for modified lines
@@ -7,18 +7,19 @@ Subject: [PATCH] fix: reserve character highlights for modified lines
  README.md                        |  16 ++-
  lua/codediff/config.lua          |   5 +
  lua/codediff/ui/auto_refresh.lua |   2 +-
- lua/codediff/ui/char_ranges.lua  |  84 ++++++++++++++++
- lua/codediff/ui/core.lua         | 167 +++++++++++--------------------
+ lua/codediff/ui/char_ranges.lua  |  84 ++++++++++++++
+ lua/codediff/ui/core.lua         | 179 +++++++++++++-----------------
  lua/codediff/ui/highlights.lua   |   5 +
- lua/codediff/ui/inline.lua       | 167 +++++--------------------------
- tests/ui/core_spec.lua           |  93 ++++++++++-------
- tests/ui/highlights_spec.lua     |  17 ++++
- tests/ui/inline_spec.lua         |  58 +++++++++--
- 10 files changed, 313 insertions(+), 301 deletions(-)
+ lua/codediff/ui/inline.lua       | 183 +++++++------------------------
+ tests/ui/core_spec.lua           |  93 ++++++++++------
+ tests/ui/highlights_spec.lua     |  17 +++
+ tests/ui/inline_spec.lua         |  58 ++++++++--
+ tests/ui/inline_syntax_spec.lua  |   4 +-
+ 11 files changed, 349 insertions(+), 297 deletions(-)
  create mode 100644 lua/codediff/ui/char_ranges.lua
 
 diff --git a/README.md b/README.md
-index 7c95a22..edda6af 100644
+index dc1672c..2cf3e8d 100644
 --- a/README.md
 +++ b/README.md
 @@ -66,6 +66,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -33,7 +34,7 @@ index 7c95a22..edda6af 100644
        -- Character-level: accepts highlight group names or hex colors
        -- If specified, these override char_brightness calculation
        char_insert = nil,            -- Character-level insertions (nil = auto-derive)
-@@ -687,13 +692,15 @@ The plugin handles syntax highlighting differently based on buffer type:
+@@ -796,13 +801,15 @@ The plugin handles syntax highlighting differently based on buffer type:
  
  ### Highlight Groups
  
@@ -52,7 +53,7 @@ index 7c95a22..edda6af 100644
  - `CodeDiffFiller` - Gray foreground for non-empty filler line patterns
  - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
  - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
-@@ -719,7 +726,8 @@ The plugin defines highlight groups matching VSCode's diff colors:
+@@ -828,7 +835,8 @@ The plugin defines highlight groups matching VSCode's diff colors:
  
  **Default behavior:**
  - Uses your colorscheme's `DiffAdd`, `DiffChange`, and `DiffDelete` for line-level highlights
@@ -63,10 +64,10 @@ index 7c95a22..edda6af 100644
    - **Light themes** (`background = "light"`): Brightness multiplied by `0.92` (8% darker)
  - This auto-detection works out-of-box for most colorschemes
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 4e2f126..32f7150 100644
+index 212e32c..3c48446 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
-@@ -10,6 +10,11 @@ M.defaults = {
+@@ -12,6 +12,11 @@ M.defaults = {
      line_change = "DiffChange", -- Line-level modifications (base color)
      line_delete = "DiffDelete", -- Line-level deletions (base color)
  
@@ -182,7 +183,7 @@ index 0000000..6baebbe
 +
 +return M
 diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
-index cbede2e..4b4f80c 100644
+index dc5e369..aa4c113 100644
 --- a/lua/codediff/ui/core.lua
 +++ b/lua/codediff/ui/core.lua
 @@ -4,7 +4,7 @@ local M = {}
@@ -210,7 +211,7 @@ index cbede2e..4b4f80c 100644
  -- ============================================================================
  -- Step 1: Line-Level Highlights
  -- ============================================================================
-@@ -69,103 +60,17 @@ end
+@@ -69,103 +60,34 @@ end
  -- Step 2: Character-Level Highlights
  -- ============================================================================
  
@@ -263,10 +264,11 @@ index cbede2e..4b4f80c 100644
 -  local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
 -  if start_line > buf_line_count or end_line > buf_line_count then
 -    return
--  end
-+local function apply_char_highlight(args)
-+  local line_count = vim.api.nvim_buf_line_count(args.bufnr)
-+  local segments = char_ranges.to_line_segments(args.range, args.counterpart, args.lines, args.counterpart_lines)
++local function apply_unpaired_line_text_highlights(bufnr, lines, mapping, side, hl_group)
++  local paired = {}
++  for _, pair in ipairs(mapping.line_pairs) do
++    paired[pair[side .. "_line"]] = true
+   end
  
 -  if start_line == end_line then
 -    local line_idx = start_line - 1
@@ -275,13 +277,8 @@ index cbede2e..4b4f80c 100644
 -      local ok = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, line_idx, start_col - 1, {
 -        end_col = end_col - 1,
 -        hl_group = hl_group,
-+  for _, segment in ipairs(segments) do
-+    if segment.line <= line_count then
-+      pcall(vim.api.nvim_buf_set_extmark, args.bufnr, ns_highlight, segment.line - 1, segment.start_col, {
-+        end_col = segment.end_col,
-+        hl_group = segment.line_text and args.line_text_hl_group or args.hl_group,
-         priority = 200,
-       })
+-        priority = 200,
+-      })
 -      if not ok then
 -        -- Column out of range, skip this highlight
 -        return
@@ -293,11 +290,17 @@ index cbede2e..4b4f80c 100644
 -      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_highlight, first_line_idx, start_col - 1, {
 -        end_line = first_line_idx + 1,
 -        end_col = 0,
--        hl_group = hl_group,
--        priority = 200,
--      })
--    end
--
++  for line = mapping[side].start_line, mapping[side].end_line - 1 do
++    if not paired[line] and lines[line] and #lines[line] > 0 then
++      vim.api.nvim_buf_set_extmark(bufnr, ns_highlight, line - 1, 0, {
++        end_col = #lines[line],
+         hl_group = hl_group,
+         priority = 200,
+       })
+     end
++  end
++end
+ 
 -    for line = start_line + 1, end_line - 1 do
 -      local line_idx = line - 1
 -      if line_idx >= 0 and line <= buf_line_count then
@@ -309,7 +312,10 @@ index cbede2e..4b4f80c 100644
 -        })
 -      end
 -    end
--
++local function apply_char_highlight(args)
++  local line_count = vim.api.nvim_buf_line_count(args.bufnr)
++  local segments = char_ranges.to_line_segments(args.range, args.counterpart, args.lines, args.counterpart_lines)
+ 
 -    if end_col > 1 or end_line ~= start_line then
 -      local last_line_idx = end_line - 1
 -      if last_line_idx >= 0 and last_line_idx ~= first_line_idx and end_line <= buf_line_count then
@@ -319,10 +325,28 @@ index cbede2e..4b4f80c 100644
 -          priority = 200,
 -        })
 -      end
++  for _, segment in ipairs(segments) do
++    if segment.line <= line_count then
++      pcall(vim.api.nvim_buf_set_extmark, args.bufnr, ns_highlight, segment.line - 1, segment.start_col, {
++        end_col = segment.end_col,
++        hl_group = segment.line_text and args.line_text_hl_group or args.hl_group,
++        priority = 200,
++      })
      end
    end
  end
-@@ -322,11 +227,27 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -240,20 +162,38 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+ 
+     if orig_has_lines then
+       apply_line_highlights(left_bufnr, mapping.original, "CodeDiffLineDelete")
++      apply_unpaired_line_text_highlights(left_bufnr, original_lines, mapping, "original", "CodeDiffLineDeleteText")
+     end
+ 
+     if mod_has_lines then
+       apply_line_highlights(right_bufnr, mapping.modified, get_modified_line_highlight(mapping))
++      apply_unpaired_line_text_highlights(right_bufnr, modified_lines, mapping, "modified", "CodeDiffLineInsertText")
+     end
+ 
      if mapping.inner_changes then
        for _, inner in ipairs(mapping.inner_changes) do
          if not is_empty_range(inner.original) then
@@ -352,7 +376,7 @@ index cbede2e..4b4f80c 100644
          end
        end
      end
-@@ -409,7 +330,7 @@ end
+@@ -333,7 +273,7 @@ end
  -- side: "original" or "modified" - which side of the diff this buffer represents
  --       "original" = deletions (red highlights)
  --       "modified" = insertions (green highlights)
@@ -361,7 +385,7 @@ index cbede2e..4b4f80c 100644
    -- Clear existing highlights
    vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
    vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
-@@ -419,6 +340,8 @@ function M.render_single_buffer(bufnr, diff, side)
+@@ -343,6 +283,8 @@ function M.render_single_buffer(bufnr, diff, side)
  
    -- Determine highlight groups based on side
    local char_hl = side == "original" and "CodeDiffCharDelete" or "CodeDiffCharInsert"
@@ -370,7 +394,15 @@ index cbede2e..4b4f80c 100644
  
    for _, mapping in ipairs(diff.changes) do
      -- Get the range for our side
-@@ -438,7 +361,15 @@ function M.render_single_buffer(bufnr, diff, side)
+@@ -355,6 +297,7 @@ function M.render_single_buffer(bufnr, diff, side)
+     if has_lines(range) then
+       local line_hl = side == "original" and "CodeDiffLineDelete" or get_modified_line_highlight(mapping)
+       apply_line_highlights(bufnr, range, line_hl)
++      apply_unpaired_line_text_highlights(bufnr, lines, mapping, side, line_text_hl)
+     end
+ 
+     -- Apply character highlights from inner changes
+@@ -362,7 +305,15 @@ function M.render_single_buffer(bufnr, diff, side)
        for _, inner in ipairs(mapping.inner_changes) do
          local inner_range = inner[side]
          if inner_range and not is_empty_range(inner_range) then
@@ -387,7 +419,13 @@ index cbede2e..4b4f80c 100644
          end
        end
      end
-@@ -490,7 +421,15 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+@@ -409,12 +360,21 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+     local range = change.modified
+     if range and has_lines(range) then
+       apply_line_highlights(left_bufnr, range, "CodeDiffLineInsert")
++      apply_unpaired_line_text_highlights(left_bufnr, left_lines, change, "modified", "CodeDiffLineInsertText")
+     end
+     if change.inner_changes then
        for _, inner in ipairs(change.inner_changes) do
          local inner_range = inner.modified
          if inner_range and not is_empty_range(inner_range) then
@@ -404,7 +442,13 @@ index cbede2e..4b4f80c 100644
          end
        end
      end
-@@ -505,7 +444,15 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+@@ -424,12 +384,21 @@ function M.render_merge_view(left_bufnr, right_bufnr, base_to_left_diff, base_to
+     local range = change.modified
+     if range and has_lines(range) then
+       apply_line_highlights(right_bufnr, range, "CodeDiffLineInsert")
++      apply_unpaired_line_text_highlights(right_bufnr, right_lines, change, "modified", "CodeDiffLineInsertText")
+     end
+     if change.inner_changes then
        for _, inner in ipairs(change.inner_changes) do
          local inner_range = inner.modified
          if inner_range and not is_empty_range(inner_range) then
@@ -438,7 +482,7 @@ index b4a884b..a9e875b 100644
    local move_fallback = diff_change_bg or 0x4f5258
    local line_move_color = resolve_color(opts.line_move, move_fallback, base256_color(0, 0, 2))
 diff --git a/lua/codediff/ui/inline.lua b/lua/codediff/ui/inline.lua
-index 3d06c16..5b2bbbb 100644
+index 3d06c16..a978718 100644
 --- a/lua/codediff/ui/inline.lua
 +++ b/lua/codediff/ui/inline.lua
 @@ -4,7 +4,7 @@ local M = {}
@@ -518,14 +562,14 @@ index 3d06c16..5b2bbbb 100644
 -    if not orig then
 -      goto continue
 -    end
- 
+-
 -    -- Check if this inner change touches our line
 -    if orig.start_line <= orig_line_1based and orig.end_line >= orig_line_1based then
 -      -- Empty range check
 -      if orig.start_line == orig.end_line and orig.start_col == orig.end_col then
 -        goto continue
 -      end
--
+ 
 -      local start_col, end_col
 -
 -      if orig.start_line == orig_line_1based then
@@ -565,15 +609,21 @@ index 3d06c16..5b2bbbb 100644
    table.sort(ranges, function(a, b)
      return a.start_col < b.start_col
    end)
-@@ -283,86 +231,19 @@ end
+@@ -283,86 +231,27 @@ end
  -- Apply char-level highlights on modified buffer lines
  -- ============================================================================
  
 -local function apply_modified_char_highlights(bufnr, inner_changes, modified_lines)
 -  if not inner_changes then
 -    return
--  end
--
++local function get_paired_lines(mapping, side)
++  local paired = {}
++  for _, pair in ipairs(mapping.line_pairs) do
++    paired[pair[side .. "_line"]] = true
+   end
++  return paired
++end
+ 
 -  local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
 -
 -  for _, inner in ipairs(inner_changes) do
@@ -613,17 +663,6 @@ index 3d06c16..5b2bbbb 100644
 -        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, line_idx, start_col - 1, {
 -          end_col = end_col - 1,
 -          hl_group = "CodeDiffCharInsert",
--          priority = 200,
--        })
--      end
--    else
--      -- Multi-line char highlight
--      local first_idx = start_line - 1
--      if first_idx >= 0 then
--        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, first_idx, start_col - 1, {
--          end_line = first_idx + 1,
--          end_col = 0,
--          hl_group = "CodeDiffCharInsert",
 +  for _, inner in ipairs(inner_changes or {}) do
 +    for _, segment in ipairs(char_ranges.to_line_segments(inner.modified, inner.original, modified_lines, original_lines)) do
 +      if segment.line <= line_count then
@@ -633,6 +672,17 @@ index 3d06c16..5b2bbbb 100644
            priority = 200,
          })
        end
+-    else
+-      -- Multi-line char highlight
+-      local first_idx = start_line - 1
+-      if first_idx >= 0 then
+-        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, first_idx, start_col - 1, {
+-          end_line = first_idx + 1,
+-          end_col = 0,
+-          hl_group = "CodeDiffCharInsert",
+-          priority = 200,
+-        })
+-      end
 -      for line = start_line + 1, end_line - 1 do
 -        local idx = line - 1
 -        if idx >= 0 and line <= buf_line_count then
@@ -660,16 +710,41 @@ index 3d06c16..5b2bbbb 100644
    end
  end
  
-@@ -413,7 +294,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
+@@ -406,6 +295,8 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
+     local mod_count = mod_end - mod_start
+     local has_original = orig_count > 0
+     local has_modified = mod_count > 0
++    local paired_original = get_paired_lines(mapping, "original")
++    local paired_modified = get_paired_lines(mapping, "modified")
+ 
+     -- Step 1: Show deleted/original lines as virtual lines
+     if has_original then
+@@ -413,9 +304,10 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
  
        for orig_line = orig_start, orig_end - 1 do
          local line_text = original_lines[orig_line] or ""
 -        local char_ranges = get_char_ranges_for_orig_line(mapping.inner_changes, orig_line, original_lines)
 +        local char_ranges = get_char_ranges_for_orig_line(mapping.inner_changes, orig_line, original_lines, modified_lines)
          local line_syntax = syntax_hls[orig_line]
-         local chunks = build_highlighted_virt_line(line_text, char_ranges, line_syntax)
+-        local chunks = build_highlighted_virt_line(line_text, char_ranges, line_syntax)
++        local base_hl = paired_original[orig_line] and "CodeDiffLineDelete" or "CodeDiffLineDeleteText"
++        local chunks = build_highlighted_virt_line(line_text, char_ranges, line_syntax, base_hl)
          table.insert(virt_lines, chunks)
-@@ -460,7 +341,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
+       end
+ 
+@@ -455,12 +347,19 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
+           hl_eol = true,
+           priority = highlight_priority,
+         })
++        if not paired_modified[line] and modified_lines[line] and #modified_lines[line] > 0 then
++          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_inline, line_idx, 0, {
++            end_col = #modified_lines[line],
++            hl_group = "CodeDiffLineInsertText",
++            priority = 200,
++          })
++        end
+       end
+     end
  
      -- Step 3: Character-level highlights on modified buffer lines
      if has_modified and mapping.inner_changes then
@@ -925,7 +1000,7 @@ index 6e45fd6..8caba15 100644
  
    it("reads fg when colorscheme uses fg + reverse (regression: #366 sorbet)", function()
 diff --git a/tests/ui/inline_spec.lua b/tests/ui/inline_spec.lua
-index ccf8617..733a662 100644
+index 81b5bd3..eb3bf9a 100644
 --- a/tests/ui/inline_spec.lua
 +++ b/tests/ui/inline_spec.lua
 @@ -35,7 +35,23 @@ describe("Inline Diff Rendering", function()
@@ -957,8 +1032,8 @@ index ccf8617..733a662 100644
      local buf = vim.api.nvim_create_buf(false, true)
  
      local original = { "hello world" }
--    local modified = { "hello earth" }
-+    local modified = { "hello earth", "added line" }
+-    local modified = { "hello whirl" }
++    local modified = { "hello whirl", "added line" }
  
      vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
  
@@ -1030,7 +1105,7 @@ index ccf8617..733a662 100644
  
 -    local original = { "hello world" }
 +    local original = { "hello world", "deleted line" }
-     local modified = { "hello earth" }
+     local modified = { "hello whirl" }
  
      vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
 @@ -246,14 +280,18 @@ describe("Inline Diff Rendering", function()
@@ -1063,3 +1138,21 @@ index ccf8617..733a662 100644
  
      vim.api.nvim_buf_delete(buf, { force = true })
    end)
+diff --git a/tests/ui/inline_syntax_spec.lua b/tests/ui/inline_syntax_spec.lua
+index 2b2abf5..9ca9287 100644
+--- a/tests/ui/inline_syntax_spec.lua
++++ b/tests/ui/inline_syntax_spec.lua
+@@ -118,11 +118,11 @@ describe("Inline virt_lines syntax highlighting", function()
+     end
+ 
+     assert.is_truthy(virt_chunks, "Should have virt_line chunks")
+-    -- Without syntax, chunks should only use CodeDiffLineDelete/CodeDiffCharDelete
++    -- Without syntax, chunks should only use delete-side diff highlights
+     for _, chunk in ipairs(virt_chunks) do
+       local hl = chunk[2]
+       assert.is_true(
+-        hl == "CodeDiffLineDelete" or hl == "CodeDiffCharDelete",
++        hl == "CodeDiffLineDelete" or hl == "CodeDiffLineDeleteText" or hl == "CodeDiffCharDelete",
+         "Without syntax, should only use diff highlights, got: " .. tostring(hl)
+       )
+     end

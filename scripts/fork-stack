@@ -35,8 +35,8 @@ DETERMINISTIC_ENV = {
 }
 
 
-def git(args, cwd=ROOT, check=True, capture_output=False):
-    env = os.environ | DETERMINISTIC_ENV
+def git(args, cwd=ROOT, check=True, capture_output=False, extra_env=None):
+    env = os.environ | DETERMINISTIC_ENV | (extra_env or {})
     return subprocess.run(
         ["git", "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", *args],
         cwd=cwd,
@@ -84,7 +84,7 @@ def replace_stack_values(values):
 def apply_patches(worktree, patches, three_way):
     mode = "--3way" if three_way else "--no-3way"
     return git(
-        ["am", mode, "--committer-date-is-author-date", *map(str, patches)],
+        ["am", mode, "--keep-cr", "--committer-date-is-author-date", *map(str, patches)],
         cwd=worktree,
         check=False,
     )
@@ -108,9 +108,114 @@ def run_checks(worktree, command):
         subprocess.run(shlex.split(command), cwd=worktree, check=True)
 
 
-def rebuild(run_tests=True, verify=True):
-    config, _, patches = load_stack()
+def pull_requests(config, names):
+    requests = []
+    for name in names:
+        patch = config[f'patch "{name}"']
+        url = patch.get("pullRequest")
+        if not url:
+            continue
+        path = ROOT / patch["file"]
+        match = re.search(r"^Subject: (?:\[PATCH[^]]*\] )?(.+)$", path.read_text(), re.MULTILINE)
+        if not match:
+            raise RuntimeError(f"Missing patch subject in {path}")
+        requests.append((url.rsplit("/", 1)[-1], match.group(1), url, patch["originCommit"]))
+    return requests
+
+
+def fork_notice(config, names, code_head):
     stack = config["stack"]
+    repository = stack["repository"]
+    repo_url = f"https://github.com/{repository}"
+    request_lines = [
+        f"- [PR #{number} — {subject}]({url})"
+        for number, subject, url, _ in pull_requests(config, names)
+    ]
+    lines = [
+        "> [!NOTE]",
+        "> This is a generated downstream build containing pending improvements to",
+        "> [upstream codediff.nvim](https://github.com/esmuellert/codediff.nvim). Install an",
+        "> immutable snapshot rather than the repository's moving default branch.",
+        ">",
+        (
+            f"> [Install the latest immutable snapshot]({repo_url}/releases/latest) · "
+            f"[See list of old versions]({repo_url}/releases)"
+        ),
+        f"> [View all downstream changes]({repo_url}/compare/{stack['upstream']}...{code_head})",
+        "",
+        "### Included pending upstream PRs",
+        "",
+        *request_lines,
+        "",
+        "## Install this fork",
+        "",
+        (
+            f"Choose a [snapshot release]({repo_url}/releases) and replace `<snapshot-sha>` below "
+            "with its commit SHA. Each release also contains ready-to-copy installation snippets."
+        ),
+        "",
+        "### lazy.nvim",
+        "",
+        "```lua",
+        "{",
+        f'  "{repository}",',
+        '  commit = "<snapshot-sha>",',
+        '  cmd = "CodeDiff",',
+        "}",
+        "```",
+        "",
+        "### vim.pack (Neovim 0.12+)",
+        "",
+        "```lua",
+        "vim.pack.add({",
+        "  {",
+        f'    src = "{repo_url}",',
+        '    version = "<snapshot-sha>",',
+        "  },",
+        "})",
+        "```",
+    ]
+    return "\n".join(lines)
+
+
+def fork_install_examples(readme, repository):
+    upstream_spec = '  "esmuellert/codediff.nvim",'
+    fork_spec = f'  "{repository}",\n  commit = "<snapshot-sha>",'
+    upstream_clone = "git clone https://github.com/esmuellert/codediff.nvim ~/.local/share/nvim/codediff.nvim"
+    fork_clone = "\n".join(
+        [
+            f"git clone https://github.com/{repository} ~/.local/share/nvim/codediff.nvim",
+            "git -C ~/.local/share/nvim/codediff.nvim checkout --detach <snapshot-sha>",
+        ]
+    )
+    if upstream_spec not in readme or upstream_clone not in readme:
+        raise RuntimeError("Upstream installation examples are missing from README.md")
+    return readme.replace(upstream_spec, fork_spec).replace(upstream_clone, fork_clone)
+
+
+def amend_fork_notice(config, names, worktree):
+    seed = """> [!NOTE]
+> This is a generated downstream build containing pending improvements to
+> [upstream codediff.nvim](https://github.com/esmuellert/codediff.nvim). Use an
+> immutable SHA from [Releases](https://github.com/richardgill/codediff.nvim/releases)
+> for reproducible installs. The [build manifest](https://github.com/richardgill/codediff.nvim/tree/fork-stack) records its exact inputs."""
+    readme_path = worktree / "README.md"
+    readme = readme_path.read_text()
+    if readme.count(seed) != 1:
+        raise RuntimeError("Fork notice seed must occur exactly once in README.md")
+    code_head = git_output(["rev-parse", "HEAD^"], cwd=worktree)
+    readme = readme.replace(seed, fork_notice(config, names, code_head))
+    readme_path.write_text(fork_install_examples(readme, config["stack"]["repository"]))
+    git(["add", "README.md"], cwd=worktree)
+    author_date = git_output(["show", "-s", "--format=%aI", "HEAD"], cwd=worktree)
+    git(["commit", "--amend", "--no-edit"], cwd=worktree, extra_env={"GIT_COMMITTER_DATE": author_date})
+
+
+def rebuild(run_tests=True, verify=True):
+    config, names, patches = load_stack()
+    stack = config["stack"]
+    if names[-1] != stack["noticePatch"]:
+        raise RuntimeError("The fork notice patch must be last")
     path = Path(tempfile.mkdtemp(prefix="codediff-fork-build-"))
     path.rmdir()
     try:
@@ -118,6 +223,7 @@ def rebuild(run_tests=True, verify=True):
         result = apply_patches(path, patches, three_way=False)
         if result.returncode:
             raise RuntimeError("Strict patch application failed")
+        amend_fork_notice(config, names, path)
         run_checks(path, stack.get("testCommand") if run_tests else None)
         head = git_output(["rev-parse", "HEAD"], cwd=path)
         tree = git_output(["rev-parse", "HEAD^{tree}"], cwd=path)
@@ -172,13 +278,29 @@ def continue_restack():
 
 
 def write_patch(path, commit, cwd):
-    result = git(
-        ["format-patch", "--no-signature", "--no-numbered", "--no-thread", "--no-base", "-1", "--stdout", commit],
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            "commit.gpgSign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "format-patch",
+            "--no-signature",
+            "--no-numbered",
+            "--no-thread",
+            "--no-base",
+            "-1",
+            "--stdout",
+            commit,
+        ],
         cwd=cwd,
+        check=True,
         capture_output=True,
+        env=os.environ | DETERMINISTIC_ENV,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(result.stdout)
+    path.write_bytes(result.stdout)
 
 
 def export_patches(base, names, patches):
@@ -241,20 +363,47 @@ def ensure_snapshot_tag(tag, head):
 
 def release_notes(config, names, head):
     stack = config["stack"]
+    repository = stack["repository"]
+    repo_url = f"https://github.com/{repository}"
     lines = [
-        f"Generated from upstream `{stack['upstream']}`.",
+        (
+            f"Generated from upstream [`{stack['upstream']}`]"
+            f"(https://github.com/esmuellert/codediff.nvim/commit/{stack['upstream']})."
+        ),
+        "",
+        (
+            f"[View all changes in this snapshot]({repo_url}/compare/{stack['upstream']}...{head}) · "
+            f"[See list of old versions]({repo_url}/releases)"
+        ),
+        "",
+        "## lazy.nvim",
         "",
         "```lua",
-        f'{{ "{stack["repository"]}", commit = "{head}" }}',
+        "{",
+        f'  "{repository}",',
+        f'  commit = "{head}",',
+        '  cmd = "CodeDiff",',
+        "}",
         "```",
         "",
-        "Included downstream patches:",
+        "## vim.pack (Neovim 0.12+)",
+        "",
+        "```lua",
+        "vim.pack.add({",
+        "  {",
+        f'    src = "{repo_url}",',
+        f'    version = "{head}",',
+        "  },",
+        "})",
+        "```",
+        "",
+        "## Included pending upstream PRs",
+        "",
     ]
-    for name in names:
-        patch = config[f'patch "{name}"']
-        pull_request = patch.get("pullRequest")
-        if pull_request:
-            lines.append(f"- [{name}]({pull_request}) (`{patch['originCommit']}`)")
+    lines.extend(
+        f"- [PR #{number} — {subject}]({url}) (`{origin_commit}`)"
+        for number, subject, url, origin_commit in pull_requests(config, names)
+    )
     return "\n".join(lines) + "\n"
 
 
