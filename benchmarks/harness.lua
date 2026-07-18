@@ -29,7 +29,12 @@ local summarize = function(samples)
 end
 
 local run_once = function(config, case)
-  local context = case.setup and case.setup() or nil
+  local context
+  if case.setup then
+    context = case.setup()
+  elseif config.setup_case then
+    context = config.setup_case(case)
+  end
   collectgarbage("collect")
   local started_at = vim.uv.hrtime()
   local result

@@ -17,13 +17,15 @@ run_suite() {
 
 if [ $# -eq 0 ]; then
     run_suite diff
+    run_suite render
     run_suite workflows
 elif [ "$1" = "--list" ]; then
     run_suite diff --list
+    run_suite render --list
     run_suite workflows --list
-elif [ "$1" = "diff" ] || [ "$1" = "workflows" ]; then
+elif [ "$1" = "diff" ] || [ "$1" = "render" ] || [ "$1" = "workflows" ]; then
     run_suite "$@"
 else
-    printf 'Usage: %s [--list | diff [benchmark] | workflows [benchmark]]\n' "$0" >&2
+    printf 'Usage: %s [--list | diff [benchmark] | render [benchmark] | workflows [benchmark]]\n' "$0" >&2
     exit 1
 fi
