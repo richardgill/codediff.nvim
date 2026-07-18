@@ -2,6 +2,7 @@
 -- Validates git status explorer functionality, window management, and file selection
 
 local git = require('codediff.core.git')
+local config = require("codediff.config")
 local h = dofile('tests/helpers.lua')
 
 -- Setup CodeDiff command for tests
@@ -55,13 +56,16 @@ local function open_explorer(temp_dir, focus_file)
   return ready, tabpage, explorer
 end
 
-local function open_initial_explorer(temp_dir, view_mode)
+local function open_initial_explorer(temp_dir, view_mode, ignore_patterns)
   local lifecycle = require("codediff.ui.lifecycle")
   vim.wait(200)
   lifecycle.cleanup_all()
   require("codediff").setup({
     diff = { layout = "side-by-side" },
-    explorer = { view_mode = view_mode },
+    explorer = {
+      view_mode = view_mode,
+      file_filter = { ignore = ignore_patterns or config.defaults.explorer.file_filter.ignore },
+    },
   })
 
   vim.fn.writefile({ "modified nested" }, temp_dir .. "/nested/deep.txt")
@@ -105,6 +109,7 @@ describe("Explorer Mode", function()
   local original_cwd
 
   before_each(function()
+    config.options = vim.deepcopy(config.defaults)
     require("codediff").setup({
       diff = { layout = "side-by-side" },
       explorer = { view_mode = "list" },
@@ -412,6 +417,11 @@ describe("Explorer Mode", function()
 
   it("Selects the first visible file in tree view", function()
     local explorer, session = open_initial_explorer(temp_dir, "tree")
+    assert_first_visible_file_selected(temp_dir, explorer, session, "nested/deep.txt")
+  end)
+
+  it("Does not select files excluded from the explorer", function()
+    local explorer, session = open_initial_explorer(temp_dir, "list", { "file1.txt", "file3.txt" })
     assert_first_visible_file_selected(temp_dir, explorer, session, "nested/deep.txt")
   end)
 
