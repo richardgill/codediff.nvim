@@ -180,6 +180,149 @@ local function run_git_async(args, opts, callback)
   end
 end
 
+-- Parse `git diff --numstat -z` output into line stats keyed by each file's destination path.
+local function parse_numstat(output)
+  local stats = {}
+  local records = vim.split(output or "", "\0", { plain = true })
+  local index = 1
+  while index <= #records do
+    -- Parse "12\t4\tlua/file.lua"; renames have an empty path followed by old/new path records.
+    local insertions, deletions, path = records[index]:match("^([^\t]+)\t([^\t]+)\t(.*)$")
+    if not insertions then
+      index = index + 1
+    else
+      if path == "" then
+        path = records[index + 2]
+        index = index + 3
+      else
+        index = index + 1
+      end
+      if path and path ~= "" then
+        stats[path] = insertions == "-" and { insertions = 0, deletions = 0, binary = true }
+          or { insertions = tonumber(insertions) or 0, deletions = tonumber(deletions) or 0, binary = false }
+      end
+    end
+  end
+  return stats
+end
+
+-- Return insertion-only stats for an untracked file, or nil when it is unreadable, non-regular, or over the size limit.
+local function get_untracked_line_stats(path, max_bytes)
+  local uv = vim.uv or vim.loop
+  local stat = uv.fs_stat(path)
+  if not stat or stat.type ~= "file" or stat.size > max_bytes then
+    return nil
+  end
+
+  local fd = uv.fs_open(path, "r", 438)
+  if not fd then
+    return nil
+  end
+  local data = uv.fs_read(fd, stat.size, 0) or ""
+  uv.fs_close(fd)
+  if data:find("\0", 1, true) then
+    return { insertions = 0, deletions = 0, binary = true }
+  end
+
+  local _, newlines = data:gsub("\n", "")
+  local final_line = #data > 0 and data:sub(-1) ~= "\n" and 1 or 0
+  return { insertions = newlines + final_line, deletions = 0, binary = false }
+end
+
+local function attach_line_stats(entries, stats)
+  for _, entry in ipairs(entries or {}) do
+    entry.line_stats = stats[entry.path]
+  end
+end
+
+local function attach_untracked_line_stats(entries, git_root, max_bytes)
+  for _, entry in ipairs(entries or {}) do
+    if entry.status == "??" then
+      entry.line_stats = get_untracked_line_stats(git_root .. "/" .. entry.path, max_bytes)
+    end
+  end
+end
+
+local function collect_line_stats(git_root, requests, callback)
+  local remaining = #requests
+  for _, request in ipairs(requests) do
+    run_git_async(request.args, { cwd = git_root }, function(err, output)
+      local stats = err and {} or parse_numstat(output)
+      for _, entries in ipairs(request.entries) do
+        attach_line_stats(entries, stats)
+      end
+      remaining = remaining - 1
+      if remaining == 0 then
+        callback()
+      end
+    end)
+  end
+end
+
+function M.get_status_with_line_stats(git_root, options, callback)
+  if not options.enabled then
+    M.get_status(git_root, callback)
+    return
+  end
+
+  M.get_status(git_root, function(err, result)
+    if err then
+      callback(err, nil)
+      return
+    end
+    collect_line_stats(git_root, {
+      { args = { "diff", "--numstat", "-z", "-M" }, entries = { result.unstaged, result.conflicts } },
+      { args = { "diff", "--cached", "--numstat", "-z", "-M" }, entries = { result.staged } },
+    }, function()
+      if options.count_untracked then
+        attach_untracked_line_stats(result.unstaged, git_root, options.max_untracked_bytes)
+      end
+      callback(nil, result)
+    end)
+  end)
+end
+
+function M.get_diff_revision_with_line_stats(revision, git_root, options, callback)
+  if not options.enabled then
+    M.get_diff_revision(revision, git_root, callback)
+    return
+  end
+
+  M.get_diff_revision(revision, git_root, function(err, result)
+    if err then
+      callback(err, nil)
+      return
+    end
+    collect_line_stats(git_root, {
+      { args = { "diff", "--numstat", "-z", "-M", revision }, entries = { result.unstaged } },
+    }, function()
+      if options.count_untracked then
+        attach_untracked_line_stats(result.unstaged, git_root, options.max_untracked_bytes)
+      end
+      callback(nil, result)
+    end)
+  end)
+end
+
+function M.get_diff_revisions_with_line_stats(rev1, rev2, git_root, options, callback)
+  if not options.enabled then
+    M.get_diff_revisions(rev1, rev2, git_root, callback)
+    return
+  end
+
+  M.get_diff_revisions(rev1, rev2, git_root, function(err, result)
+    if err then
+      callback(err, nil)
+      return
+    end
+    collect_line_stats(git_root, {
+      { args = { "diff", "--numstat", "-z", "-M", rev1, rev2 }, entries = { result.unstaged } },
+    }, function()
+      callback(nil, result)
+    end)
+  end)
+end
+
 -- ATOMIC ASYNC OPERATIONS
 -- All functions below are simple, atomic git operations
 
