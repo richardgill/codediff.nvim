@@ -38,8 +38,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 
 - Neovim >= 0.7.0 (for Lua FFI support; 0.10+ recommended for vim.system)
 - Git (for git diff features)
-- `curl` or `wget` (for automatic binary download)
-**No compiler required!** The plugin automatically downloads pre-built binaries from GitHub releases.
+- A C compiler:
+  - Linux/macOS: `cc`, GCC, or Clang
+  - Windows: Visual Studio Build Tools (MSVC), Clang, or MinGW-w64
+
+This fork builds its C diff engine locally on first use. Build output is cached under Neovim's cache directory, so the plugin installation itself can remain read-only. Updating native sources automatically selects a new cache entry and triggers one rebuild.
 
 ### Using lazy.nvim
 
@@ -381,7 +384,7 @@ Three strategies are available:
 
 Custom Lua matcher callbacks are not supported.
 
-The C library will be downloaded automatically on first use. No `build` step needed!
+The C library is built locally and cached automatically on first use.
 
 ### Native gutter signs
 
@@ -418,24 +421,21 @@ vim.opt.statuscolumn = "%C%=%l %s"
 
 ### Managing Library Installation
 
-The plugin automatically manages the C library installation:
+This fork automatically builds and caches the C library:
 
-**Automatic Updates:**
-- The library is automatically downloaded on first use
-- When you update the plugin to a new version, the library is automatically updated to match
-- No manual intervention required!
+- The first `:CodeDiff` invocation compiles the bundled native sources.
+- The cache key includes the plugin version and native source contents, so native changes trigger a rebuild.
+- The library is stored under `stdpath("cache")/codediff/native/`; the plugin directory is not modified.
+- If no supported compiler is available, CodeDiff reports which toolchain to install.
 
-**Manual Installation Commands:**
+**Manual Build Commands:**
 ```vim
-" Install/update the library manually
+" Build the library if it is not cached
 :CodeDiff install
 
-" Force reinstall (useful for troubleshooting)
+" Force a clean rebuild into the cache
 :CodeDiff install!
 ```
-
-**Version Management:**
-The installer reads the `VERSION` file to download the matching library version from GitHub releases. This ensures compatibility between the Lua code and C library.
 
 ### Manual Installation
 
