@@ -283,10 +283,17 @@ static bool process_whitespace_changes(
         .seq2_start = modified_index,
         .seq2_end = modified_index + 1,
     };
-    if (!process_block(changes, &block, original_lines, original_count,
-                       modified_lines, modified_count,
-                       consider_whitespace_changes, options, timeout,
-                       hit_timeout)) {
+    int change_index;
+    if (!append_change(changes, &block, &change_index)) {
+      return false;
+    }
+    if (*hit_timeout || timeout_expired(timeout)) {
+      *hit_timeout = true;
+    } else if (!append_line_mapping(
+                   &changes->mappings[change_index], &block, original_lines,
+                   original_count, modified_lines, modified_count,
+                   consider_whitespace_changes, options, timeout,
+                   hit_timeout)) {
       return false;
     }
   }

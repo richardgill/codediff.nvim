@@ -165,6 +165,26 @@ describe("Native line matching", function()
     assert.equal(1, #result.changes[1].line_mappings)
   end)
 
+  local trim_whitespace_cases = {
+    { name = "whitespace-only lines", original = "    ", modified = "" },
+    { name = "leading whitespace removal", original = "  x", modified = "x" },
+    { name = "leading whitespace addition", original = "x", modified = "  x" },
+    { name = "trailing whitespace removal", original = "x  ", modified = "x" },
+    { name = "trailing whitespace addition", original = "x", modified = "x  " },
+    { name = "leading and trailing whitespace", original = "  value  ", modified = "value" },
+  }
+
+  for _, test_case in ipairs(trim_whitespace_cases) do
+    it("refines " .. test_case.name .. " for every matcher", function()
+      for _, strategy in ipairs({ "similarity", "vscode", "equal_line_count" }) do
+        local result = compute({ "before", test_case.original, "after" }, { "before", test_case.modified, "after" }, { strategy = strategy })
+        assert.equal(1, #result.changes)
+        assert.equal(1, #result.changes[1].line_mappings)
+        assert.is_true(#result.changes[1].inner_changes > 0)
+      end
+    end)
+  end
+
   it("leaves pure changes unmatched except for vscode", function()
     local strategies = { "similarity", "equal_line_count" }
     for _, strategy in ipairs(strategies) do
