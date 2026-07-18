@@ -220,6 +220,92 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 }
 ```
 
+### Intraline line matching
+
+CodeDiff uses a callback to pair original and modified lines within each changed block. Paired lines use `CodeDiffLineDelete`/`CodeDiffLineInsert`, with changed text additionally using `CodeDiffCharDelete`/`CodeDiffCharInsert`. Unpaired lines use only `CodeDiffLineDelete` or `CodeDiffLineInsert`. Similarity matching with a `0.75` threshold is the default:
+
+```lua
+local line_matchers = require("codediff.line_matchers")
+
+require("codediff").setup({
+  diff = {
+    line_matcher = line_matchers.similarity,
+  },
+})
+```
+
+Wrap the default matcher to choose a threshold from `0.0` to `1.0`; lower values pair more lines:
+
+```lua
+require("codediff").setup({
+  diff = {
+    line_matcher = function(context)
+      return line_matchers.similarity(context, {
+        threshold = 0.6,
+      })
+    end,
+  },
+})
+```
+
+For GitHub-style matching, pair lines by position only when both sides of a changed block have the same line count:
+
+```lua
+require("codediff").setup({
+  diff = {
+    line_matcher = line_matchers.equal_line_count,
+  },
+})
+```
+
+To disable character-level matching while retaining line-level highlights:
+
+```lua
+require("codediff").setup({
+  diff = {
+    line_matcher = line_matchers.none,
+  },
+})
+```
+
+Custom callbacks receive one changed block and return ordered, non-crossing pairs of 1-based indices:
+
+```lua
+---@class CodeDiffLineMatcherContext
+---@field original_lines string[]
+---@field modified_lines string[]
+---@field original_start_line integer
+---@field modified_start_line integer
+
+---@class CodeDiffLinePair
+---@field original_index integer
+---@field modified_index integer
+
+---@alias CodeDiffLineMatcher fun(context: CodeDiffLineMatcherContext): CodeDiffLinePair[]
+```
+
+For example:
+
+```lua
+local function match_by_position(context)
+  local pair_count = math.min(#context.original_lines, #context.modified_lines)
+  local pairs = {}
+
+  for index = 1, pair_count do
+    pairs[index] = {
+      original_index = index,
+      modified_index = index,
+    }
+  end
+
+  return pairs
+end
+```
+
+Each line may appear in at most one pair. Omitted lines remain unpaired. Paired lines retain `CodeDiffLineInsert` or `CodeDiffLineDelete` and receive `CodeDiffCharInsert` or `CodeDiffCharDelete` over changed characters. Unpaired lines receive only their line-level highlight. Pure insertions and deletions do not invoke the matcher.
+
+Matchers run synchronously during rendering and automatic refreshes. Custom callbacks should avoid I/O and return quickly. `diff.max_computation_time_ms` cannot interrupt custom Lua code.
+
 The C library will be downloaded automatically on first use. No `build` step needed!
 
 ### Managing Library Installation
