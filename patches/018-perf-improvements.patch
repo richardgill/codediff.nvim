@@ -1,0 +1,2279 @@
+From 0b15ee032d53279e264112a45b4bbc45abf11429 Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Sun, 19 Jul 2026 10:15:43 +0100
+Subject: [PATCH] perf improvements
+
+---
+diff --git a/README.md b/README.md
+index dd75bd72376403688e6769e495e14bae0c0c4432..ea805fb3aa2bec588d0d359ded9b4e8c54b888b4 100644
+--- a/README.md
++++ b/README.md
+@@ -146,6 +146,15 @@ This fork builds its C diff engine locally on first use. Build output is cached
+       compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
+       compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
+       compact_sync_folds = true,          -- Sync fold open/close across panes (mirrors Vim diff mode behavior)
++      inline_cache = {
++        enabled = true,                    -- Compute and cache inline diffs plus Tree-sitter captures in a helper process
++        forward = 1,                       -- Warm this many following visible explorer files
++        backward = 0,                      -- Warm this many preceding visible explorer files
++        dwell_ms = 100,                    -- Wait for selection to settle before warming
++        eligibility = { revisions = true, index = true, worktree = true },
++        max_entries = 8,
++        max_bytes = 32 * 1024 * 1024,
++      },
+     },
+ 
+     -- Explorer panel configuration
+diff --git a/doc/codediff.txt b/doc/codediff.txt
+index b2c05f9fad9b8f832d7f77afd4ba35c59b721148..27a78c9a80caa3eab1ee9898997a849af789ef59 100644
+--- a/doc/codediff.txt
++++ b/doc/codediff.txt
+@@ -283,6 +283,15 @@ Setup entry point:
+       compute_moves = false,
+       compact_context_lines = 3,
+       compact_sync_folds = true,
++      inline_cache = {
++        enabled = true,
++        forward = 1,
++        backward = 0,
++        dwell_ms = 100,
++        eligibility = { revisions = true, index = true, worktree = true },
++        max_entries = 8,
++        max_bytes = 32 * 1024 * 1024,
++      },
+       cycle_hunks_across_files = false,
+     },
+     explorer = {
+diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
+index 262baba456177737a4736f57a1ca5e5157e83ce2..ff9522b98e465fc3f73b76272eeda1e4b2d1e547 100644
+--- a/lua/codediff/config.lua
++++ b/lua/codediff/config.lua
+@@ -55,6 +55,19 @@ M.defaults = {
+     compute_moves = false, -- Detect moved code blocks (opt-in, may increase diff computation time)
+     compact_context_lines = 3, -- Number of context lines around hunks in compact mode
+     compact_sync_folds = true, -- Sync fold open/close across panes in compact mode (mirrors Vim diff mode behavior)
++    inline_cache = {
++      enabled = true,
++      forward = 1,
++      backward = 0,
++      dwell_ms = 100,
++      eligibility = {
++        revisions = true,
++        index = true,
++        worktree = true,
++      },
++      max_entries = 8,
++      max_bytes = 32 * 1024 * 1024,
++    },
+   },
+ 
+   -- Explorer panel configuration
+diff --git a/lua/codediff/core/async_diff.lua b/lua/codediff/core/async_diff.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..459f37cbe24b92bc0ca79769afc3d6ae9882b3cc
+--- /dev/null
++++ b/lua/codediff/core/async_diff.lua
+@@ -0,0 +1,250 @@
++local M = {}
++
++local uv = vim.uv or vim.loop
++local mpack = vim.mpack
++local requests = {}
++local owner_requests = {}
++local next_request_id = 0
++local shutting_down = false
++local metrics = {
++  worker_queued = 0,
++  coalesced = 0,
++}
++
++-- uv.new_work serializes this function into an isolated Lua state, so worker helpers cannot use module upvalues.
++local async_worker = function(request_id, library_path, ffi_definitions, payload)
++  local ffi
++  local loaded_lib
++  local c_diff
++
++  local line_range_to_lua = function(range)
++    return { start_line = range.start_line, end_line = range.end_line }
++  end
++
++  local char_range_to_lua = function(range)
++    return {
++      start_line = range.start_line,
++      start_col = range.start_col,
++      end_line = range.end_line,
++      end_col = range.end_col,
++    }
++  end
++
++  local detailed_mapping_to_lua = function(mapping)
++    local inner_changes = {}
++    for index = 0, mapping.inner_change_count - 1 do
++      local inner = mapping.inner_changes[index]
++      inner_changes[#inner_changes + 1] = {
++        original = char_range_to_lua(inner.original),
++        modified = char_range_to_lua(inner.modified),
++      }
++    end
++    local line_mappings = {}
++    for index = 0, mapping.line_mapping_count - 1 do
++      local line_mapping = mapping.line_mappings[index]
++      line_mappings[#line_mappings + 1] = {
++        original = line_range_to_lua(line_mapping.original),
++        modified = line_range_to_lua(line_mapping.modified),
++      }
++    end
++    return {
++      original = line_range_to_lua(mapping.original),
++      modified = line_range_to_lua(mapping.modified),
++      inner_changes = inner_changes,
++      line_mappings = line_mappings,
++    }
++  end
++
++  local lines_diff_to_lua = function(diff)
++    local result = { changes = {}, moves = {}, hit_timeout = diff.hit_timeout }
++    for index = 0, diff.changes.count - 1 do
++      result.changes[#result.changes + 1] = detailed_mapping_to_lua(diff.changes.mappings[index])
++    end
++    for index = 0, diff.moves.count - 1 do
++      local move = diff.moves.moves[index]
++      result.moves[#result.moves + 1] = {
++        original = line_range_to_lua(move.original),
++        modified = line_range_to_lua(move.modified),
++      }
++    end
++    return result
++  end
++
++  local traceback = function(err)
++    return debug.traceback(tostring(err), 2)
++  end
++
++  local ok, result = xpcall(function()
++    ffi = require("ffi")
++    if not pcall(ffi.typeof, "CodeDiffLinesDiff") then
++      ffi.cdef(ffi_definitions)
++    end
++    loaded_lib = ffi.load(library_path)
++
++    local args = vim.mpack.decode(payload)
++    local original_lines = args.original_lines
++    local modified_lines = args.modified_lines
++    local options = args.options
++    local c_original = ffi.new("const char*[?]", #original_lines)
++    local c_modified = ffi.new("const char*[?]", #modified_lines)
++    for index, line in ipairs(original_lines) do
++      c_original[index - 1] = line
++    end
++    for index, line in ipairs(modified_lines) do
++      c_modified[index - 1] = line
++    end
++
++    local c_options = ffi.new("CodeDiffDiffOptions")
++    c_options.ignore_trim_whitespace = options.ignore_trim_whitespace
++    c_options.max_computation_time_ms = options.max_computation_time_ms
++    c_options.compute_moves = options.compute_moves
++    c_options.extend_to_subwords = options.extend_to_subwords
++    c_options.line_matcher_strategy = options.line_matcher_strategy
++    c_options.line_matcher_threshold = options.line_matcher_threshold
++
++    c_diff = loaded_lib.compute_diff(c_original, #original_lines, c_modified, #modified_lines, c_options)
++    assert(c_diff ~= nil, "compute_diff returned NULL")
++    return vim.mpack.encode(lines_diff_to_lua(c_diff))
++  end, traceback)
++
++  if c_diff ~= nil then
++    loaded_lib.free_lines_diff(c_diff)
++  end
++  return request_id, ok and result or "", ok and "" or tostring(result)
++end
++
++local work_context
++
++local fail_request = function(request, err)
++  requests[request.id] = nil
++  if request.owner ~= nil then
++    owner_requests[request.owner] = nil
++  end
++  return nil, tostring(err)
++end
++
++local start_request = function(request)
++  local encoded, payload = pcall(mpack.encode, request.payload)
++  if not encoded then
++    return fail_request(request, payload)
++  end
++  local queued, err = work_context:queue(request.id, request.library_path, request.ffi_definitions, payload)
++  if not queued then
++    return fail_request(request, err)
++  end
++  if request.owner ~= nil then
++    owner_requests[request.owner] = { active = request.id }
++  end
++  metrics.worker_queued = metrics.worker_queued + 1
++  return true
++end
++
++local finish_request = function(request_id, encoded_result, worker_error)
++  local request = requests[request_id]
++  if not request then
++    return
++  end
++  requests[request_id] = nil
++
++  local pending
++  if request.owner ~= nil then
++    local owner_state = owner_requests[request.owner]
++    if owner_state and owner_state.active == request_id then
++      pending = owner_state.pending and requests[owner_state.pending] or nil
++      owner_requests[request.owner] = nil
++    end
++  end
++  if pending then
++    local started, start_error = start_request(pending)
++    if not started then
++      pending.callback(nil, start_error)
++    end
++  end
++  if not request.callback then
++    return
++  end
++  if worker_error ~= "" then
++    request.callback(nil, worker_error)
++    return
++  end
++
++  local ok, result = pcall(mpack.decode, encoded_result)
++  if ok then
++    request.callback(result, nil)
++  else
++    request.callback(nil, tostring(result))
++  end
++end
++
++local complete_request = function(request_id, encoded_result, worker_error)
++  vim.schedule(function()
++    finish_request(request_id, encoded_result, worker_error)
++  end)
++end
++
++work_context = uv.new_work(async_worker, complete_request)
++
++function M.compute(args)
++  if shutting_down then
++    return nil, "async diff worker is shutting down"
++  end
++  assert(type(args.callback) == "function", "async diff callback is required")
++
++  next_request_id = next_request_id + 1
++  local request = {
++    id = next_request_id,
++    callback = args.callback,
++    owner = args.owner,
++    payload = {
++      original_lines = args.original_lines,
++      modified_lines = args.modified_lines,
++      options = args.options,
++    },
++    library_path = args.library_path,
++    ffi_definitions = args.ffi_definitions,
++  }
++  requests[request.id] = request
++
++  local owner_state = request.owner ~= nil and owner_requests[request.owner] or nil
++  if owner_state then
++    local active = assert(requests[owner_state.active], "active async diff request is missing")
++    -- new_work:queue() exposes no uv_work_t to cancel, so superseded work must finish and its result is discarded.
++    active.callback = nil
++    if owner_state.pending then
++      requests[owner_state.pending] = nil
++    end
++    owner_state.pending = request.id
++    metrics.coalesced = metrics.coalesced + 1
++    return true
++  end
++
++  local started, err = start_request(request)
++  if not started then
++    return nil, err
++  end
++  return true
++end
++
++function M.get_metrics()
++  return vim.deepcopy(metrics)
++end
++
++function M.reset_metrics()
++  metrics = {
++    worker_queued = 0,
++    coalesced = 0,
++  }
++end
++
++function M.shutdown()
++  shutting_down = true
++  requests = {}
++  owner_requests = {}
++end
++
++vim.api.nvim_create_autocmd("VimLeavePre", {
++  group = vim.api.nvim_create_augroup("CodeDiffAsyncDiffShutdown", { clear = true }),
++  callback = M.shutdown,
++})
++
++return M
+diff --git a/lua/codediff/core/diff.lua b/lua/codediff/core/diff.lua
+index 13277ec478fa673be4cedb87a5adb0a745ebb506..14f9b23e947b7bf1972f2769e325f406facf8869 100644
+--- a/lua/codediff/core/diff.lua
++++ b/lua/codediff/core/diff.lua
+@@ -3,6 +3,7 @@
+ 
+ local M = {}
+ local ffi = require("ffi")
++local async_diff = require("codediff.core.async_diff")
+ 
+ -- Get VERSION from version.lua (single source of truth)
+ local version = require("codediff.version")
+@@ -43,6 +44,7 @@ end
+ 
+ -- Try to load the library - fall back to unversioned name for local builds
+ local lib
++local loaded_lib_path = lib_path
+ local load_ok, load_err = pcall(function()
+   lib = ffi.load(lib_path)
+ end)
+@@ -53,95 +55,97 @@ if not load_ok then
+   local fallback_path = plugin_root .. "/" .. fallback_lib_name
+   if vim.fn.filereadable(fallback_path) == 1 then
+     lib = ffi.load(fallback_path)
++    loaded_lib_path = fallback_path
+   else
+     error(load_err)
+   end
+ end
+ 
+ -- FFI type definitions matching C types.h
+-ffi.cdef([[
++local ffi_definitions = [[
+   // Basic range types
+   typedef struct {
+     int start_line;  // 1-based, inclusive
+     int end_line;    // 1-based, EXCLUSIVE
+-  } LineRange;
++  } CodeDiffLineRange;
+ 
+   typedef struct {
+     int start_line;  // 1-based
+     int start_col;   // 1-based, inclusive
+     int end_line;    // 1-based
+     int end_col;     // 1-based, EXCLUSIVE
+-  } CharRange;
++  } CodeDiffCharRange;
+ 
+   // Mapping types
+   typedef struct {
+-    CharRange original;
+-    CharRange modified;
+-  } RangeMapping;
++    CodeDiffCharRange original;
++    CodeDiffCharRange modified;
++  } CodeDiffRangeMapping;
+ 
+   typedef struct {
+-    LineRange original;
+-    LineRange modified;
+-  } LineMapping;
++    CodeDiffLineRange original;
++    CodeDiffLineRange modified;
++  } CodeDiffLineMapping;
+ 
+   typedef struct {
+-    LineRange original;
+-    LineRange modified;
+-    RangeMapping* inner_changes;
++    CodeDiffLineRange original;
++    CodeDiffLineRange modified;
++    CodeDiffRangeMapping* inner_changes;
+     int inner_change_count;
+-    LineMapping* line_mappings;
++    CodeDiffLineMapping* line_mappings;
+     int line_mapping_count;
+     int line_mapping_capacity;
+-  } DetailedLineRangeMapping;
++  } CodeDiffDetailedLineRangeMapping;
+ 
+   typedef struct {
+-    DetailedLineRangeMapping* mappings;
++    CodeDiffDetailedLineRangeMapping* mappings;
+     int count;
+     int capacity;
+-  } DetailedLineRangeMappingArray;
++  } CodeDiffDetailedLineRangeMappingArray;
+ 
+   typedef struct {
+-    LineRange original;
+-    LineRange modified;
+-  } MovedText;
++    CodeDiffLineRange original;
++    CodeDiffLineRange modified;
++  } CodeDiffMovedText;
+ 
+   typedef struct {
+-    MovedText* moves;
++    CodeDiffMovedText* moves;
+     int count;
+     int capacity;
+-  } MovedTextArray;
++  } CodeDiffMovedTextArray;
+ 
+   // Main diff result
+   typedef struct {
+-    DetailedLineRangeMappingArray changes;
+-    MovedTextArray moves;
++    CodeDiffDetailedLineRangeMappingArray changes;
++    CodeDiffMovedTextArray moves;
+     bool hit_timeout;
+-  } LinesDiff;
++  } CodeDiffLinesDiff;
+ 
+   // Options
+-  typedef int LineMatcherStrategy;
++  typedef int CodeDiffLineMatcherStrategy;
+ 
+   typedef struct {
+     bool ignore_trim_whitespace;
+     int max_computation_time_ms;
+     bool compute_moves;
+     bool extend_to_subwords;
+-    LineMatcherStrategy line_matcher_strategy;
++    CodeDiffLineMatcherStrategy line_matcher_strategy;
+     double line_matcher_threshold;
+-  } DiffOptions;
++  } CodeDiffDiffOptions;
+ 
+   // API functions
+-  LinesDiff* compute_diff(
++  CodeDiffLinesDiff* compute_diff(
+     const char** original_lines,
+     int original_count,
+     const char** modified_lines,
+     int modified_count,
+-    const DiffOptions* options
++    const CodeDiffDiffOptions* options
+   );
+ 
+-  void free_lines_diff(LinesDiff* diff);
++  void free_lines_diff(CodeDiffLinesDiff* diff);
+   const char* get_version(void);
+-]])
++]]
++ffi.cdef(ffi_definitions)
+ 
+ ---@class DiffOptions
+ ---@field ignore_trim_whitespace boolean
+@@ -247,10 +251,25 @@ local function lines_diff_to_lua(c_diff)
+   }
+ end
+ 
++local function resolve_options(options)
++  options = options or {}
++  local config = require("codediff.config")
++  local defaults = config.defaults.diff
++  local matcher = config.resolve_line_matcher(options.line_matcher or config.options.diff.line_matcher)
++  return {
++    ignore_trim_whitespace = options.ignore_trim_whitespace or defaults.ignore_trim_whitespace,
++    max_computation_time_ms = options.max_computation_time_ms or defaults.max_computation_time_ms,
++    compute_moves = options.compute_moves or defaults.compute_moves,
++    extend_to_subwords = options.extend_to_subwords or false,
++    line_matcher_strategy = line_matcher_strategies[matcher.strategy],
++    line_matcher_threshold = matcher.threshold or defaults.line_matcher.threshold,
++  }
++end
++
+ -- Main API: Compute diff between two sets of lines
+ -- Returns Lua table representation of LinesDiff
+ function M.compute_diff(original_lines, modified_lines, options)
+-  options = options or {}
++  local resolved_options = resolve_options(options)
+ 
+   -- Convert Lua lines to C arrays
+   local c_orig, orig_count = lua_to_c_strings(original_lines)
+@@ -259,15 +278,13 @@ function M.compute_diff(original_lines, modified_lines, options)
+   -- Create options struct
+   ---@type DiffOptions
+   ---@diagnostic disable-next-line: assign-type-mismatch
+-  local c_options = ffi.new("DiffOptions")
+-  c_options.ignore_trim_whitespace = options.ignore_trim_whitespace or false
+-  c_options.max_computation_time_ms = options.max_computation_time_ms or 5000
+-  c_options.compute_moves = options.compute_moves or false
+-  c_options.extend_to_subwords = options.extend_to_subwords or false
+-  local config = require("codediff.config")
+-  local matcher = config.resolve_line_matcher(options.line_matcher or config.options.diff.line_matcher)
+-  c_options.line_matcher_strategy = line_matcher_strategies[matcher.strategy]
+-  c_options.line_matcher_threshold = matcher.threshold or 0.75
++  local c_options = ffi.new("CodeDiffDiffOptions")
++  c_options.ignore_trim_whitespace = resolved_options.ignore_trim_whitespace
++  c_options.max_computation_time_ms = resolved_options.max_computation_time_ms
++  c_options.compute_moves = resolved_options.compute_moves
++  c_options.extend_to_subwords = resolved_options.extend_to_subwords
++  c_options.line_matcher_strategy = resolved_options.line_matcher_strategy
++  c_options.line_matcher_threshold = resolved_options.line_matcher_threshold
+ 
+   -- Call C function
+   local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
+@@ -285,6 +302,23 @@ function M.compute_diff(original_lines, modified_lines, options)
+   return lua_diff
+ end
+ 
++function M.compute_diff_async(args)
++  assert(type(args) == "table", "async diff arguments are required")
++  assert(type(args.original_lines) == "table", "async diff original_lines are required")
++  assert(type(args.modified_lines) == "table", "async diff modified_lines are required")
++  assert(type(args.callback) == "function", "async diff callback is required")
++
++  return async_diff.compute({
++    original_lines = args.original_lines,
++    modified_lines = args.modified_lines,
++    options = resolve_options(args.options),
++    callback = args.callback,
++    owner = args.owner,
++    library_path = loaded_lib_path,
++    ffi_definitions = ffi_definitions,
++  })
++end
++
+ -- Get library version
+ function M.get_version()
+   return ffi.string(lib.get_version())
+diff --git a/lua/codediff/core/inline_worker.lua b/lua/codediff/core/inline_worker.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..0885d49d61696d5fda2794b04b9f9c18448d00a5
+--- /dev/null
++++ b/lua/codediff/core/inline_worker.lua
+@@ -0,0 +1,267 @@
++local M = {}
++
++local config = require("codediff.config")
++local version = require("codediff.version")
++
++local channel
++local next_request_id = 0
++local requests = {}
++local inflight = {}
++local cache = {}
++local access_order = {}
++local cache_bytes = 0
++local cache_generation = 0
++local shutting_down = false
++local worker_stderr = {}
++local module_path = debug.getinfo(1, "S").source:sub(2)
++local plugin_root = vim.fn.fnamemodify(module_path, ":h:h:h:h")
++local metrics = {
++  hits = 0,
++  misses = 0,
++  deduplicated = 0,
++  evictions = 0,
++  warm_used = 0,
++}
++
++local update_access_order = function(key)
++  for index, current in ipairs(access_order) do
++    if current == key then
++      table.remove(access_order, index)
++      return table.insert(access_order, key)
++    end
++  end
++  table.insert(access_order, key)
++end
++
++local remove_entry = function(key, evicted)
++  local entry = cache[key]
++  if not entry then
++    return
++  end
++  cache[key] = nil
++  cache_bytes = cache_bytes - entry.bytes
++  if evicted then
++    metrics.evictions = metrics.evictions + 1
++  end
++  for index, current in ipairs(access_order) do
++    if current == key then
++      table.remove(access_order, index)
++      return
++    end
++  end
++end
++
++local enforce_budget = function()
++  local options = config.options.diff.inline_cache
++  while #access_order > options.max_entries or cache_bytes > options.max_bytes do
++    remove_entry(access_order[1], true)
++  end
++end
++
++local put = function(key, value, bytes, warm)
++  local options = config.options.diff.inline_cache
++  if bytes > options.max_bytes or options.max_entries == 0 then
++    return
++  end
++  remove_entry(key)
++  cache[key] = { value = value, bytes = bytes, warm = warm }
++  cache_bytes = cache_bytes + bytes
++  update_access_order(key)
++  enforce_budget()
++end
++
++local make_key = function(args)
++  local original = table.concat(args.original_lines, "\n")
++  local modified = table.concat(args.modified_lines, "\n")
++  local options = vim.mpack.encode(args.options or {})
++  return table.concat({
++    vim.fn.sha256(original),
++    vim.fn.sha256(modified),
++    args.filetype or "",
++    vim.fn.sha256(options),
++    version.VERSION,
++    vim.fn.sha256(vim.o.runtimepath),
++  }, ":")
++end
++
++local fail_all = function(err)
++  local pending = requests
++  requests = {}
++  inflight = {}
++  for _, request in pairs(pending) do
++    for _, callback in ipairs(request.callbacks) do
++      callback(nil, err)
++    end
++  end
++end
++
++local start = function()
++  if channel and vim.fn.jobwait({ channel }, 0)[1] == -1 then
++    return channel
++  end
++  if shutting_down then
++    return nil, "inline worker is shutting down"
++  end
++
++  worker_stderr = {}
++  channel = vim.fn.jobstart({ vim.v.progpath, "--headless", "--clean", "--embed" }, {
++    rpc = true,
++    on_stderr = function(_, data)
++      for _, line in ipairs(data or {}) do
++        if line ~= "" then
++          worker_stderr[#worker_stderr + 1] = line
++        end
++      end
++    end,
++    on_exit = function(_, code)
++      local exited_channel = channel
++      channel = nil
++      if not shutting_down then
++        local details = #worker_stderr > 0 and ": " .. table.concat(worker_stderr, "\n") or ""
++        fail_all("inline worker exited with code " .. code .. " (channel " .. tostring(exited_channel) .. ")" .. details)
++      end
++    end,
++  })
++  if channel <= 0 then
++    local failed_channel = channel
++    channel = nil
++    return nil, "failed to start inline worker: " .. tostring(failed_channel)
++  end
++
++  local ok, err = pcall(
++    vim.rpcrequest,
++    channel,
++    "nvim_exec_lua",
++    [[
++    local runtimepath = ...
++    vim.o.runtimepath = runtimepath
++    require("codediff.core.inline_worker_child").setup(1)
++    return true
++  ]],
++    { plugin_root .. "," .. vim.o.runtimepath }
++  )
++  if not ok then
++    vim.fn.jobstop(channel)
++    channel = nil
++    return nil, tostring(err)
++  end
++  return channel
++end
++
++function M.compute(args)
++  assert(type(args.callback) == "function", "inline worker callback is required")
++
++  local key = make_key(args)
++  local cached = cache[key]
++  if cached then
++    metrics.hits = metrics.hits + 1
++    if cached.warm and args.kind ~= "warm" then
++      cached.warm = false
++      metrics.warm_used = metrics.warm_used + 1
++    end
++    update_access_order(key)
++    args.callback(cached.value, nil, true)
++    return true
++  end
++
++  local active = inflight[key]
++  if active then
++    metrics.deduplicated = metrics.deduplicated + 1
++    if active.warm and args.kind ~= "warm" then
++      active.warm = false
++      metrics.warm_used = metrics.warm_used + 1
++    end
++    active.callbacks[#active.callbacks + 1] = args.callback
++    return true
++  end
++
++  local worker_channel, err = start()
++  if not worker_channel then
++    return nil, err
++  end
++
++  metrics.misses = metrics.misses + 1
++  next_request_id = next_request_id + 1
++  local request = {
++    id = next_request_id,
++    key = key,
++    callbacks = { args.callback },
++    input_bytes = #table.concat(args.original_lines, "\n") + #table.concat(args.modified_lines, "\n"),
++    cache_generation = cache_generation,
++    warm = args.kind == "warm",
++  }
++  requests[request.id] = request
++  inflight[key] = request
++
++  vim.rpcnotify(worker_channel, "nvim_exec_lua", "return require('codediff.core.inline_worker_child').compute(...)", {
++    request.id,
++    {
++      original_lines = args.original_lines,
++      modified_lines = args.modified_lines,
++      options = args.options,
++      filetype = args.filetype,
++    },
++  })
++  return true
++end
++
++function M._complete(request_id, ok, payload)
++  local request = requests[request_id]
++  if not request then
++    return
++  end
++  requests[request_id] = nil
++  inflight[request.key] = nil
++
++  local value
++  local err
++  if ok then
++    local decoded, result = pcall(vim.mpack.decode, payload)
++    if decoded then
++      value = result
++      if request.cache_generation == cache_generation then
++        put(request.key, value, request.input_bytes + #payload, request.warm)
++      end
++    else
++      err = tostring(result)
++    end
++  else
++    err = payload
++  end
++
++  for _, callback in ipairs(request.callbacks) do
++    callback(value, err, false)
++  end
++end
++
++function M.clear()
++  cache_generation = cache_generation + 1
++  cache = {}
++  access_order = {}
++  cache_bytes = 0
++end
++
++function M.get_metrics()
++  return vim.tbl_extend("force", vim.deepcopy(metrics), {
++    entries = #access_order,
++    bytes = cache_bytes,
++    inflight = vim.tbl_count(inflight),
++  })
++end
++
++function M.shutdown()
++  shutting_down = true
++  fail_all("inline worker shut down")
++  M.clear()
++  if channel then
++    pcall(vim.fn.jobstop, channel)
++    channel = nil
++  end
++end
++
++vim.api.nvim_create_autocmd("VimLeavePre", {
++  group = vim.api.nvim_create_augroup("CodeDiffInlineWorkerShutdown", { clear = true }),
++  callback = M.shutdown,
++})
++
++return M
+diff --git a/lua/codediff/core/inline_worker_child.lua b/lua/codediff/core/inline_worker_child.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..49e956221fed27a3b366e9dbf359a23cc76b5966
+--- /dev/null
++++ b/lua/codediff/core/inline_worker_child.lua
+@@ -0,0 +1,31 @@
++local M = {}
++
++local parent_channel
++
++local traceback = function(err)
++  return debug.traceback(tostring(err), 2)
++end
++
++function M.setup(channel)
++  parent_channel = channel
++end
++
++function M.compute(request_id, args)
++  local ok, result = xpcall(function()
++    local diff = require("codediff.core.diff")
++    local inline = require("codediff.ui.inline")
++    return {
++      lines_diff = diff.compute_diff(args.original_lines, args.modified_lines, args.options),
++      syntax_hls = inline.compute_syntax_highlights(args.original_lines, args.filetype),
++    }
++  end, traceback)
++
++  local payload = ok and vim.mpack.encode(result) or tostring(result)
++  vim.rpcnotify(parent_channel, "nvim_exec_lua", "return require('codediff.core.inline_worker')._complete(...)", {
++    request_id,
++    ok,
++    payload,
++  })
++end
++
++return M
+diff --git a/lua/codediff/ui/auto_refresh.lua b/lua/codediff/ui/auto_refresh.lua
+index 744237a92ee6e1c119262762e5721b02cd8fed8f..67c9350ef45ecc0b140ceaca11ae29505f335f37 100644
+--- a/lua/codediff/ui/auto_refresh.lua
++++ b/lua/codediff/ui/auto_refresh.lua
+@@ -3,6 +3,7 @@
+ local M = {}
+ 
+ local diff = require("codediff.core.diff")
++local inline_worker = require("codediff.core.inline_worker")
+ local core = require("codediff.ui.core")
+ 
+ -- Throttle delay in milliseconds
+@@ -13,6 +14,10 @@ local THROTTLE_DELAY_MS = 200
+ -- Buffer pair info is retrieved from lifecycle
+ local watched_buffers = {}
+ 
++local function notify_async_error(err)
++  vim.notify_once("[codediff] async diff failed: " .. tostring(err), vim.log.levels.ERROR)
++end
++
+ -- Cancel pending timer for a buffer
+ local function cancel_timer(bufnr)
+   local watcher = watched_buffers[bufnr]
+@@ -22,6 +27,126 @@ local function cancel_timer(bufnr)
+   end
+ end
+ 
++local function resync_diff_windows(update)
++  local original_win, modified_win, result_win = nil, nil, nil
++  local _, stored_result_win = update.lifecycle.get_result(update.tabpage)
++
++  for _, win in ipairs(vim.api.nvim_list_wins()) do
++    local buf = vim.api.nvim_win_get_buf(win)
++    if buf == update.original_bufnr then
++      original_win = win
++    elseif buf == update.modified_bufnr then
++      modified_win = win
++    end
++  end
++
++  -- Check if result window is valid
++  if stored_result_win and vim.api.nvim_win_is_valid(stored_result_win) then
++    result_win = stored_result_win
++  end
++  if not original_win or not modified_win then
++    return
++  end
++
++  local current_win = vim.api.nvim_get_current_win()
++  -- Only resync if user is in one of the diff windows
++  if current_win ~= original_win and current_win ~= modified_win and current_win ~= result_win then
++    return
++  end
++  local other_win = current_win == original_win and modified_win or original_win
++
++  -- Step 1: Save full view state for all windows to prevent flicker
++  local saved_view = vim.fn.winsaveview()
++  vim.api.nvim_set_current_win(other_win)
++  local other_saved_view = vim.fn.winsaveview()
++  local result_saved_view = nil
++  if result_win then
++    vim.api.nvim_set_current_win(result_win)
++    result_saved_view = vim.fn.winsaveview()
++  end
++  vim.api.nvim_set_current_win(current_win)
++
++  -- Step 2: Reset all windows to line 1 (baseline for scrollbind)
++  vim.api.nvim_win_set_cursor(original_win, { 1, 0 })
++  vim.api.nvim_win_set_cursor(modified_win, { 1, 0 })
++  if result_win then
++    vim.api.nvim_win_set_cursor(result_win, { 1, 0 })
++  end
++
++  -- Step 3: Re-establish scrollbind (reset sync state)
++  vim.wo[original_win].scrollbind = false
++  vim.wo[modified_win].scrollbind = false
++  if result_win then
++    vim.wo[result_win].scrollbind = false
++  end
++  vim.wo[original_win].scrollbind = true
++  vim.wo[modified_win].scrollbind = true
++  if result_win then
++    vim.wo[result_win].scrollbind = true
++  end
++
++  -- Step 4: Restore full view state for all windows
++  vim.api.nvim_set_current_win(other_win)
++  vim.fn.winrestview(other_saved_view)
++  if result_win and result_saved_view then
++    vim.api.nvim_set_current_win(result_win)
++    vim.fn.winrestview(result_saved_view)
++  end
++  vim.api.nvim_set_current_win(current_win)
++  vim.fn.winrestview(saved_view)
++end
++
++local function apply_diff_update(update, lines_diff, err)
++  if update.watcher and watched_buffers[update.bufnr] ~= update.watcher then
++    return
++  end
++  if err or not lines_diff then
++    notify_async_error(err or "empty result")
++    return
++  end
++  -- Double-check buffer validity after schedule
++  if not vim.api.nvim_buf_is_valid(update.original_bufnr) or not vim.api.nvim_buf_is_valid(update.modified_bufnr) then
++    watched_buffers[update.bufnr] = nil
++    return
++  end
++  if
++    vim.api.nvim_buf_get_changedtick(update.original_bufnr) ~= update.original_changedtick
++    or vim.api.nvim_buf_get_changedtick(update.modified_bufnr) ~= update.modified_changedtick
++  then
++    return
++  end
++  if not vim.api.nvim_tabpage_is_valid(update.tabpage) then
++    return
++  end
++  local current_original, current_modified = update.lifecycle.get_buffers(update.tabpage)
++  if current_original ~= update.original_bufnr or current_modified ~= update.modified_bufnr then
++    return
++  end
++
++  -- Update stored diff result in lifecycle (critical for hunk navigation and do/dp)
++  update.lifecycle.update_diff_result(update.tabpage, lines_diff)
++
++  -- Refresh compact mode folds if active
++  require("codediff.ui.view.compact").refresh(update.tabpage)
++
++  -- Check if this is an inline mode session
++  local session = update.lifecycle.get_session(update.tabpage)
++  if session and session.layout == "inline" then
++    local inline_mod = require("codediff.ui.inline")
++    inline_mod.render_inline_diff(update.modified_bufnr, lines_diff, update.original_lines, update.modified_lines, {
++      syntax_hls = update.syntax_hls,
++    })
++    return
++  end
++
++  -- Side-by-side mode: Update decorations on both buffers
++  core.render_diff(update.original_bufnr, update.modified_bufnr, update.original_lines, update.modified_lines, lines_diff)
++
++  -- Re-sync scrollbind after filler changes
++  -- This ensures all windows stay aligned even if fillers were added/removed
++  resync_diff_windows(update)
++end
++
+ -- Perform diff computation and update decorations
+ -- @param bufnr number: Buffer to update
+ -- @param skip_watcher_check boolean: If true, don't require buffer to be in watched_buffers
+@@ -74,114 +199,53 @@ local function do_diff_update(bufnr, skip_watcher_check)
+   -- Get fresh buffer content
+   local original_lines = vim.api.nvim_buf_get_lines(original_bufnr, 0, -1, false)
+   local modified_lines = vim.api.nvim_buf_get_lines(modified_bufnr, 0, -1, false)
++  local original_changedtick = vim.api.nvim_buf_get_changedtick(original_bufnr)
++  local modified_changedtick = vim.api.nvim_buf_get_changedtick(modified_bufnr)
+ 
+   -- Async diff computation
+-  vim.schedule(function()
+-    -- Double-check buffer validity after schedule
+-    if not vim.api.nvim_buf_is_valid(original_bufnr) or not vim.api.nvim_buf_is_valid(modified_bufnr) then
+-      if watched_buffers[bufnr] then
+-        watched_buffers[bufnr] = nil
+-      end
+-      return
+-    end
+-
+-    -- Compute diff
+-    local config = require("codediff.config")
+-    local diff_options = {
+-      max_computation_time_ms = config.options.diff.max_computation_time_ms,
+-      ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
+-      compute_moves = config.options.diff.compute_moves,
+-    }
+-    local lines_diff = diff.compute_diff(original_lines, modified_lines, diff_options)
+-    if not lines_diff then
+-      return
+-    end
+-
+-    -- Update stored diff result in lifecycle (critical for hunk navigation and do/dp)
+-    lifecycle.update_diff_result(tabpage, lines_diff)
+-
+-    -- Refresh compact mode folds if active
+-    require("codediff.ui.view.compact").refresh(tabpage)
+-
+-    -- Check if this is an inline mode session
+-    local session = lifecycle.get_session(tabpage)
+-    if session and session.layout == "inline" then
+-      local inline_mod = require("codediff.ui.inline")
+-      inline_mod.render_inline_diff(modified_bufnr, lines_diff, original_lines, modified_lines)
+-      return
+-    end
+-
+-    -- Side-by-side mode: Update decorations on both buffers
+-    core.render_diff(original_bufnr, modified_bufnr, original_lines, modified_lines, lines_diff)
+-
+-    -- Re-sync scrollbind after filler changes
+-    -- This ensures all windows stay aligned even if fillers were added/removed
+-    local original_win, modified_win, result_win = nil, nil, nil
+-    local _, stored_result_win = lifecycle.get_result(tabpage)
+-
+-    for _, win in ipairs(vim.api.nvim_list_wins()) do
+-      local buf = vim.api.nvim_win_get_buf(win)
+-      if buf == original_bufnr then
+-        original_win = win
+-      elseif buf == modified_bufnr then
+-        modified_win = win
+-      end
+-    end
+-
+-    -- Check if result window is valid
+-    if stored_result_win and vim.api.nvim_win_is_valid(stored_result_win) then
+-      result_win = stored_result_win
+-    end
+-
+-    if original_win and modified_win then
+-      local current_win = vim.api.nvim_get_current_win()
+-
+-      -- Only resync if user is in one of the diff windows
+-      if current_win == original_win or current_win == modified_win or current_win == result_win then
+-        local other_win = current_win == original_win and modified_win or original_win
+-
+-        -- Step 1: Save full view state for all windows to prevent flicker
+-        local saved_view = vim.fn.winsaveview()
+-        vim.api.nvim_set_current_win(other_win)
+-        local other_saved_view = vim.fn.winsaveview()
+-        local result_saved_view = nil
+-        if result_win then
+-          vim.api.nvim_set_current_win(result_win)
+-          result_saved_view = vim.fn.winsaveview()
+-        end
+-        vim.api.nvim_set_current_win(current_win)
+-
+-        -- Step 2: Reset all windows to line 1 (baseline for scrollbind)
+-        vim.api.nvim_win_set_cursor(original_win, { 1, 0 })
+-        vim.api.nvim_win_set_cursor(modified_win, { 1, 0 })
+-        if result_win then
+-          vim.api.nvim_win_set_cursor(result_win, { 1, 0 })
+-        end
+-
+-        -- Step 3: Re-establish scrollbind (reset sync state)
+-        vim.wo[original_win].scrollbind = false
+-        vim.wo[modified_win].scrollbind = false
+-        if result_win then
+-          vim.wo[result_win].scrollbind = false
+-        end
+-        vim.wo[original_win].scrollbind = true
+-        vim.wo[modified_win].scrollbind = true
+-        if result_win then
+-          vim.wo[result_win].scrollbind = true
+-        end
+-
+-        -- Step 4: Restore full view state for all windows
+-        vim.api.nvim_set_current_win(other_win)
+-        vim.fn.winrestview(other_saved_view)
+-        if result_win and result_saved_view then
+-          vim.api.nvim_set_current_win(result_win)
+-          vim.fn.winrestview(result_saved_view)
+-        end
+-        vim.api.nvim_set_current_win(current_win)
+-        vim.fn.winrestview(saved_view)
++  local config = require("codediff.config")
++  local diff_options = {
++    max_computation_time_ms = config.options.diff.max_computation_time_ms,
++    ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
++    compute_moves = config.options.diff.compute_moves,
++    line_matcher = config.options.diff.line_matcher,
++  }
++  local update = {
++    bufnr = bufnr,
++    watcher = watcher,
++    lifecycle = lifecycle,
++    tabpage = tabpage,
++    original_bufnr = original_bufnr,
++    modified_bufnr = modified_bufnr,
++    original_lines = original_lines,
++    modified_lines = modified_lines,
++    original_changedtick = original_changedtick,
++    modified_changedtick = modified_changedtick,
++  }
++  local session = lifecycle.get_session(tabpage)
++  local use_inline_worker = session and session.layout == "inline" and config.options.diff.inline_cache.enabled ~= false
++  local compute = use_inline_worker and inline_worker.compute or diff.compute_diff_async
++  local request = {
++    original_lines = original_lines,
++    modified_lines = modified_lines,
++    options = diff_options,
++    owner = "auto-refresh:" .. tabpage,
++    callback = function(result, err)
++      if use_inline_worker and result then
++        update.syntax_hls = result.syntax_hls
++        apply_diff_update(update, result.lines_diff, err)
++      else
++        apply_diff_update(update, result, err)
+       end
+-    end
+-  end)
++    end,
++  }
++  if use_inline_worker then
++    request.filetype = vim.bo[modified_bufnr].filetype
++  end
++  local queued, queue_error = compute(request)
++  if not queued then
++    notify_async_error(queue_error)
++  end
+ end
+ 
+ -- Trigger diff update with throttling
+diff --git a/lua/codediff/ui/explorer/inline_warm.lua b/lua/codediff/ui/explorer/inline_warm.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..29801855cce4ac07a0229ef65bb21bfba4339103
+--- /dev/null
++++ b/lua/codediff/ui/explorer/inline_warm.lua
+@@ -0,0 +1,247 @@
++local M = {}
++
++local config = require("codediff.config")
++local git = require("codediff.core.git")
++local inline_worker = require("codediff.core.inline_worker")
++local lifecycle = require("codediff.ui.lifecycle")
++local refresh = require("codediff.ui.explorer.refresh")
++
++local split_file = function(contents)
++  local lines = vim.split(contents, "\n", { plain = true })
++  if lines[#lines] == "" then
++    table.remove(lines)
++  end
++  for index, line in ipairs(lines) do
++    lines[index] = line:gsub("\r$", "")
++  end
++  return lines
++end
++
++local read_worktree = function(path, callback)
++  local bufnr = vim.fn.bufnr(path, false)
++  if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
++    callback(nil, vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
++    return
++  end
++
++  vim.uv.fs_open(path, "r", 438, function(open_err, fd)
++    if open_err then
++      return vim.schedule(function()
++        callback(open_err)
++      end)
++    end
++    vim.uv.fs_fstat(fd, function(stat_err, stat)
++      if stat_err then
++        vim.uv.fs_close(fd)
++        return vim.schedule(function()
++          callback(stat_err)
++        end)
++      end
++      vim.uv.fs_read(fd, stat.size, 0, function(read_err, contents)
++        vim.uv.fs_close(fd)
++        vim.schedule(function()
++          callback(read_err, read_err and nil or split_file(contents))
++        end)
++      end)
++    end)
++  end)
++end
++
++local read_revision = function(revision, root, path, callback)
++  if revision:match("^:[0-3]$") then
++    git.get_file_content(revision, root, path, callback)
++    return
++  end
++  git.resolve_revision(revision, root, function(err, oid)
++    if err then
++      callback(err)
++      return
++    end
++    git.get_file_content(oid, root, path, callback)
++  end)
++end
++
++local has_staged_version = function(explorer, path)
++  for _, file in ipairs((explorer.status_result or {}).staged or {}) do
++    if file.path == path then
++      return true
++    end
++  end
++  return false
++end
++
++local comparison = function(explorer, file)
++  if file.status == "??" or file.status == "A" or file.status == "D" or file.group == "conflicts" then
++    return nil
++  end
++
++  local eligibility = config.options.diff.inline_cache.eligibility
++  local path = file.path
++  local old_path = file.old_path or path
++  if not explorer.git_root then
++    if not eligibility.worktree then
++      return nil
++    end
++    return {
++      original = { path = explorer.dir1 .. "/" .. old_path },
++      modified = { path = explorer.dir2 .. "/" .. path },
++    }
++  end
++  if explorer.base_revision and explorer.target_revision and explorer.target_revision ~= "WORKING" then
++    if not eligibility.revisions then
++      return nil
++    end
++    return {
++      original = { revision = explorer.base_revision, path = old_path },
++      modified = { revision = explorer.target_revision, path = path },
++    }
++  end
++  if explorer.base_revision then
++    if not eligibility.revisions or not eligibility.worktree then
++      return nil
++    end
++    return {
++      original = { revision = explorer.base_revision, path = old_path },
++      modified = { path = explorer.git_root .. "/" .. path },
++    }
++  end
++  if file.group == "staged" then
++    if not eligibility.index or not eligibility.revisions then
++      return nil
++    end
++    return {
++      original = { revision = "HEAD", path = old_path },
++      modified = { revision = ":0", path = path },
++    }
++  end
++  local index_original = has_staged_version(explorer, path)
++  if not eligibility.worktree or (index_original and not eligibility.index) or (not index_original and not eligibility.revisions) then
++    return nil
++  end
++  return {
++    original = { revision = index_original and ":0" or "HEAD", path = old_path },
++    modified = { path = explorer.git_root .. "/" .. path },
++  }
++end
++
++local read_side = function(explorer, side, callback)
++  if side.revision then
++    read_revision(side.revision, explorer.git_root, side.path, callback)
++  else
++    read_worktree(side.path, callback)
++  end
++end
++
++local prepare = function(explorer, file, generation)
++  local pair = comparison(explorer, file)
++  if not pair then
++    return
++  end
++
++  local values = {}
++  local remaining = 2
++  local failed = false
++  local complete
++  complete = function(name, err, lines)
++    if vim.in_fast_event() then
++      vim.schedule(function()
++        complete(name, err, lines)
++      end)
++      return
++    end
++    if failed or explorer._inline_warm_generation ~= generation then
++      return
++    end
++    if err then
++      failed = true
++      return
++    end
++    values[name] = lines
++    remaining = remaining - 1
++    if remaining > 0 then
++      return
++    end
++
++    local diff_options = config.options.diff
++    inline_worker.compute({
++      original_lines = values.original,
++      modified_lines = values.modified,
++      options = {
++        max_computation_time_ms = diff_options.max_computation_time_ms,
++        ignore_trim_whitespace = diff_options.ignore_trim_whitespace,
++        compute_moves = diff_options.compute_moves,
++        line_matcher = diff_options.line_matcher,
++      },
++      filetype = vim.filetype.match({ filename = file.path }) or "",
++      kind = "warm",
++      callback = function() end,
++    })
++  end
++
++  read_side(explorer, pair.original, function(err, lines)
++    complete("original", err, lines)
++  end)
++  read_side(explorer, pair.modified, function(err, lines)
++    complete("modified", err, lines)
++  end)
++end
++
++local candidates = function(explorer, selected)
++  local options = config.options.diff.inline_cache
++  local files = refresh.get_all_files(explorer.tree)
++  local selected_index
++  for index, file in ipairs(files) do
++    if file.data.path == selected.path and file.data.group == selected.group then
++      selected_index = index
++    end
++  end
++  if not selected_index then
++    return {}
++  end
++
++  local result = {}
++  local seen = {}
++  local add = function(index)
++    if not config.options.diff.cycle_next_file and (index < 1 or index > #files) then
++      return
++    end
++    local wrapped = (index - 1) % #files + 1
++    local file = files[wrapped]
++    local key = file.data.group .. "\0" .. file.data.path
++    if not seen[key] and wrapped ~= selected_index then
++      seen[key] = true
++      result[#result + 1] = file.data
++    end
++  end
++  for distance = 1, options.forward do
++    add(selected_index + distance)
++  end
++  for distance = 1, options.backward do
++    add(selected_index - distance)
++  end
++  return result
++end
++
++function M.selection_changed(explorer, selected)
++  local options = config.options.diff.inline_cache
++  if options.enabled == false then
++    return
++  end
++  local session = lifecycle.get_session(explorer.tabpage)
++  if not session or session.layout ~= "inline" then
++    return
++  end
++
++  explorer._inline_warm_generation = (explorer._inline_warm_generation or 0) + 1
++  local generation = explorer._inline_warm_generation
++  vim.defer_fn(function()
++    if explorer._inline_warm_generation ~= generation or not vim.api.nvim_tabpage_is_valid(explorer.tabpage) then
++      return
++    end
++    for _, file in ipairs(candidates(explorer, selected)) do
++      prepare(explorer, file, generation)
++    end
++  end, options.dwell_ms)
++end
++
++return M
+diff --git a/lua/codediff/ui/explorer/render.lua b/lua/codediff/ui/explorer/render.lua
+index 8b7c963767e5d7586f08e72f19035d99187f2da5..4206a089219996672d722b0ed3d2dc191e6dc3ad 100644
+--- a/lua/codediff/ui/explorer/render.lua
++++ b/lua/codediff/ui/explorer/render.lua
+@@ -8,6 +8,7 @@ local nodes_module = require("codediff.ui.explorer.nodes")
+ local tree_module = require("codediff.ui.explorer.tree")
+ local keymaps_module = require("codediff.ui.explorer.keymaps")
+ local refresh_module = require("codediff.ui.explorer.refresh")
++local inline_warm = require("codediff.ui.explorer.inline_warm")
+ local welcome = require("codediff.ui.welcome")
+ 
+ local function should_show_welcome(explorer)
+@@ -514,6 +515,7 @@ function M.create(status_result, git_root, tabpage, width, base_revision, target
+     selected_group = file_data.group
+     tree:render()
+     on_file_select(file_data, opts)
++    inline_warm.selection_changed(explorer, file_data)
+   end
+ 
+   -- Clear selection highlight (used when showing welcome page)
+diff --git a/lua/codediff/ui/inline.lua b/lua/codediff/ui/inline.lua
+index 6c4e8beec7f9e470ccb5ab63dfa8ef7871a0c6d2..97c5697b67128398538e19d73fe7c24c1b68280e 100644
+--- a/lua/codediff/ui/inline.lua
++++ b/lua/codediff/ui/inline.lua
+@@ -379,7 +379,7 @@ end
+ -- @param diff_result table: The diff result from core/diff.compute_diff
+ -- @param original_lines string[]: Lines from the original (reference) content
+ -- @param modified_lines string[]: Lines from the modified buffer
+--- @param opts? table: { filetype?: string } for syntax highlighting on virt_lines
++-- @param opts? table: { filetype?: string, syntax_hls?: table } for syntax highlighting on virt_lines
+ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines, opts)
+   -- Clear previous inline decorations
+   vim.api.nvim_buf_clear_namespace(bufnr, M.ns_inline, 0, -1)
+@@ -393,7 +393,7 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
+ 
+   -- Compute syntax highlights for original lines (for virt_line coloring)
+   local filetype = opts and opts.filetype or (vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].filetype or nil)
+-  local syntax_hls = M.compute_syntax_highlights(original_lines, filetype)
++  local syntax_hls = opts and opts.syntax_hls or M.compute_syntax_highlights(original_lines, filetype)
+ 
+   local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
+   local highlight_priority = config.options.diff.highlight_priority
+diff --git a/lua/codediff/ui/lifecycle/cleanup.lua b/lua/codediff/ui/lifecycle/cleanup.lua
+index dae75cd996d8483df5910d84a7ac21eb3fc45432..5eddcd6658f113c0b27469afad269192de6bbda6 100644
+--- a/lua/codediff/ui/lifecycle/cleanup.lua
++++ b/lua/codediff/ui/lifecycle/cleanup.lua
+@@ -124,6 +124,10 @@ local function cleanup_diff(tabpage)
+   pcall(vim.api.nvim_del_augroup_by_name, "codediff_working_sync_" .. tabpage)
+   pcall(vim.api.nvim_del_augroup_by_name, "CodeDiffConflictSigns_" .. tabpage)
+ 
++  if diff.layout == "inline" then
++    require("codediff.core.inline_worker").clear()
++  end
++
+   -- Remove from tracking
+   active_diffs[tabpage] = nil
+ end
+diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
+index 38a67fe2bbd0225f0d50aa6ea44be5b2d3b9f791..53a3bc06fc53387b7566493978057cdec5b96faf 100644
+--- a/lua/codediff/ui/view/inline_view.lua
++++ b/lua/codediff/ui/view/inline_view.lua
+@@ -11,6 +11,9 @@ local inline = require("codediff.ui.inline")
+ local semantic = require("codediff.ui.semantic_tokens")
+ local layout = require("codediff.ui.layout")
+ local welcome_window = require("codediff.ui.view.welcome_window")
++local inline_worker = require("codediff.core.inline_worker")
++
++local render_generations = {}
+ 
+ local helpers = require("codediff.ui.view.helpers")
+ local panel = require("codediff.ui.view.panel")
+@@ -38,52 +41,100 @@ local function compute_and_render_inline(
+   original_is_virtual,
+   modified_is_virtual,
+   modified_win,
+-  auto_scroll_to_first_hunk
++  auto_scroll_to_first_hunk,
++  callback
+ )
+   local diff_options = {
+     max_computation_time_ms = config.options.diff.max_computation_time_ms,
+     ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
+     compute_moves = config.options.diff.compute_moves,
++    line_matcher = config.options.diff.line_matcher,
+   }
+-
+-  local lines_diff = diff_module.compute_diff(original_lines, modified_lines, diff_options)
+-  if not lines_diff then
+-    vim.notify("Failed to compute diff", vim.log.levels.ERROR)
+-    return nil
++  local filetype = vim.api.nvim_buf_is_valid(modified_buf) and vim.bo[modified_buf].filetype or ""
++  local generation = (render_generations[modified_win] or 0) + 1
++  render_generations[modified_win] = generation
++  local tabpage = modified_win and vim.api.nvim_win_is_valid(modified_win) and vim.api.nvim_win_get_tabpage(modified_win) or nil
++  local render_session = tabpage and lifecycle.get_session(tabpage) or nil
++  if render_session then
++    render_session.inline_render_generation = generation
++    render_session.inline_render_pending = true
+   end
+ 
+-  inline.render_inline_diff(modified_buf, lines_diff, original_lines, modified_lines)
+-
+-  if original_is_virtual then
+-    semantic.apply_semantic_tokens(original_buf, modified_buf)
++  local finish_transition = function()
++    if render_session and render_session.inline_render_generation == generation then
++      render_session.inline_render_pending = nil
++      render_session.inline_render_generation = nil
++    end
+   end
+-  if modified_is_virtual then
+-    semantic.apply_semantic_tokens(modified_buf, original_buf)
++
++  local compute_sync = function()
++    return {
++      lines_diff = diff_module.compute_diff(original_lines, modified_lines, diff_options),
++      syntax_hls = inline.compute_syntax_highlights(original_lines, filetype),
++    }
+   end
+ 
+-  if modified_win and vim.api.nvim_win_is_valid(modified_win) then
+-    vim.wo[modified_win].wrap = false
+-    if auto_scroll_to_first_hunk and lines_diff.changes and #lines_diff.changes > 0 then
+-      -- Honor session.pending_cursor_landing (cycle-hunks-across-files
+-      -- backward direction sets it to "last"; see ui/view/navigation.lua).
+-      -- Look up the session via the window's tabpage because this code can
+-      -- run from a scheduled callback on a different tab.
+-      local lifecycle = require("codediff.ui.lifecycle")
+-      local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
+-      local session = tabpage and lifecycle.get_session(tabpage) or nil
+-      local landing = session and session.pending_cursor_landing
+-      if session then session.pending_cursor_landing = nil end
+-
+-      local target_line = landing == "last"
+-        and lines_diff.changes[#lines_diff.changes].modified.start_line
+-        or lines_diff.changes[1].modified.start_line
+-      pcall(vim.api.nvim_win_set_cursor, modified_win, { target_line, 0 })
+-      vim.api.nvim_set_current_win(modified_win)
+-      vim.cmd("normal! zz")
++  local finish = function(prepared, err)
++    if render_generations[modified_win] ~= generation then
++      return
++    end
++    if not prepared or not vim.api.nvim_buf_is_valid(modified_buf) then
++      finish_transition()
++      vim.notify("Failed to compute inline diff: " .. tostring(err), vim.log.levels.ERROR)
++      return
++    end
++
++    local lines_diff = prepared.lines_diff
++    inline.render_inline_diff(modified_buf, lines_diff, original_lines, modified_lines, {
++      filetype = filetype,
++      syntax_hls = prepared.syntax_hls,
++    })
++
++    if original_is_virtual then
++      semantic.apply_semantic_tokens(original_buf, modified_buf)
++    end
++    if modified_is_virtual then
++      semantic.apply_semantic_tokens(modified_buf, original_buf)
++    end
++
++    if modified_win and vim.api.nvim_win_is_valid(modified_win) then
++      vim.wo[modified_win].wrap = false
++      if auto_scroll_to_first_hunk and lines_diff.changes and #lines_diff.changes > 0 then
++        local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
++        local session = tabpage and lifecycle.get_session(tabpage) or nil
++        local landing = session and session.pending_cursor_landing
++        if session then
++          session.pending_cursor_landing = nil
++        end
++
++        local target_line = landing == "last" and lines_diff.changes[#lines_diff.changes].modified.start_line or lines_diff.changes[1].modified.start_line
++        pcall(vim.api.nvim_win_set_cursor, modified_win, { target_line, 0 })
++        vim.api.nvim_set_current_win(modified_win)
++        vim.cmd("normal! zz")
++      end
+     end
++
++    callback(lines_diff)
++    finish_transition()
++  end
++
++  if config.options.diff.inline_cache.enabled == false then
++    finish(compute_sync())
++    return
+   end
+ 
+-  return lines_diff
++  local queued, err = inline_worker.compute({
++    original_lines = original_lines,
++    modified_lines = modified_lines,
++    options = diff_options,
++    filetype = filetype,
++    callback = function(prepared, worker_error)
++      finish(prepared or compute_sync(), worker_error)
++    end,
++  })
++  if not queued then
++    finish(compute_sync(), err)
++  end
+ end
+ 
+ -- Helper: mark session as inline layout after creation
+@@ -223,7 +274,7 @@ function M.create(session_config, filetype, on_ready)
+     local original_lines = vim.api.nvim_buf_get_lines(original_info.bufnr, 0, -1, false)
+     local modified_lines = vim.api.nvim_buf_get_lines(modified_info.bufnr, 0, -1, false)
+ 
+-    local lines_diff = compute_and_render_inline(
++    compute_and_render_inline(
+       modified_info.bufnr,
+       original_info.bufnr,
+       original_lines,
+@@ -231,43 +282,42 @@ function M.create(session_config, filetype, on_ready)
+       original_is_virtual,
+       modified_is_virtual,
+       modified_win,
+-      config.options.diff.jump_to_first_change
+-    )
+-
+-    if lines_diff then
+-      lifecycle.create_session(
+-        tabpage,
+-        session_config.mode,
+-        session_config.git_root,
+-        session_config.original_path,
+-        session_config.modified_path,
+-        session_config.original_revision,
+-        session_config.modified_revision,
+-        original_info.bufnr,
+-        modified_info.bufnr,
+-        modified_win,
+-        modified_win,
+-        lines_diff,
+-        function()
+-          local _, mb = lifecycle.get_buffers(tabpage)
+-          if mb then
+-            setup_keymaps(tabpage, original_info.bufnr, mb)
+-          end
+-        end,
+-        session_config.exit_on_close
+-      )
+-
+-      mark_inline(tabpage)
+-
+-      auto_refresh.enable(original_info.bufnr)
+-      auto_refresh.enable(modified_info.bufnr)
+-
+-      setup_keymaps(tabpage, original_info.bufnr, modified_info.bufnr)
+-
+-      if on_ready then
+-        on_ready()
++      config.options.diff.jump_to_first_change,
++      function(lines_diff)
++        lifecycle.create_session(
++          tabpage,
++          session_config.mode,
++          session_config.git_root,
++          session_config.original_path,
++          session_config.modified_path,
++          session_config.original_revision,
++          session_config.modified_revision,
++          original_info.bufnr,
++          modified_info.bufnr,
++          modified_win,
++          modified_win,
++          lines_diff,
++          function()
++            local _, mb = lifecycle.get_buffers(tabpage)
++            if mb then
++              setup_keymaps(tabpage, original_info.bufnr, mb)
++            end
++          end,
++          session_config.exit_on_close
++        )
++
++        mark_inline(tabpage)
++
++        auto_refresh.enable(original_info.bufnr)
++        auto_refresh.enable(modified_info.bufnr)
++
++        setup_keymaps(tabpage, original_info.bufnr, modified_info.bufnr)
++
++        if on_ready then
++          on_ready()
++        end
+       end
+-    end
++    )
+   end
+ 
+   -- Async buffer loading
+@@ -337,6 +387,14 @@ end
+ -- Update (for explorer/history file switching)
+ -- ============================================================================
+ 
++function M.cancel(tabpage)
++  local session = lifecycle.get_session(tabpage)
++  local win = session and session.modified_win
++  if win then
++    render_generations[win] = (render_generations[win] or 0) + 1
++  end
++end
++
+ ---@param tabpage number
+ ---@param session_config SessionConfig
+ ---@param auto_scroll_to_first_hunk boolean?
+@@ -353,6 +411,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
+   if not modified_win or not vim.api.nvim_win_is_valid(modified_win) then
+     return false
+   end
++  session.inline_render_pending = true
+ 
+   -- ns_highlight/ns_filler may linger after toggling from side-by-side.
+   disable_refresh_and_clear_highlights(session)
+@@ -408,9 +467,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
+     local original_lines = vim.api.nvim_buf_get_lines(orig_buf, 0, -1, false)
+     local modified_lines = vim.api.nvim_buf_get_lines(mod_buf, 0, -1, false)
+ 
+-    local lines_diff = compute_and_render_inline(mod_buf, orig_buf, original_lines, modified_lines, original_is_virtual, modified_is_virtual, modified_win, should_auto_scroll)
+-
+-    if lines_diff then
++    compute_and_render_inline(mod_buf, orig_buf, original_lines, modified_lines, original_is_virtual, modified_is_virtual, modified_win, should_auto_scroll, function(lines_diff)
+       lifecycle.update_buffers(tabpage, orig_buf, mod_buf)
+       lifecycle.update_git_root(tabpage, session_config.git_root)
+       lifecycle.update_revisions(tabpage, session_config.original_revision, session_config.modified_revision)
+@@ -427,7 +484,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
+       if saved_current_win and vim.api.nvim_win_is_valid(saved_current_win) then
+         vim.api.nvim_set_current_win(saved_current_win)
+       end
+-    end
++    end)
+   end
+ 
+   -- Async loading with pending counter
+@@ -516,17 +573,19 @@ function M.rerender(tabpage)
+   local original_lines = vim.api.nvim_buf_get_lines(original_bufnr, 0, -1, false)
+   local modified_lines = vim.api.nvim_buf_get_lines(modified_bufnr, 0, -1, false)
+ 
+-  local diff_options = {
+-    max_computation_time_ms = config.options.diff.max_computation_time_ms,
+-    ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
+-    compute_moves = config.options.diff.compute_moves,
+-  }
+-
+-  local lines_diff = diff_module.compute_diff(original_lines, modified_lines, diff_options)
+-  if lines_diff then
+-    inline.render_inline_diff(modified_bufnr, lines_diff, original_lines, modified_lines)
+-    lifecycle.update_diff_result(tabpage, lines_diff)
+-  end
++  compute_and_render_inline(
++    modified_bufnr,
++    original_bufnr,
++    original_lines,
++    modified_lines,
++    is_virtual_revision(session.original_revision),
++    is_virtual_revision(session.modified_revision),
++    session.modified_win,
++    false,
++    function(lines_diff)
++      lifecycle.update_diff_result(tabpage, lines_diff)
++    end
++  )
+ end
+ 
+ -- ============================================================================
+diff --git a/lua/codediff/ui/view/toggle.lua b/lua/codediff/ui/view/toggle.lua
+index 9737286bd811d50f29aa0a238257b069dc9ca3c1..4c0dd6919d16c83c5bf588bc09ffbbbbd856dd55 100644
+--- a/lua/codediff/ui/view/toggle.lua
++++ b/lua/codediff/ui/view/toggle.lua
+@@ -98,10 +98,25 @@ function M.toggle(tabpage)
+     vim.notify("Cannot toggle layout in conflict mode", vim.log.levels.WARN)
+     return false
+   end
++  if session.inline_render_pending then
++    local completed = vim.wait(10000, function()
++      local current = lifecycle.get_session(tabpage)
++      return not current or not current.inline_render_pending
++    end, 10)
++    if not completed then
++      return false
++    end
++    session = lifecycle.get_session(tabpage)
++    if not session then
++      return false
++    end
++  end
+ 
+   local target_layout = session.layout == "inline" and "side-by-side" or "inline"
+   local normalize = target_layout == "inline" and normalize_inline_layout or normalize_side_by_side_layout
+-  local previous_layout = session.layout
++  if session.layout == "inline" then
++    require("codediff.ui.view.inline_view").cancel(tabpage)
++  end
+ 
+   -- Disable compact mode before changing layout (window IDs will change)
+   local compact = require("codediff.ui.view.compact")
+diff --git a/tests/core/async_diff_spec.lua b/tests/core/async_diff_spec.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..44537fc1573488196ee8ad6fd938b99f5f23817a
+--- /dev/null
++++ b/tests/core/async_diff_spec.lua
+@@ -0,0 +1,204 @@
++local async_diff = require("codediff.core.async_diff")
++local diff = require("codediff.core.diff")
++
++local make_large_lines = function(prefix)
++  local lines = {}
++  for index = 1, 300 do
++    lines[index] = string.format("%s %03d %s", prefix, index, string.rep("content ", 8))
++  end
++  return lines
++end
++
++local compute_async = function(original, modified, options, owner)
++  local result
++  local callback_error
++  local done = false
++  local queued, queue_error = diff.compute_diff_async({
++    original_lines = original,
++    modified_lines = modified,
++    options = options,
++    owner = owner,
++    callback = function(value, err)
++      result = value
++      callback_error = err
++      done = true
++    end,
++  })
++  assert.is_true(queued, queue_error)
++  assert.is_true(
++    vim.wait(10000, function()
++      return done
++    end, 1),
++    "async diff did not complete"
++  )
++  assert.is_nil(callback_error)
++  return result
++end
++
++describe("Async diff", function()
++  before_each(function()
++    async_diff.reset_metrics()
++  end)
++
++  it("matches synchronous results", function()
++    local original = { "alpha", "shared", "old value", "omega" }
++    local modified = { "alpha", "inserted", "shared", "new value", "omega" }
++    local options = { compute_moves = true, line_matcher = { strategy = "vscode" } }
++
++    assert.same(diff.compute_diff(original, modified, options), compute_async(original, modified, options))
++    assert.same(diff.compute_diff({}, {}), compute_async({}, {}))
++  end)
++
++  it("delivers only the latest result for an owner", function()
++    local delivered = {}
++    local owner = {}
++    assert(diff.compute_diff_async({
++      original_lines = { "first" },
++      modified_lines = { "stale" },
++      owner = owner,
++      callback = function()
++        delivered[#delivered + 1] = "stale"
++      end,
++    }))
++    local latest = compute_async({ "second" }, { "latest" }, {}, owner)
++
++    vim.wait(100)
++    assert.is_not_nil(latest)
++    assert.same({}, delivered)
++  end)
++
++  it("coalesces rapid requests for one owner", function()
++    local original = make_large_lines("original")
++    local owner = {}
++    local delivered = {}
++    local done = false
++
++    for index = 1, 5 do
++      local request_index = index
++      assert(diff.compute_diff_async({
++        original_lines = original,
++        modified_lines = make_large_lines("modified-" .. request_index),
++        owner = owner,
++        callback = function(_, err)
++          delivered[#delivered + 1] = { index = request_index, err = err }
++          done = request_index == 5
++        end,
++      }))
++    end
++
++    local queued_stats = async_diff.get_metrics()
++    assert.equal(1, queued_stats.worker_queued)
++    assert.equal(4, queued_stats.coalesced)
++    assert.is_true(
++      vim.wait(10000, function()
++        return done
++      end, 1),
++      "coalesced diff did not complete"
++    )
++    assert.same({ { index = 5 } }, delivered)
++    assert.equal(2, async_diff.get_metrics().worker_queued)
++  end)
++
++  it("runs requests for distinct owners concurrently", function()
++    local completed = {}
++    local errors = {}
++    local original = make_large_lines("original")
++
++    for index = 1, 2 do
++      local request_index = index
++      assert(diff.compute_diff_async({
++        original_lines = original,
++        modified_lines = make_large_lines("owner-" .. request_index),
++        owner = {},
++        callback = function(_, err)
++          completed[#completed + 1] = request_index
++          errors[#errors + 1] = err
++        end,
++      }))
++    end
++
++    assert.equal(2, async_diff.get_metrics().worker_queued)
++    assert.is_true(
++      vim.wait(10000, function()
++        return #completed == 2
++      end, 1),
++      "concurrent diffs did not complete"
++    )
++    table.sort(completed)
++    assert.same({ 1, 2 }, completed)
++    assert.same({}, errors)
++  end)
++
++  it("keeps the main loop responsive during worker computation", function()
++    local timer_fired = false
++    local callback_saw_timer = false
++    local done = false
++    vim.defer_fn(function()
++      timer_fired = true
++    end, 0)
++
++    assert(diff.compute_diff_async({
++      original_lines = make_large_lines("responsive-original"),
++      modified_lines = make_large_lines("responsive-modified"),
++      callback = function(_, err)
++        assert.is_nil(err)
++        callback_saw_timer = timer_fired
++        done = true
++      end,
++    }))
++
++    assert.is_false(done)
++    assert.is_true(
++      vim.wait(10000, function()
++        return done
++      end, 1),
++      "responsive diff did not complete"
++    )
++    assert.is_true(callback_saw_timer)
++  end)
++
++  it("returns worker failures with a traceback", function()
++    local callback_error
++    assert(async_diff.compute({
++      original_lines = { "before" },
++      modified_lines = { "after" },
++      options = {},
++      callback = function(_, err)
++        callback_error = err
++      end,
++      library_path = "/codediff/missing-library",
++      ffi_definitions = "",
++    }))
++
++    assert.is_true(
++      vim.wait(10000, function()
++        return callback_error ~= nil
++      end, 1),
++      "worker error was not delivered"
++    )
++    assert.matches("missing%-library", callback_error)
++    assert.matches("stack traceback", callback_error)
++  end)
++
++  it("suppresses callbacks during shutdown", function()
++    local called = false
++    assert(diff.compute_diff_async({
++      original_lines = { "before" },
++      modified_lines = { "after" },
++      callback = function()
++        called = true
++      end,
++    }))
++    async_diff.shutdown()
++
++    vim.wait(100)
++    assert.is_false(called)
++    local queued, err = diff.compute_diff_async({
++      original_lines = { "before" },
++      modified_lines = { "after" },
++      callback = function() end,
++    })
++    assert.is_nil(queued)
++    assert.matches("shutting down", err)
++  end)
++end)
+diff --git a/tests/core/ffi_integration_spec.lua b/tests/core/ffi_integration_spec.lua
+index 48ab84ca6e80935134c097cb14abcdda3856c9e5..8312878f4e625e6c40802baee3bd1318f545ef8c 100644
+--- a/tests/core/ffi_integration_spec.lua
++++ b/tests/core/ffi_integration_spec.lua
+@@ -23,7 +23,7 @@ describe("FFI Integration", function()
+   it("Changes have correct nested structure", function()
+     local result = diff.compute_diff({"a", "b"}, {"a", "c"})
+     assert.is_true(#result.changes > 0, "Should have at least one change")
+-    
++
+     local mapping = result.changes[1]
+     assert.equal("table", type(mapping), "Mapping should be a table")
+     assert.is_not_nil(mapping.original, "Should have original range")
+@@ -35,7 +35,7 @@ describe("FFI Integration", function()
+   it("LineRange has correct fields", function()
+     local result = diff.compute_diff({"a"}, {"b"})
+     local mapping = result.changes[1]
+-    
++
+     assert.equal("number", type(mapping.original.start_line), "start_line should be number")
+     assert.equal("number", type(mapping.original.end_line), "end_line should be number")
+     assert.is_true(mapping.original.start_line >= 1, "start_line should be 1-based")
+@@ -47,7 +47,7 @@ describe("FFI Integration", function()
+     local result = diff.compute_diff({"hello"}, {"world"})
+     if #result.changes > 0 and #result.changes[1].inner_changes > 0 then
+       local inner = result.changes[1].inner_changes[1]
+-      
++
+       assert.equal("table", type(inner.original), "Should have original CharRange")
+       assert.equal("table", type(inner.modified), "Should have modified CharRange")
+       assert.equal("number", type(inner.original.start_line))
+@@ -81,7 +81,7 @@ describe("FFI Integration", function()
+       table.insert(large_a, "line " .. i)
+       table.insert(large_b, "modified " .. i)
+     end
+-    
++
+     local result = diff.compute_diff(large_a, large_b)
+     assert.is_not_nil(result, "Should handle large diffs")
+     assert.is_true(#result.changes > 0, "Should detect changes in large diff")
+diff --git a/tests/core/inline_worker_spec.lua b/tests/core/inline_worker_spec.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..15e8228cc6943bb61c15395b14a8fb544037ef29
+--- /dev/null
++++ b/tests/core/inline_worker_spec.lua
+@@ -0,0 +1,71 @@
++local config = require("codediff.config")
++local diff = require("codediff.core.diff")
++local inline = require("codediff.ui.inline")
++local worker = require("codediff.core.inline_worker")
++
++local compute = function(original, modified, filetype)
++  local done = false
++  local result
++  local callback_error
++  local cache_hit
++  local queued, err = worker.compute({
++    original_lines = original,
++    modified_lines = modified,
++    options = {},
++    filetype = filetype,
++    callback = function(value, value_error, hit)
++      result = value
++      callback_error = value_error
++      cache_hit = hit
++      done = true
++    end,
++  })
++  assert.is_true(queued, err)
++  assert.is_true(
++    vim.wait(10000, function()
++      return done
++    end, 10),
++    "inline worker timed out"
++  )
++  assert.is_nil(callback_error)
++  return result, cache_hit
++end
++
++describe("Inline worker", function()
++  before_each(function()
++    worker.clear()
++    config.options.diff.inline_cache.max_entries = 8
++    config.options.diff.inline_cache.max_bytes = 32 * 1024 * 1024
++  end)
++
++  it("computes exact diff and Tree-sitter captures outside the editor process", function()
++    local original = { "local value = 1", "return value" }
++    local modified = { "local value = 2", "return value" }
++    local result, cache_hit = compute(original, modified, "lua")
++
++    assert.is_false(cache_hit)
++    assert.same(diff.compute_diff(original, modified), result.lines_diff)
++    assert.same(inline.compute_syntax_highlights(original, "lua"), result.syntax_hls)
++  end)
++
++  it("caches the combined result", function()
++    local original = { "local value = 1" }
++    local modified = { "local value = 2" }
++    local first = compute(original, modified, "lua")
++    local second, cache_hit = compute(original, modified, "lua")
++
++    assert.is_true(cache_hit)
++    assert.same(first, second)
++    assert.equal(1, worker.get_metrics().entries)
++  end)
++
++  it("enforces the entry budget", function()
++    config.options.diff.inline_cache.max_entries = 1
++    compute({ "local first = 1" }, { "local first = 2" }, "lua")
++    compute({ "local second = 1" }, { "local second = 2" }, "lua")
++
++    local metrics = worker.get_metrics()
++    assert.equal(1, metrics.entries)
++    assert.is_true(metrics.evictions > 0)
++  end)
++end)
+diff --git a/tests/ui/explorer/inline_warm_spec.lua b/tests/ui/explorer/inline_warm_spec.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..6310e8769d202d157712a3090a9ee6f4f7c3f30c
+--- /dev/null
++++ b/tests/ui/explorer/inline_warm_spec.lua
+@@ -0,0 +1,66 @@
++local config = require("codediff.config")
++local git = require("codediff.core.git")
++local inline_warm = require("codediff.ui.explorer.inline_warm")
++local inline_worker = require("codediff.core.inline_worker")
++local lifecycle = require("codediff.ui.lifecycle")
++local refresh = require("codediff.ui.explorer.refresh")
++
++local original_get_all_files = refresh.get_all_files
++local original_get_session = lifecycle.get_session
++local original_resolve_revision = git.resolve_revision
++local original_get_file_content = git.get_file_content
++local original_compute = inline_worker.compute
++
++describe("Inline explorer warming", function()
++  after_each(function()
++    refresh.get_all_files = original_get_all_files
++    lifecycle.get_session = original_get_session
++    git.resolve_revision = original_resolve_revision
++    git.get_file_content = original_get_file_content
++    inline_worker.compute = original_compute
++    config.options.diff.inline_cache.dwell_ms = 100
++  end)
++
++  it("warms the next visible tracked worktree comparison", function()
++    local requested
++    local explorer = {
++      tabpage = vim.api.nvim_get_current_tabpage(),
++      git_root = "/repo",
++      status_result = { staged = {}, unstaged = {}, conflicts = {} },
++      tree = {},
++    }
++    local selected = { path = "a.lua", group = "unstaged", status = "M" }
++    local adjacent = { path = "b.lua", group = "unstaged", status = "M" }
++    local modified = vim.api.nvim_create_buf(false, true)
++    vim.api.nvim_buf_set_name(modified, "/repo/b.lua")
++    vim.api.nvim_buf_set_lines(modified, 0, -1, false, { "local value = 2" })
++
++    config.options.diff.inline_cache.dwell_ms = 0
++    refresh.get_all_files = function()
++      return { { data = selected }, { data = adjacent } }
++    end
++    lifecycle.get_session = function()
++      return { layout = "inline" }
++    end
++    git.resolve_revision = function(_, _, callback)
++      callback(nil, "head-oid")
++    end
++    git.get_file_content = function(_, _, _, callback)
++      callback(nil, { "local value = 1" })
++    end
++    inline_worker.compute = function(args)
++      requested = args
++      return true
++    end
++
++    inline_warm.selection_changed(explorer, selected)
++    assert.is_true(vim.wait(1000, function()
++      return requested ~= nil
++    end, 10))
++    assert.same({ "local value = 1" }, requested.original_lines)
++    assert.same({ "local value = 2" }, requested.modified_lines)
++    assert.equal("lua", requested.filetype)
++
++    vim.api.nvim_buf_delete(modified, { force = true })
++  end)
++end)
+diff --git a/tests/ui/view/inline_interaction_spec.lua b/tests/ui/view/inline_interaction_spec.lua
+index 597291d726238f664f19ba06c5343d69a15275fb..5d62103388a3c71d75d568e7e3605e58d2d99a2d 100644
+--- a/tests/ui/view/inline_interaction_spec.lua
++++ b/tests/ui/view/inline_interaction_spec.lua
+@@ -4,9 +4,12 @@
+ 
+ local view = require("codediff.ui.view")
+ local diff = require("codediff.core.diff")
++local inline_worker = require("codediff.core.inline_worker")
+ local highlights = require("codediff.ui.highlights")
+ local lifecycle = require("codediff.ui.lifecycle")
+ local navigation = require("codediff.ui.view.navigation")
++local compute_diff_async = diff.compute_diff_async
++local compute_inline = inline_worker.compute
+ 
+ -- Helper to get OS-appropriate temp path
+ local function get_temp_path(filename)
+@@ -65,6 +68,8 @@ describe("Inline diff mode interactions", function()
+   end)
+ 
+   after_each(function()
++    diff.compute_diff_async = compute_diff_async
++    inline_worker.compute = compute_inline
+     -- Restore default layout so other test suites are unaffected
+     require("codediff").setup({ diff = { layout = "side-by-side" } })
+ 
+@@ -226,6 +231,35 @@ describe("Inline diff mode interactions", function()
+     vim.fn.delete(ctx.right_path)
+   end)
+ 
++  it("discards async results when buffer content changes", function()
++    local ctx = create_inline_view({ "line1", "line2" }, { "line1", "changed" })
++    local initial_result = lifecycle.get_session(ctx.tabpage).stored_diff_result
++    local request_args
++    inline_worker.compute = function(args)
++      request_args = args
++      return true
++    end
++
++    local auto_refresh = require("codediff.ui.auto_refresh")
++    auto_refresh.trigger(ctx.modified_bufnr)
++    assert.is_true(
++      vim.wait(1000, function()
++        return request_args ~= nil
++      end, 10),
++      "async diff was not requested"
++    )
++
++    vim.api.nvim_buf_set_lines(ctx.modified_bufnr, -1, -1, false, { "newer content" })
++    request_args.callback({
++      lines_diff = { changes = {}, moves = {}, hit_timeout = false },
++      syntax_hls = {},
++    }, nil)
++
++    assert.equal(initial_result, lifecycle.get_session(ctx.tabpage).stored_diff_result)
++    vim.fn.delete(ctx.left_path)
++    vim.fn.delete(ctx.right_path)
++  end)
++
+   -- =========================================================================
+   -- 5. Cleanup on tab close
+   -- =========================================================================

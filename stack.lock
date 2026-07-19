@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 9c9144d1bca5f36000695a8de940e81e7a31302e
-expectedTree = 41f62ccc824755715eabc055a77b803e201e1dd4
+expectedHead = 82440c472b6394967586ee530d1e478aadbc1f36
+expectedTree = aa442053726dc212081eac0b27dfacfe12d2d3e9
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -25,7 +25,7 @@ patches =
     native-gutter-signs
     explorer-line-statistics
     local-native-build
-    native-worker
+    perf-improvements
     fork-notice
 
 [patch "manual-build-libgomp"]
@@ -128,10 +128,10 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 description = fix: build fork native library locally
 file = patches/017-local-native-build.patch
 
-[patch "native-worker"]
-description = perf: compute auto-refresh diffs in a native worker
-file = patches/018-native-worker.patch
-originCommit = e1e9d4c7671e072cebbd180c6338099813636d95
+[patch "perf-improvements"]
+description = perf improvements
+file = patches/018-perf-improvements.patch
+originCommit = 0b15ee032d53279e264112a45b4bbc45abf11429
 
 [patch "fork-notice"]
 file = patches/019-fork-notice.patch
