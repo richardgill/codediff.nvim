@@ -13,6 +13,10 @@ local THROTTLE_DELAY_MS = 200
 -- Buffer pair info is retrieved from lifecycle
 local watched_buffers = {}
 
+local function notify_async_error(err)
+  vim.notify_once("[codediff] async diff failed: " .. tostring(err), vim.log.levels.ERROR)
+end
+
 -- Cancel pending timer for a buffer
 local function cancel_timer(bufnr)
   local watcher = watched_buffers[bufnr]
@@ -20,6 +24,124 @@ local function cancel_timer(bufnr)
     vim.fn.timer_stop(watcher.timer)
     watcher.timer = nil
   end
+end
+
+local function resync_diff_windows(update)
+  local original_win, modified_win, result_win = nil, nil, nil
+  local _, stored_result_win = update.lifecycle.get_result(update.tabpage)
+
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if buf == update.original_bufnr then
+      original_win = win
+    elseif buf == update.modified_bufnr then
+      modified_win = win
+    end
+  end
+
+  -- Check if result window is valid
+  if stored_result_win and vim.api.nvim_win_is_valid(stored_result_win) then
+    result_win = stored_result_win
+  end
+  if not original_win or not modified_win then
+    return
+  end
+
+  local current_win = vim.api.nvim_get_current_win()
+  -- Only resync if user is in one of the diff windows
+  if current_win ~= original_win and current_win ~= modified_win and current_win ~= result_win then
+    return
+  end
+  local other_win = current_win == original_win and modified_win or original_win
+
+  -- Step 1: Save full view state for all windows to prevent flicker
+  local saved_view = vim.fn.winsaveview()
+  vim.api.nvim_set_current_win(other_win)
+  local other_saved_view = vim.fn.winsaveview()
+  local result_saved_view = nil
+  if result_win then
+    vim.api.nvim_set_current_win(result_win)
+    result_saved_view = vim.fn.winsaveview()
+  end
+  vim.api.nvim_set_current_win(current_win)
+
+  -- Step 2: Reset all windows to line 1 (baseline for scrollbind)
+  vim.api.nvim_win_set_cursor(original_win, { 1, 0 })
+  vim.api.nvim_win_set_cursor(modified_win, { 1, 0 })
+  if result_win then
+    vim.api.nvim_win_set_cursor(result_win, { 1, 0 })
+  end
+
+  -- Step 3: Re-establish scrollbind (reset sync state)
+  vim.wo[original_win].scrollbind = false
+  vim.wo[modified_win].scrollbind = false
+  if result_win then
+    vim.wo[result_win].scrollbind = false
+  end
+  vim.wo[original_win].scrollbind = true
+  vim.wo[modified_win].scrollbind = true
+  if result_win then
+    vim.wo[result_win].scrollbind = true
+  end
+
+  -- Step 4: Restore full view state for all windows
+  vim.api.nvim_set_current_win(other_win)
+  vim.fn.winrestview(other_saved_view)
+  if result_win and result_saved_view then
+    vim.api.nvim_set_current_win(result_win)
+    vim.fn.winrestview(result_saved_view)
+  end
+  vim.api.nvim_set_current_win(current_win)
+  vim.fn.winrestview(saved_view)
+end
+
+local function apply_diff_update(update, lines_diff, err)
+  if update.watcher and watched_buffers[update.bufnr] ~= update.watcher then
+    return
+  end
+  if err or not lines_diff then
+    notify_async_error(err or "empty result")
+    return
+  end
+  -- Double-check buffer validity after schedule
+  if not vim.api.nvim_buf_is_valid(update.original_bufnr) or not vim.api.nvim_buf_is_valid(update.modified_bufnr) then
+    watched_buffers[update.bufnr] = nil
+    return
+  end
+  if
+    vim.api.nvim_buf_get_changedtick(update.original_bufnr) ~= update.original_changedtick
+    or vim.api.nvim_buf_get_changedtick(update.modified_bufnr) ~= update.modified_changedtick
+  then
+    return
+  end
+  if not vim.api.nvim_tabpage_is_valid(update.tabpage) then
+    return
+  end
+  local current_original, current_modified = update.lifecycle.get_buffers(update.tabpage)
+  if current_original ~= update.original_bufnr or current_modified ~= update.modified_bufnr then
+    return
+  end
+
+  -- Update stored diff result in lifecycle (critical for hunk navigation and do/dp)
+  update.lifecycle.update_diff_result(update.tabpage, lines_diff)
+
+  -- Refresh compact mode folds if active
+  require("codediff.ui.view.compact").refresh(update.tabpage)
+
+  -- Check if this is an inline mode session
+  local session = update.lifecycle.get_session(update.tabpage)
+  if session and session.layout == "inline" then
+    local inline_mod = require("codediff.ui.inline")
+    inline_mod.render_inline_diff(update.modified_bufnr, lines_diff, update.original_lines, update.modified_lines)
+    return
+  end
+
+  -- Side-by-side mode: Update decorations on both buffers
+  core.render_diff(update.original_bufnr, update.modified_bufnr, update.original_lines, update.modified_lines, lines_diff)
+
+  -- Re-sync scrollbind after filler changes
+  -- This ensures all windows stay aligned even if fillers were added/removed
+  resync_diff_windows(update)
 end
 
 -- Perform diff computation and update decorations
@@ -74,114 +196,41 @@ local function do_diff_update(bufnr, skip_watcher_check)
   -- Get fresh buffer content
   local original_lines = vim.api.nvim_buf_get_lines(original_bufnr, 0, -1, false)
   local modified_lines = vim.api.nvim_buf_get_lines(modified_bufnr, 0, -1, false)
+  local original_changedtick = vim.api.nvim_buf_get_changedtick(original_bufnr)
+  local modified_changedtick = vim.api.nvim_buf_get_changedtick(modified_bufnr)
 
   -- Async diff computation
-  vim.schedule(function()
-    -- Double-check buffer validity after schedule
-    if not vim.api.nvim_buf_is_valid(original_bufnr) or not vim.api.nvim_buf_is_valid(modified_bufnr) then
-      if watched_buffers[bufnr] then
-        watched_buffers[bufnr] = nil
-      end
-      return
-    end
-
-    -- Compute diff
-    local config = require("codediff.config")
-    local diff_options = {
-      max_computation_time_ms = config.options.diff.max_computation_time_ms,
-      ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
-      compute_moves = config.options.diff.compute_moves,
-    }
-    local lines_diff = diff.compute_diff(original_lines, modified_lines, diff_options)
-    if not lines_diff then
-      return
-    end
-
-    -- Update stored diff result in lifecycle (critical for hunk navigation and do/dp)
-    lifecycle.update_diff_result(tabpage, lines_diff)
-
-    -- Refresh compact mode folds if active
-    require("codediff.ui.view.compact").refresh(tabpage)
-
-    -- Check if this is an inline mode session
-    local session = lifecycle.get_session(tabpage)
-    if session and session.layout == "inline" then
-      local inline_mod = require("codediff.ui.inline")
-      inline_mod.render_inline_diff(modified_bufnr, lines_diff, original_lines, modified_lines)
-      return
-    end
-
-    -- Side-by-side mode: Update decorations on both buffers
-    core.render_diff(original_bufnr, modified_bufnr, original_lines, modified_lines, lines_diff)
-
-    -- Re-sync scrollbind after filler changes
-    -- This ensures all windows stay aligned even if fillers were added/removed
-    local original_win, modified_win, result_win = nil, nil, nil
-    local _, stored_result_win = lifecycle.get_result(tabpage)
-
-    for _, win in ipairs(vim.api.nvim_list_wins()) do
-      local buf = vim.api.nvim_win_get_buf(win)
-      if buf == original_bufnr then
-        original_win = win
-      elseif buf == modified_bufnr then
-        modified_win = win
-      end
-    end
-
-    -- Check if result window is valid
-    if stored_result_win and vim.api.nvim_win_is_valid(stored_result_win) then
-      result_win = stored_result_win
-    end
-
-    if original_win and modified_win then
-      local current_win = vim.api.nvim_get_current_win()
-
-      -- Only resync if user is in one of the diff windows
-      if current_win == original_win or current_win == modified_win or current_win == result_win then
-        local other_win = current_win == original_win and modified_win or original_win
-
-        -- Step 1: Save full view state for all windows to prevent flicker
-        local saved_view = vim.fn.winsaveview()
-        vim.api.nvim_set_current_win(other_win)
-        local other_saved_view = vim.fn.winsaveview()
-        local result_saved_view = nil
-        if result_win then
-          vim.api.nvim_set_current_win(result_win)
-          result_saved_view = vim.fn.winsaveview()
-        end
-        vim.api.nvim_set_current_win(current_win)
-
-        -- Step 2: Reset all windows to line 1 (baseline for scrollbind)
-        vim.api.nvim_win_set_cursor(original_win, { 1, 0 })
-        vim.api.nvim_win_set_cursor(modified_win, { 1, 0 })
-        if result_win then
-          vim.api.nvim_win_set_cursor(result_win, { 1, 0 })
-        end
-
-        -- Step 3: Re-establish scrollbind (reset sync state)
-        vim.wo[original_win].scrollbind = false
-        vim.wo[modified_win].scrollbind = false
-        if result_win then
-          vim.wo[result_win].scrollbind = false
-        end
-        vim.wo[original_win].scrollbind = true
-        vim.wo[modified_win].scrollbind = true
-        if result_win then
-          vim.wo[result_win].scrollbind = true
-        end
-
-        -- Step 4: Restore full view state for all windows
-        vim.api.nvim_set_current_win(other_win)
-        vim.fn.winrestview(other_saved_view)
-        if result_win and result_saved_view then
-          vim.api.nvim_set_current_win(result_win)
-          vim.fn.winrestview(result_saved_view)
-        end
-        vim.api.nvim_set_current_win(current_win)
-        vim.fn.winrestview(saved_view)
-      end
-    end
-  end)
+  local config = require("codediff.config")
+  local diff_options = {
+    max_computation_time_ms = config.options.diff.max_computation_time_ms,
+    ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
+    compute_moves = config.options.diff.compute_moves,
+  }
+  local update = {
+    bufnr = bufnr,
+    watcher = watcher,
+    lifecycle = lifecycle,
+    tabpage = tabpage,
+    original_bufnr = original_bufnr,
+    modified_bufnr = modified_bufnr,
+    original_lines = original_lines,
+    modified_lines = modified_lines,
+    original_changedtick = original_changedtick,
+    modified_changedtick = modified_changedtick,
+  }
+  -- Compute diff
+  local queued, queue_error = diff.compute_diff_async({
+    original_lines = original_lines,
+    modified_lines = modified_lines,
+    options = diff_options,
+    owner = "auto-refresh:" .. tabpage,
+    callback = function(lines_diff, err)
+      apply_diff_update(update, lines_diff, err)
+    end,
+  })
+  if not queued then
+    notify_async_error(queue_error)
+  end
 end
 
 -- Trigger diff update with throttling
