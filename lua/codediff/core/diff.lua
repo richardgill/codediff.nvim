@@ -3,6 +3,7 @@
 
 local M = {}
 local ffi = require("ffi")
+local async_diff = require("codediff.core.async_diff")
 
 -- Get VERSION from version.lua (single source of truth)
 local version = require("codediff.version")
@@ -43,6 +44,7 @@ end
 
 -- Try to load the library - fall back to unversioned name for local builds
 local lib
+local loaded_lib_path = lib_path
 local load_ok, load_err = pcall(function()
   lib = ffi.load(lib_path)
 end)
@@ -53,95 +55,97 @@ if not load_ok then
   local fallback_path = plugin_root .. "/" .. fallback_lib_name
   if vim.fn.filereadable(fallback_path) == 1 then
     lib = ffi.load(fallback_path)
+    loaded_lib_path = fallback_path
   else
     error(load_err)
   end
 end
 
 -- FFI type definitions matching C types.h
-ffi.cdef([[
+local ffi_definitions = [[
   // Basic range types
   typedef struct {
     int start_line;  // 1-based, inclusive
     int end_line;    // 1-based, EXCLUSIVE
-  } LineRange;
+  } CodeDiffLineRange;
 
   typedef struct {
     int start_line;  // 1-based
     int start_col;   // 1-based, inclusive
     int end_line;    // 1-based
     int end_col;     // 1-based, EXCLUSIVE
-  } CharRange;
+  } CodeDiffCharRange;
 
   // Mapping types
   typedef struct {
-    CharRange original;
-    CharRange modified;
-  } RangeMapping;
+    CodeDiffCharRange original;
+    CodeDiffCharRange modified;
+  } CodeDiffRangeMapping;
 
   typedef struct {
-    LineRange original;
-    LineRange modified;
-  } LineMapping;
+    CodeDiffLineRange original;
+    CodeDiffLineRange modified;
+  } CodeDiffLineMapping;
 
   typedef struct {
-    LineRange original;
-    LineRange modified;
-    RangeMapping* inner_changes;
+    CodeDiffLineRange original;
+    CodeDiffLineRange modified;
+    CodeDiffRangeMapping* inner_changes;
     int inner_change_count;
-    LineMapping* line_mappings;
+    CodeDiffLineMapping* line_mappings;
     int line_mapping_count;
     int line_mapping_capacity;
-  } DetailedLineRangeMapping;
+  } CodeDiffDetailedLineRangeMapping;
 
   typedef struct {
-    DetailedLineRangeMapping* mappings;
+    CodeDiffDetailedLineRangeMapping* mappings;
     int count;
     int capacity;
-  } DetailedLineRangeMappingArray;
+  } CodeDiffDetailedLineRangeMappingArray;
 
   typedef struct {
-    LineRange original;
-    LineRange modified;
-  } MovedText;
+    CodeDiffLineRange original;
+    CodeDiffLineRange modified;
+  } CodeDiffMovedText;
 
   typedef struct {
-    MovedText* moves;
+    CodeDiffMovedText* moves;
     int count;
     int capacity;
-  } MovedTextArray;
+  } CodeDiffMovedTextArray;
 
   // Main diff result
   typedef struct {
-    DetailedLineRangeMappingArray changes;
-    MovedTextArray moves;
+    CodeDiffDetailedLineRangeMappingArray changes;
+    CodeDiffMovedTextArray moves;
     bool hit_timeout;
-  } LinesDiff;
+  } CodeDiffLinesDiff;
 
   // Options
-  typedef int LineMatcherStrategy;
+  typedef int CodeDiffLineMatcherStrategy;
 
   typedef struct {
     bool ignore_trim_whitespace;
     int max_computation_time_ms;
     bool compute_moves;
     bool extend_to_subwords;
-    LineMatcherStrategy line_matcher_strategy;
+    CodeDiffLineMatcherStrategy line_matcher_strategy;
     double line_matcher_threshold;
-  } DiffOptions;
+  } CodeDiffDiffOptions;
 
   // API functions
-  LinesDiff* compute_diff(
+  CodeDiffLinesDiff* compute_diff(
     const char** original_lines,
     int original_count,
     const char** modified_lines,
     int modified_count,
-    const DiffOptions* options
+    const CodeDiffDiffOptions* options
   );
 
-  void free_lines_diff(LinesDiff* diff);
+  void free_lines_diff(CodeDiffLinesDiff* diff);
   const char* get_version(void);
-]])
+]]
+ffi.cdef(ffi_definitions)
 
 ---@class DiffOptions
 ---@field ignore_trim_whitespace boolean
@@ -247,10 +251,25 @@ local function lines_diff_to_lua(c_diff)
   }
 end
 
+local function resolve_options(options)
+  options = options or {}
+  local config = require("codediff.config")
+  local defaults = config.defaults.diff
+  local matcher = config.resolve_line_matcher(options.line_matcher or config.options.diff.line_matcher)
+  return {
+    ignore_trim_whitespace = options.ignore_trim_whitespace or defaults.ignore_trim_whitespace,
+    max_computation_time_ms = options.max_computation_time_ms or defaults.max_computation_time_ms,
+    compute_moves = options.compute_moves or defaults.compute_moves,
+    extend_to_subwords = options.extend_to_subwords or false,
+    line_matcher_strategy = line_matcher_strategies[matcher.strategy],
+    line_matcher_threshold = matcher.threshold or defaults.line_matcher.threshold,
+  }
+end
+
 -- Main API: Compute diff between two sets of lines
 -- Returns Lua table representation of LinesDiff
 function M.compute_diff(original_lines, modified_lines, options)
-  options = options or {}
+  local resolved_options = resolve_options(options)
 
   -- Convert Lua lines to C arrays
   local c_orig, orig_count = lua_to_c_strings(original_lines)
@@ -259,15 +278,13 @@ function M.compute_diff(original_lines, modified_lines, options)
   -- Create options struct
   ---@type DiffOptions
   ---@diagnostic disable-next-line: assign-type-mismatch
-  local c_options = ffi.new("DiffOptions")
-  c_options.ignore_trim_whitespace = options.ignore_trim_whitespace or false
-  c_options.max_computation_time_ms = options.max_computation_time_ms or 5000
-  c_options.compute_moves = options.compute_moves or false
-  c_options.extend_to_subwords = options.extend_to_subwords or false
-  local config = require("codediff.config")
-  local matcher = config.resolve_line_matcher(options.line_matcher or config.options.diff.line_matcher)
-  c_options.line_matcher_strategy = line_matcher_strategies[matcher.strategy]
-  c_options.line_matcher_threshold = matcher.threshold or 0.75
+  local c_options = ffi.new("CodeDiffDiffOptions")
+  c_options.ignore_trim_whitespace = resolved_options.ignore_trim_whitespace
+  c_options.max_computation_time_ms = resolved_options.max_computation_time_ms
+  c_options.compute_moves = resolved_options.compute_moves
+  c_options.extend_to_subwords = resolved_options.extend_to_subwords
+  c_options.line_matcher_strategy = resolved_options.line_matcher_strategy
+  c_options.line_matcher_threshold = resolved_options.line_matcher_threshold
 
   -- Call C function
   local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
@@ -283,6 +300,23 @@ function M.compute_diff(original_lines, modified_lines, options)
   lib.free_lines_diff(c_diff)
 
   return lua_diff
+end
+
+function M.compute_diff_async(args)
+  assert(type(args) == "table", "async diff arguments are required")
+  assert(type(args.original_lines) == "table", "async diff original_lines are required")
+  assert(type(args.modified_lines) == "table", "async diff modified_lines are required")
+  assert(type(args.callback) == "function", "async diff callback is required")
+
+  return async_diff.compute({
+    original_lines = args.original_lines,
+    modified_lines = args.modified_lines,
+    options = resolve_options(args.options),
+    callback = args.callback,
+    owner = args.owner,
+    library_path = loaded_lib_path,
+    ffi_definitions = ffi_definitions,
+  })
 end
 
 -- Get library version

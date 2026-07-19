@@ -7,6 +7,7 @@ local diff = require("codediff.core.diff")
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
 local navigation = require("codediff.ui.view.navigation")
+local compute_diff_async = diff.compute_diff_async
 
 -- Helper to get OS-appropriate temp path
 local function get_temp_path(filename)
@@ -65,6 +66,7 @@ describe("Inline diff mode interactions", function()
   end)
 
   after_each(function()
+    diff.compute_diff_async = compute_diff_async
     -- Restore default layout so other test suites are unaffected
     require("codediff").setup({ diff = { layout = "side-by-side" } })
 
@@ -222,6 +224,32 @@ describe("Inline diff mode interactions", function()
     assert.is_not.equal(initial_change_count, #updated_session.stored_diff_result.changes,
       "Change count should differ after buffer modification")
 
+    vim.fn.delete(ctx.left_path)
+    vim.fn.delete(ctx.right_path)
+  end)
+
+  it("discards async results when buffer content changes", function()
+    local ctx = create_inline_view({ "line1", "line2" }, { "line1", "changed" })
+    local initial_result = lifecycle.get_session(ctx.tabpage).stored_diff_result
+    local request_args
+    diff.compute_diff_async = function(args)
+      request_args = args
+      return true
+    end
+
+    local auto_refresh = require("codediff.ui.auto_refresh")
+    auto_refresh.trigger(ctx.modified_bufnr)
+    assert.is_true(
+      vim.wait(1000, function()
+        return request_args ~= nil
+      end, 10),
+      "async diff was not requested"
+    )
+
+    vim.api.nvim_buf_set_lines(ctx.modified_bufnr, -1, -1, false, { "newer content" })
+    request_args.callback({ changes = {}, moves = {}, hit_timeout = false }, nil)
+
+    assert.equal(initial_result, lifecycle.get_session(ctx.tabpage).stored_diff_result)
     vim.fn.delete(ctx.left_path)
     vim.fn.delete(ctx.right_path)
   end)
