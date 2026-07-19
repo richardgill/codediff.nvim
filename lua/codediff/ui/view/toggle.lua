@@ -98,10 +98,25 @@ function M.toggle(tabpage)
     vim.notify("Cannot toggle layout in conflict mode", vim.log.levels.WARN)
     return false
   end
+  if session.inline_render_pending then
+    local completed = vim.wait(10000, function()
+      local current = lifecycle.get_session(tabpage)
+      return not current or not current.inline_render_pending
+    end, 10)
+    if not completed then
+      return false
+    end
+    session = lifecycle.get_session(tabpage)
+    if not session then
+      return false
+    end
+  end
 
   local target_layout = session.layout == "inline" and "side-by-side" or "inline"
   local normalize = target_layout == "inline" and normalize_inline_layout or normalize_side_by_side_layout
-  local previous_layout = session.layout
+  if session.layout == "inline" then
+    require("codediff.ui.view.inline_view").cancel(tabpage)
+  end
 
   -- Disable compact mode before changing layout (window IDs will change)
   local compact = require("codediff.ui.view.compact")

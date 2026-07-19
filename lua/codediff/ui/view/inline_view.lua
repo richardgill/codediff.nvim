@@ -11,6 +11,9 @@ local inline = require("codediff.ui.inline")
 local semantic = require("codediff.ui.semantic_tokens")
 local layout = require("codediff.ui.layout")
 local welcome_window = require("codediff.ui.view.welcome_window")
+local inline_worker = require("codediff.core.inline_worker")
+
+local render_generations = {}
 
 local helpers = require("codediff.ui.view.helpers")
 local panel = require("codediff.ui.view.panel")
@@ -38,52 +41,100 @@ local function compute_and_render_inline(
   original_is_virtual,
   modified_is_virtual,
   modified_win,
-  auto_scroll_to_first_hunk
+  auto_scroll_to_first_hunk,
+  callback
 )
   local diff_options = {
     max_computation_time_ms = config.options.diff.max_computation_time_ms,
     ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
     compute_moves = config.options.diff.compute_moves,
+    line_matcher = config.options.diff.line_matcher,
   }
-
-  local lines_diff = diff_module.compute_diff(original_lines, modified_lines, diff_options)
-  if not lines_diff then
-    vim.notify("Failed to compute diff", vim.log.levels.ERROR)
-    return nil
+  local filetype = vim.api.nvim_buf_is_valid(modified_buf) and vim.bo[modified_buf].filetype or ""
+  local generation = (render_generations[modified_win] or 0) + 1
+  render_generations[modified_win] = generation
+  local tabpage = modified_win and vim.api.nvim_win_is_valid(modified_win) and vim.api.nvim_win_get_tabpage(modified_win) or nil
+  local render_session = tabpage and lifecycle.get_session(tabpage) or nil
+  if render_session then
+    render_session.inline_render_generation = generation
+    render_session.inline_render_pending = true
   end
 
-  inline.render_inline_diff(modified_buf, lines_diff, original_lines, modified_lines)
-
-  if original_is_virtual then
-    semantic.apply_semantic_tokens(original_buf, modified_buf)
-  end
-  if modified_is_virtual then
-    semantic.apply_semantic_tokens(modified_buf, original_buf)
-  end
-
-  if modified_win and vim.api.nvim_win_is_valid(modified_win) then
-    vim.wo[modified_win].wrap = false
-    if auto_scroll_to_first_hunk and lines_diff.changes and #lines_diff.changes > 0 then
-      -- Honor session.pending_cursor_landing (cycle-hunks-across-files
-      -- backward direction sets it to "last"; see ui/view/navigation.lua).
-      -- Look up the session via the window's tabpage because this code can
-      -- run from a scheduled callback on a different tab.
-      local lifecycle = require("codediff.ui.lifecycle")
-      local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
-      local session = tabpage and lifecycle.get_session(tabpage) or nil
-      local landing = session and session.pending_cursor_landing
-      if session then session.pending_cursor_landing = nil end
-
-      local target_line = landing == "last"
-        and lines_diff.changes[#lines_diff.changes].modified.start_line
-        or lines_diff.changes[1].modified.start_line
-      pcall(vim.api.nvim_win_set_cursor, modified_win, { target_line, 0 })
-      vim.api.nvim_set_current_win(modified_win)
-      vim.cmd("normal! zz")
+  local finish_transition = function()
+    if render_session and render_session.inline_render_generation == generation then
+      render_session.inline_render_pending = nil
+      render_session.inline_render_generation = nil
     end
   end
 
-  return lines_diff
+  local compute_sync = function()
+    return {
+      lines_diff = diff_module.compute_diff(original_lines, modified_lines, diff_options),
+      syntax_hls = inline.compute_syntax_highlights(original_lines, filetype),
+    }
+  end
+
+  local finish = function(prepared, err)
+    if render_generations[modified_win] ~= generation then
+      return
+    end
+    if not prepared or not vim.api.nvim_buf_is_valid(modified_buf) then
+      finish_transition()
+      vim.notify("Failed to compute inline diff: " .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
+
+    local lines_diff = prepared.lines_diff
+    inline.render_inline_diff(modified_buf, lines_diff, original_lines, modified_lines, {
+      filetype = filetype,
+      syntax_hls = prepared.syntax_hls,
+    })
+
+    if original_is_virtual then
+      semantic.apply_semantic_tokens(original_buf, modified_buf)
+    end
+    if modified_is_virtual then
+      semantic.apply_semantic_tokens(modified_buf, original_buf)
+    end
+
+    if modified_win and vim.api.nvim_win_is_valid(modified_win) then
+      vim.wo[modified_win].wrap = false
+      if auto_scroll_to_first_hunk and lines_diff.changes and #lines_diff.changes > 0 then
+        local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
+        local session = tabpage and lifecycle.get_session(tabpage) or nil
+        local landing = session and session.pending_cursor_landing
+        if session then
+          session.pending_cursor_landing = nil
+        end
+
+        local target_line = landing == "last" and lines_diff.changes[#lines_diff.changes].modified.start_line or lines_diff.changes[1].modified.start_line
+        pcall(vim.api.nvim_win_set_cursor, modified_win, { target_line, 0 })
+        vim.api.nvim_set_current_win(modified_win)
+        vim.cmd("normal! zz")
+      end
+    end
+
+    callback(lines_diff)
+    finish_transition()
+  end
+
+  if config.options.diff.inline_cache.enabled == false then
+    finish(compute_sync())
+    return
+  end
+
+  local queued, err = inline_worker.compute({
+    original_lines = original_lines,
+    modified_lines = modified_lines,
+    options = diff_options,
+    filetype = filetype,
+    callback = function(prepared, worker_error)
+      finish(prepared or compute_sync(), worker_error)
+    end,
+  })
+  if not queued then
+    finish(compute_sync(), err)
+  end
 end
 
 -- Helper: mark session as inline layout after creation
@@ -223,7 +274,7 @@ function M.create(session_config, filetype, on_ready)
     local original_lines = vim.api.nvim_buf_get_lines(original_info.bufnr, 0, -1, false)
     local modified_lines = vim.api.nvim_buf_get_lines(modified_info.bufnr, 0, -1, false)
 
-    local lines_diff = compute_and_render_inline(
+    compute_and_render_inline(
       modified_info.bufnr,
       original_info.bufnr,
       original_lines,
@@ -231,43 +282,42 @@ function M.create(session_config, filetype, on_ready)
       original_is_virtual,
       modified_is_virtual,
       modified_win,
-      config.options.diff.jump_to_first_change
-    )
+      config.options.diff.jump_to_first_change,
+      function(lines_diff)
+        lifecycle.create_session(
+          tabpage,
+          session_config.mode,
+          session_config.git_root,
+          session_config.original_path,
+          session_config.modified_path,
+          session_config.original_revision,
+          session_config.modified_revision,
+          original_info.bufnr,
+          modified_info.bufnr,
+          modified_win,
+          modified_win,
+          lines_diff,
+          function()
+            local _, mb = lifecycle.get_buffers(tabpage)
+            if mb then
+              setup_keymaps(tabpage, original_info.bufnr, mb)
+            end
+          end,
+          session_config.exit_on_close
+        )
 
-    if lines_diff then
-      lifecycle.create_session(
-        tabpage,
-        session_config.mode,
-        session_config.git_root,
-        session_config.original_path,
-        session_config.modified_path,
-        session_config.original_revision,
-        session_config.modified_revision,
-        original_info.bufnr,
-        modified_info.bufnr,
-        modified_win,
-        modified_win,
-        lines_diff,
-        function()
-          local _, mb = lifecycle.get_buffers(tabpage)
-          if mb then
-            setup_keymaps(tabpage, original_info.bufnr, mb)
-          end
-        end,
-        session_config.exit_on_close
-      )
+        mark_inline(tabpage)
 
-      mark_inline(tabpage)
+        auto_refresh.enable(original_info.bufnr)
+        auto_refresh.enable(modified_info.bufnr)
 
-      auto_refresh.enable(original_info.bufnr)
-      auto_refresh.enable(modified_info.bufnr)
+        setup_keymaps(tabpage, original_info.bufnr, modified_info.bufnr)
 
-      setup_keymaps(tabpage, original_info.bufnr, modified_info.bufnr)
-
-      if on_ready then
-        on_ready()
+        if on_ready then
+          on_ready()
+        end
       end
-    end
+    )
   end
 
   -- Async buffer loading
@@ -337,6 +387,14 @@ end
 -- Update (for explorer/history file switching)
 -- ============================================================================
 
+function M.cancel(tabpage)
+  local session = lifecycle.get_session(tabpage)
+  local win = session and session.modified_win
+  if win then
+    render_generations[win] = (render_generations[win] or 0) + 1
+  end
+end
+
 ---@param tabpage number
 ---@param session_config SessionConfig
 ---@param auto_scroll_to_first_hunk boolean?
@@ -353,6 +411,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
   if not modified_win or not vim.api.nvim_win_is_valid(modified_win) then
     return false
   end
+  session.inline_render_pending = true
 
   -- ns_highlight/ns_filler may linger after toggling from side-by-side.
   disable_refresh_and_clear_highlights(session)
@@ -408,9 +467,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
     local original_lines = vim.api.nvim_buf_get_lines(orig_buf, 0, -1, false)
     local modified_lines = vim.api.nvim_buf_get_lines(mod_buf, 0, -1, false)
 
-    local lines_diff = compute_and_render_inline(mod_buf, orig_buf, original_lines, modified_lines, original_is_virtual, modified_is_virtual, modified_win, should_auto_scroll)
-
-    if lines_diff then
+    compute_and_render_inline(mod_buf, orig_buf, original_lines, modified_lines, original_is_virtual, modified_is_virtual, modified_win, should_auto_scroll, function(lines_diff)
       lifecycle.update_buffers(tabpage, orig_buf, mod_buf)
       lifecycle.update_git_root(tabpage, session_config.git_root)
       lifecycle.update_revisions(tabpage, session_config.original_revision, session_config.modified_revision)
@@ -427,7 +484,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
       if saved_current_win and vim.api.nvim_win_is_valid(saved_current_win) then
         vim.api.nvim_set_current_win(saved_current_win)
       end
-    end
+    end)
   end
 
   -- Async loading with pending counter
@@ -516,17 +573,19 @@ function M.rerender(tabpage)
   local original_lines = vim.api.nvim_buf_get_lines(original_bufnr, 0, -1, false)
   local modified_lines = vim.api.nvim_buf_get_lines(modified_bufnr, 0, -1, false)
 
-  local diff_options = {
-    max_computation_time_ms = config.options.diff.max_computation_time_ms,
-    ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
-    compute_moves = config.options.diff.compute_moves,
-  }
-
-  local lines_diff = diff_module.compute_diff(original_lines, modified_lines, diff_options)
-  if lines_diff then
-    inline.render_inline_diff(modified_bufnr, lines_diff, original_lines, modified_lines)
-    lifecycle.update_diff_result(tabpage, lines_diff)
-  end
+  compute_and_render_inline(
+    modified_bufnr,
+    original_bufnr,
+    original_lines,
+    modified_lines,
+    is_virtual_revision(session.original_revision),
+    is_virtual_revision(session.modified_revision),
+    session.modified_win,
+    false,
+    function(lines_diff)
+      lifecycle.update_diff_result(tabpage, lines_diff)
+    end
+  )
 end
 
 -- ============================================================================

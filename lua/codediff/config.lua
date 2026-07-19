@@ -55,6 +55,19 @@ M.defaults = {
     compute_moves = false, -- Detect moved code blocks (opt-in, may increase diff computation time)
     compact_context_lines = 3, -- Number of context lines around hunks in compact mode
     compact_sync_folds = true, -- Sync fold open/close across panes in compact mode (mirrors Vim diff mode behavior)
+    inline_cache = {
+      enabled = true,
+      forward = 1,
+      backward = 0,
+      dwell_ms = 100,
+      eligibility = {
+        revisions = true,
+        index = true,
+        worktree = true,
+      },
+      max_entries = 8,
+      max_bytes = 32 * 1024 * 1024,
+    },
   },
 
   -- Explorer panel configuration

@@ -124,6 +124,10 @@ local function cleanup_diff(tabpage)
   pcall(vim.api.nvim_del_augroup_by_name, "codediff_working_sync_" .. tabpage)
   pcall(vim.api.nvim_del_augroup_by_name, "CodeDiffConflictSigns_" .. tabpage)
 
+  if diff.layout == "inline" then
+    require("codediff.core.inline_worker").clear()
+  end
+
   -- Remove from tracking
   active_diffs[tabpage] = nil
 end

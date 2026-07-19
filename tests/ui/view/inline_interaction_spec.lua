@@ -4,10 +4,12 @@
 
 local view = require("codediff.ui.view")
 local diff = require("codediff.core.diff")
+local inline_worker = require("codediff.core.inline_worker")
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
 local navigation = require("codediff.ui.view.navigation")
 local compute_diff_async = diff.compute_diff_async
+local compute_inline = inline_worker.compute
 
 -- Helper to get OS-appropriate temp path
 local function get_temp_path(filename)
@@ -67,6 +69,7 @@ describe("Inline diff mode interactions", function()
 
   after_each(function()
     diff.compute_diff_async = compute_diff_async
+    inline_worker.compute = compute_inline
     -- Restore default layout so other test suites are unaffected
     require("codediff").setup({ diff = { layout = "side-by-side" } })
 
@@ -232,7 +235,7 @@ describe("Inline diff mode interactions", function()
     local ctx = create_inline_view({ "line1", "line2" }, { "line1", "changed" })
     local initial_result = lifecycle.get_session(ctx.tabpage).stored_diff_result
     local request_args
-    diff.compute_diff_async = function(args)
+    inline_worker.compute = function(args)
       request_args = args
       return true
     end
@@ -247,7 +250,10 @@ describe("Inline diff mode interactions", function()
     )
 
     vim.api.nvim_buf_set_lines(ctx.modified_bufnr, -1, -1, false, { "newer content" })
-    request_args.callback({ changes = {}, moves = {}, hit_timeout = false }, nil)
+    request_args.callback({
+      lines_diff = { changes = {}, moves = {}, hit_timeout = false },
+      syntax_hls = {},
+    }, nil)
 
     assert.equal(initial_result, lifecycle.get_session(ctx.tabpage).stored_diff_result)
     vim.fn.delete(ctx.left_path)

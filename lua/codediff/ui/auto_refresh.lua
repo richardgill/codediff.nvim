@@ -3,6 +3,7 @@
 local M = {}
 
 local diff = require("codediff.core.diff")
+local inline_worker = require("codediff.core.inline_worker")
 local core = require("codediff.ui.core")
 
 -- Throttle delay in milliseconds
@@ -132,7 +133,9 @@ local function apply_diff_update(update, lines_diff, err)
   local session = update.lifecycle.get_session(update.tabpage)
   if session and session.layout == "inline" then
     local inline_mod = require("codediff.ui.inline")
-    inline_mod.render_inline_diff(update.modified_bufnr, lines_diff, update.original_lines, update.modified_lines)
+    inline_mod.render_inline_diff(update.modified_bufnr, lines_diff, update.original_lines, update.modified_lines, {
+      syntax_hls = update.syntax_hls,
+    })
     return
   end
 
@@ -205,6 +208,7 @@ local function do_diff_update(bufnr, skip_watcher_check)
     max_computation_time_ms = config.options.diff.max_computation_time_ms,
     ignore_trim_whitespace = config.options.diff.ignore_trim_whitespace,
     compute_moves = config.options.diff.compute_moves,
+    line_matcher = config.options.diff.line_matcher,
   }
   local update = {
     bufnr = bufnr,
@@ -218,16 +222,27 @@ local function do_diff_update(bufnr, skip_watcher_check)
     original_changedtick = original_changedtick,
     modified_changedtick = modified_changedtick,
   }
-  -- Compute diff
-  local queued, queue_error = diff.compute_diff_async({
+  local session = lifecycle.get_session(tabpage)
+  local use_inline_worker = session and session.layout == "inline" and config.options.diff.inline_cache.enabled ~= false
+  local compute = use_inline_worker and inline_worker.compute or diff.compute_diff_async
+  local request = {
     original_lines = original_lines,
     modified_lines = modified_lines,
     options = diff_options,
     owner = "auto-refresh:" .. tabpage,
-    callback = function(lines_diff, err)
-      apply_diff_update(update, lines_diff, err)
+    callback = function(result, err)
+      if use_inline_worker and result then
+        update.syntax_hls = result.syntax_hls
+        apply_diff_update(update, result.lines_diff, err)
+      else
+        apply_diff_update(update, result, err)
+      end
     end,
-  })
+  }
+  if use_inline_worker then
+    request.filetype = vim.bo[modified_bufnr].filetype
+  end
+  local queued, queue_error = compute(request)
   if not queued then
     notify_async_error(queue_error)
   end
