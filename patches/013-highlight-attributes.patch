@@ -1,12 +1,12 @@
-From 9a1d47a46f4149b78bee60685185c7fa8ff976df Mon Sep 17 00:00:00 2001
+From 18ffe5e5e0416bcbac0955bda7643d1061c64ec7 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
-Date: Fri, 17 Jul 2026 00:05:43 +0100
+Date: Fri, 17 Jul 2026 00:01:45 +0100
 Subject: [PATCH] fix(highlights): preserve character group attributes
 
 ---
  lua/codediff/ui/highlights.lua |  36 ++++++++-
- tests/ui/highlights_spec.lua   | 135 ++++++++++++++++++++++++++++++++-
- 2 files changed, 167 insertions(+), 4 deletions(-)
+ tests/ui/highlights_spec.lua   | 141 +++++++++++++++++++++++++++++++--
+ 2 files changed, 169 insertions(+), 8 deletions(-)
 
 diff --git a/lua/codediff/ui/highlights.lua b/lua/codediff/ui/highlights.lua
 index c947269..52dec55 100644
@@ -70,7 +70,7 @@ index c947269..52dec55 100644
      -- Derive from line_delete with brightness adjustment
      char_delete_color = {
 diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
-index a7a5693..c23f6c4 100644
+index a7a5693..9a15ae2 100644
 --- a/tests/ui/highlights_spec.lua
 +++ b/tests/ui/highlights_spec.lua
 @@ -3,12 +3,16 @@
@@ -90,7 +90,20 @@ index a7a5693..c23f6c4 100644
    require("codediff").setup({})
  end
  
-@@ -57,6 +61,110 @@ describe("highlights.lua color derivation", function()
+@@ -36,10 +40,8 @@ describe("highlights.lua color derivation", function()
+ 
+     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
+     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
+-    assert.are.equal(0x00af5f, insert.bg,
+-      "Insert bg should come from DiffAdd.fg when reverse=true")
+-    assert.are.equal(0xd70000, delete.bg,
+-      "Delete bg should come from DiffDelete.fg when reverse=true")
++    assert.are.equal(0x00af5f, insert.bg, "Insert bg should come from DiffAdd.fg when reverse=true")
++    assert.are.equal(0xd70000, delete.bg, "Delete bg should come from DiffDelete.fg when reverse=true")
+   end)
+ 
+   it("honors cterm.reverse independently of gui reverse", function()
+@@ -57,6 +59,110 @@ describe("highlights.lua color derivation", function()
      assert.are.equal(35, insert.ctermbg, "Cterm bg should come from ctermfg under cterm.reverse")
    end)
  
@@ -201,7 +214,7 @@ index a7a5693..c23f6c4 100644
    it("re-derives on :colorscheme change", function()
      -- First setup: bg-based DiffAdd
      vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x111111 })
-@@ -69,7 +177,30 @@ describe("highlights.lua color derivation", function()
+@@ -69,7 +175,30 @@ describe("highlights.lua color derivation", function()
      vim.cmd("doautocmd ColorScheme")
  
      local after = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false }).bg

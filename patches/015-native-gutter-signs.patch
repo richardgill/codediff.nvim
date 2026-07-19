@@ -1,4 +1,4 @@
-From bcea4abf3d6660292ec81ff1ef61d8927eecdc93 Mon Sep 17 00:00:00 2001
+From 11d47133c1afe5e9bd52e9bb1f368e4c99f13264 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 20:18:52 +0100
 Subject: [PATCH] Added native gutter signs support
@@ -941,7 +941,7 @@ index 0000000..c96a97a
 +  end)
 +end)
 diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
-index c23f6c4..815eaa2 100644
+index 9a15ae2..13e3b9e 100644
 --- a/tests/ui/highlights_spec.lua
 +++ b/tests/ui/highlights_spec.lua
 @@ -12,6 +12,10 @@ local function reset_codediff()
@@ -955,7 +955,7 @@ index c23f6c4..815eaa2 100644
    config.options = vim.deepcopy(config.defaults)
    require("codediff").setup({})
  end
-@@ -165,6 +169,39 @@ describe("highlights.lua color derivation", function()
+@@ -163,6 +167,39 @@ describe("highlights.lua color derivation", function()
      assert.is_nil(insert.bold)
    end)
  

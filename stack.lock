@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 9c72e2f9599e6bc74d99f3dd6a77d4dbfcbb076a
-expectedTree = 09150962e99988e0508591635fc373590097c005
+expectedHead = 9c9144d1bca5f36000695a8de940e81e7a31302e
+expectedTree = 41f62ccc824755715eabc055a77b803e201e1dd4
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -25,6 +25,7 @@ patches =
     native-gutter-signs
     explorer-line-statistics
     local-native-build
+    native-worker
     fork-notice
 
 [patch "manual-build-libgomp"]
@@ -60,13 +61,13 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/460
 [patch "zero-hunk-navigation"]
 description = fix(navigation): include zero-hunk files in cross-file cycling
 file = patches/006-zero-hunk-navigation.patch
-originCommit = ee9443aaf3bede9722f2d91db80f444d727f9f8f
+originCommit = dfedfe8540be0880bb847eed4964be55bf3a0b68
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/438
 
 [patch "safe-last-diff-close"]
 description = fix: keep Neovim open when closing the last diff tab
 file = patches/007-safe-last-diff-close.patch
-originCommit = 2b2f488fab0b5c3b6dbc9c11ea19d2936cd03841
+originCommit = 961019388934bffaf27ff201ce03cbbe1eb99fda
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/440
 
 [patch "ranged-line-highlights"]
@@ -78,31 +79,31 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/461
 [patch "hide-native-tabline"]
 description = fix(ui): hide the native tabline in CodeDiff views
 file = patches/009-hide-native-tabline.patch
-originCommit = aa4964f8757aa5f5c4bec411846c7862b83c059b
+originCommit = 6970fba5c5ba3f9ef55bd73500943bd591d2a6f6
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/441
 
 [patch "special-file-highlights"]
 description = feat: highlight added and deleted single-file views
 file = patches/010-special-file-highlights.patch
-originCommit = 5d90f3ffb5d95cabfe4c447384c64a4cf704c4bf
+originCommit = a469c4f779d37f745b85f1ba3d76b55ab70c770a
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/442
 
 [patch "preserve-explorer-state"]
 description = fix(explorer): preserve tree state across refreshes
 file = patches/011-preserve-explorer-state.patch
-originCommit = 9e94576bf1ea2966a890ce03fbe45355b85ba423
+originCommit = 6a6e5c541d830531daa444a48bc86db10ed532ef
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/443
 
 [patch "configurable-fillers"]
 description = feat: make filler text configurable
 file = patches/012-configurable-fillers.patch
-originCommit = c3acc612c6bff51a7a6ed3ff3fc47923e676d940
+originCommit = d4a8612ad6c5753025031768e2bcec1bb0bca642
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/444
 
 [patch "highlight-attributes"]
 description = fix(highlights): preserve character group attributes
 file = patches/013-highlight-attributes.patch
-originCommit = 496deed42da874892a2c6daa911432fda9aa7d64
+originCommit = 4e66a9f57bd94d6ba0c70596a987c0745bb31682
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/447
 
 [patch "explorer-line-statistics"]
@@ -127,5 +128,10 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 description = fix: build fork native library locally
 file = patches/017-local-native-build.patch
 
+[patch "native-worker"]
+description = perf: compute auto-refresh diffs in a native worker
+file = patches/018-native-worker.patch
+originCommit = e1e9d4c7671e072cebbd180c6338099813636d95
+
 [patch "fork-notice"]
-file = patches/018-fork-notice.patch
+file = patches/019-fork-notice.patch

@@ -1,4 +1,4 @@
-From cb57dee62f7f71b6949fb30ca8aa5539f4c46036 Mon Sep 17 00:00:00 2001
+From ebea371240c7fcc708570ce98aa9d3b9913ad21f Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 07:25:57 +0100
 Subject: [PATCH] feat(explorer): add optional line change statistics
@@ -23,8 +23,8 @@ Subject: [PATCH] feat(explorer): add optional line change statistics
  tests/ui/explorer/custom_keymaps_spec.lua    | 117 ++++++++
  tests/ui/explorer/explorer_modules_spec.lua  |  18 ++
  tests/ui/explorer/line_stats_spec.lua        | 184 ++++++++++++
- tests/ui/highlights_spec.lua                 |  35 ++-
- 20 files changed, 1579 insertions(+), 195 deletions(-)
+ tests/ui/highlights_spec.lua                 |  29 +-
+ 20 files changed, 1577 insertions(+), 191 deletions(-)
  create mode 100644 lua/codediff/ui/explorer/formatters.lua
  create mode 100644 lua/codediff/ui/explorer/line_highlights.lua
  create mode 100644 lua/codediff/ui/explorer/line_layout.lua
@@ -2105,7 +2105,7 @@ index 0000000..b7816d0
 +  end)
 +end)
 diff --git a/tests/ui/highlights_spec.lua b/tests/ui/highlights_spec.lua
-index 815eaa2..9e631d4 100644
+index 13e3b9e..9e631d4 100644
 --- a/tests/ui/highlights_spec.lua
 +++ b/tests/ui/highlights_spec.lua
 @@ -8,10 +8,20 @@ local highlights = require("codediff.ui.highlights")
@@ -2151,16 +2151,3 @@ index 815eaa2..9e631d4 100644
    it("reads bg directly for colorschemes that use bg-based diff highlights", function()
      -- Mimic the default convention: DiffAdd uses bg + (optional) fg, no reverse
      vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x123456 })
-@@ -44,10 +65,8 @@ describe("highlights.lua color derivation", function()
- 
-     local insert = vim.api.nvim_get_hl(0, { name = "CodeDiffLineInsert", link = false })
-     local delete = vim.api.nvim_get_hl(0, { name = "CodeDiffLineDelete", link = false })
--    assert.are.equal(0x00af5f, insert.bg,
--      "Insert bg should come from DiffAdd.fg when reverse=true")
--    assert.are.equal(0xd70000, delete.bg,
--      "Delete bg should come from DiffDelete.fg when reverse=true")
-+    assert.are.equal(0x00af5f, insert.bg, "Insert bg should come from DiffAdd.fg when reverse=true")
-+    assert.are.equal(0xd70000, delete.bg, "Delete bg should come from DiffDelete.fg when reverse=true")
-   end)
- 
-   it("honors cterm.reverse independently of gui reverse", function()

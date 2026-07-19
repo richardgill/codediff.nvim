@@ -1,4 +1,4 @@
-From 5756bd68c9ad097eb1b2e3c4d3391d262c5c60f0 Mon Sep 17 00:00:00 2001
+From 1c2c7dddd3ee1b2d79d69c08a3c82a561d9f8213 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:25:25 +0100
 Subject: [PATCH] Added native line matcher implementation and tests
