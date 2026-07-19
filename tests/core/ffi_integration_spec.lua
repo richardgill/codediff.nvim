@@ -23,7 +23,7 @@ describe("FFI Integration", function()
   it("Changes have correct nested structure", function()
     local result = diff.compute_diff({"a", "b"}, {"a", "c"})
     assert.is_true(#result.changes > 0, "Should have at least one change")
-    
+
     local mapping = result.changes[1]
     assert.equal("table", type(mapping), "Mapping should be a table")
     assert.is_not_nil(mapping.original, "Should have original range")
@@ -35,7 +35,7 @@ describe("FFI Integration", function()
   it("LineRange has correct fields", function()
     local result = diff.compute_diff({"a"}, {"b"})
     local mapping = result.changes[1]
-    
+
     assert.equal("number", type(mapping.original.start_line), "start_line should be number")
     assert.equal("number", type(mapping.original.end_line), "end_line should be number")
     assert.is_true(mapping.original.start_line >= 1, "start_line should be 1-based")
@@ -47,7 +47,7 @@ describe("FFI Integration", function()
     local result = diff.compute_diff({"hello"}, {"world"})
     if #result.changes > 0 and #result.changes[1].inner_changes > 0 then
       local inner = result.changes[1].inner_changes[1]
-      
+
       assert.equal("table", type(inner.original), "Should have original CharRange")
       assert.equal("table", type(inner.modified), "Should have modified CharRange")
       assert.equal("number", type(inner.original.start_line))
@@ -81,7 +81,7 @@ describe("FFI Integration", function()
       table.insert(large_a, "line " .. i)
       table.insert(large_b, "modified " .. i)
     end
-    
+
     local result = diff.compute_diff(large_a, large_b)
     assert.is_not_nil(result, "Should handle large diffs")
     assert.is_true(#result.changes > 0, "Should detect changes in large diff")

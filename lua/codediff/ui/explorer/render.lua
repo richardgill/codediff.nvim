@@ -8,6 +8,7 @@ local nodes_module = require("codediff.ui.explorer.nodes")
 local tree_module = require("codediff.ui.explorer.tree")
 local keymaps_module = require("codediff.ui.explorer.keymaps")
 local refresh_module = require("codediff.ui.explorer.refresh")
+local inline_warm = require("codediff.ui.explorer.inline_warm")
 local welcome = require("codediff.ui.welcome")
 
 local function should_show_welcome(explorer)
@@ -514,6 +515,7 @@ function M.create(status_result, git_root, tabpage, width, base_revision, target
     selected_group = file_data.group
     tree:render()
     on_file_select(file_data, opts)
+    inline_warm.selection_changed(explorer, file_data)
   end
 
   -- Clear selection highlight (used when showing welcome page)
