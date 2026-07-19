@@ -1,12 +1,15 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 82440c472b6394967586ee530d1e478aadbc1f36
-expectedTree = aa442053726dc212081eac0b27dfacfe12d2d3e9
+expectedHead = 387d6fece71a4f1281baf7d9a1e4083e106d9f8b
+expectedTree = 76d260d37c3bb12f66540ebf51dce47086dbee14
 testCommand = make test
 publishRemote = origin
 publishBranch = main
 repository = richardgill/codediff.nvim
 noticePatch = fork-notice
+referencePatches =
+    perf-improvements
+    design-line-wrapping
 patches =
     manual-build-libgomp
     move-keymap-scrolloff
@@ -25,7 +28,6 @@ patches =
     native-gutter-signs
     explorer-line-statistics
     local-native-build
-    perf-improvements
     fork-notice
 
 [patch "manual-build-libgomp"]
@@ -133,5 +135,10 @@ description = perf improvements
 file = patches/018-perf-improvements.patch
 originCommit = 0b15ee032d53279e264112a45b4bbc45abf11429
 
+[patch "design-line-wrapping"]
+description = design: synchronized line wrapping and viewport rendering
+file = patches/019-design-line-wrapping.patch
+originCommit = 70ff0766533682c312a835e79584d942859fe827
+
 [patch "fork-notice"]
-file = patches/019-fork-notice.patch
+file = patches/020-fork-notice.patch
