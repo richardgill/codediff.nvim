@@ -8,6 +8,7 @@ local lifecycle = require("codediff.ui.lifecycle")
 
 -- Inline namespace (must match codediff.ui.inline)
 local ns_inline = vim.api.nvim_create_namespace("codediff-inline")
+local ns_gutter_signs = vim.api.nvim_create_namespace("codediff-gutter-signs")
 
 -- Helper to get temp path (OS-aware)
 local function get_temp_path(filename)
@@ -423,6 +424,32 @@ describe("Inline standalone view", function()
     local info = get_inline_extmarks(result.modified_buf)
     assert.is_true(info.has_virt_lines, "Should have virt_lines for changed lines")
     assert.is_true(info.has_insert_hl, "Should have insert highlights for changed lines")
+
+    vim.fn.delete(left_path)
+    vim.fn.delete(right_path)
+  end)
+
+  it("shows gutter signs on real and virtual lines only in the inline window", function()
+    require("codediff").setup({ diff = { layout = "inline", gutter_signs = {} } })
+    local previous_win = vim.api.nvim_get_current_win()
+    vim.wo[previous_win].statuscolumn = "%C%s%=%l "
+    local original = { "same", "old", "same end" }
+    local modified = { "same", "new", "same end" }
+    local left_path = get_temp_path("inline_gutter_left.txt")
+    local right_path = get_temp_path("inline_gutter_right.txt")
+    vim.fn.writefile(original, left_path)
+    vim.fn.writefile(modified, right_path)
+
+    local result = create_inline_view(original, modified, left_path, right_path)
+    vim.cmd("redraw")
+    vim.wait(300)
+
+    local signs = vim.api.nvim_buf_get_extmarks(result.modified_buf, ns_gutter_signs, 0, -1, { details = true })
+    assert.equals(1, #signs)
+    assert.equals(1, signs[1][2])
+    assert.equals("＋", signs[1][4].sign_text)
+    assert.equals("%C%s%=%l ", vim.wo[previous_win].statuscolumn)
+    assert.matches("v:virtnum < 0", vim.wo[result.modified_win].statuscolumn, 1, true)
 
     vim.fn.delete(left_path)
     vim.fn.delete(right_path)

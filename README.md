@@ -247,7 +247,9 @@ gutter_signs = {
 
 Set this under `diff`. `insert_text` and `delete_text` must each occupy one or two display cells, as measured by `strdisplaywidth()`, because Neovim limits native sign text to two display cells. The fullwidth defaults each occupy two display cells.
 
-CodeDiff uses persistent native Neovim signs and does not modify `signcolumn` or `statuscolumn`. This example keeps a sign column and places signs after line numbers:
+Inline layout uses native insert signs on real modified lines. Deleted lines are virtual lines and cannot carry native Neovim signs, so CodeDiff renders their delete glyph through the inline content window's `statuscolumn`. The original window-local value is restored when leaving inline layout. Other windows and tabs are unchanged.
+
+CodeDiff uses persistent native Neovim signs and does not modify `signcolumn`. This example keeps a sign column and places signs after line numbers in side-by-side layout:
 
 ```lua
 vim.opt.signcolumn = "yes"

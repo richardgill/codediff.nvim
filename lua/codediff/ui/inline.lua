@@ -383,13 +383,15 @@ end
 function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines, opts)
   -- Clear previous inline decorations
   vim.api.nvim_buf_clear_namespace(bufnr, M.ns_inline, 0, -1)
-  gutter_signs.clear_buffer(bufnr)
   -- Clear merged highlight cache on re-render (colorscheme may have changed)
   merged_hl_cache = {}
 
   if not diff_result or not diff_result.changes then
+    gutter_signs.clear_buffer(bufnr)
     return
   end
+
+  gutter_signs.set_inline_ranges(bufnr, diff_result.changes)
 
   -- Compute syntax highlights for original lines (for virt_line coloring)
   local filetype = opts and opts.filetype or (vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].filetype or nil)

@@ -43,6 +43,10 @@ local function cleanup_diff(tabpage)
   state.clear_buffer_highlights(diff.original_bufnr)
   state.clear_buffer_highlights(diff.modified_bufnr)
 
+  local gutter_signs = require("codediff.ui.gutter_signs")
+  gutter_signs.restore_inline_statuscolumn(diff.original_win)
+  gutter_signs.restore_inline_statuscolumn(diff.modified_win)
+
   -- Restore buffer states
   state.restore_buffer_state(diff.original_bufnr, diff.original_state)
   state.restore_buffer_state(diff.modified_bufnr, diff.modified_state)
