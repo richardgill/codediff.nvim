@@ -235,13 +235,8 @@ function M.update_layout(tabpage, layout)
   end
 
   sess.layout = layout
-  local gutter_signs = require("codediff.ui.gutter_signs")
   if layout == "inline" then
-    gutter_signs.clear_buffer(sess.original_bufnr)
-    gutter_signs.apply_inline_statuscolumn(sess.modified_win)
-  else
-    gutter_signs.restore_inline_statuscolumn(sess.original_win)
-    gutter_signs.restore_inline_statuscolumn(sess.modified_win)
+    clear_gutter_signs(sess)
   end
   return true
 end
@@ -380,9 +375,6 @@ function M.set_result(tabpage, result_bufnr, result_win)
   end
   if result_win then
     clear_gutter_signs(sess)
-    local gutter_signs = require("codediff.ui.gutter_signs")
-    gutter_signs.restore_inline_statuscolumn(sess.original_win)
-    gutter_signs.restore_inline_statuscolumn(sess.modified_win)
   end
 
   return true

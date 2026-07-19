@@ -6,6 +6,4 @@ CodeDiff therefore uses ordinary persistent ranged extmarks. A changed hunk, mov
 
 Persistent signs are buffer-local rather than window-local. If another window shows a buffer participating in an active CodeDiff view, it shows the same CodeDiff signs. Suspending or closing the diff clears them.
 
-Inline deleted rows are virtual lines and cannot carry native signs. CodeDiff renders their delete glyph through a temporary window-local `statuscolumn` in the inline content window, preserving native signs on real rows and restoring the previous value when inline layout ends.
-
 Neovim 0.11 introduced the experimental `nvim__ns_set()` API, which can scope persistent extmark namespaces to windows. CodeDiff does not depend on that private-style API; window-local signs can be reconsidered when Neovim exposes a stable supported mechanism.

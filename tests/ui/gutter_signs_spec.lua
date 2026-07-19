@@ -193,22 +193,6 @@ describe("Native gutter signs", function()
     assert.equals(2, find_sign(session.original_bufnr, "└").row)
   end)
 
-  it("only changes statuscolumn in the inline diff window and restores it", function()
-    config.options.diff.gutter_signs = {}
-    vim.wo[session.original_win].statuscolumn = "%C%s%=%l "
-    vim.wo[session.modified_win].statuscolumn = "%C%=%l %s"
-
-    gutter_signs.apply_inline_statuscolumn(session.modified_win)
-
-    assert.equals("%C%s%=%l ", vim.wo[session.original_win].statuscolumn)
-    assert.matches("v:virtnum < 0", vim.wo[session.modified_win].statuscolumn, 1, true)
-    assert.matches("CodeDiffGutterDeleteNumber", vim.wo[session.modified_win].statuscolumn, 1, true)
-
-    gutter_signs.restore_inline_statuscolumn(session.modified_win)
-
-    assert.equals("%C%=%l %s", vim.wo[session.modified_win].statuscolumn)
-  end)
-
   it("keeps a growing whole-file sign anchored across replacement and appends", function()
     config.options.diff.gutter_signs = { changed_priority = 100 }
     vim.api.nvim_buf_set_lines(session.modified_bufnr, 0, -1, false, { "loading" })
@@ -277,14 +261,9 @@ describe("Native gutter signs", function()
       { changes = {}, moves = {} }
     )
 
-    vim.wo[session.modified_win].statuscolumn = "%C%=%l %s"
     gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
     lifecycle.update_layout(tabpage, "inline")
     assert.same({}, get_signs(session.original_bufnr))
-    assert.matches("v:virtnum < 0", vim.wo[session.modified_win].statuscolumn, 1, true)
-
-    lifecycle.update_layout(tabpage, "side-by-side")
-    assert.equals("%C%=%l %s", vim.wo[session.modified_win].statuscolumn)
 
     gutter_signs.set_changed_ranges(session.original_bufnr, session.modified_bufnr, changed_ranges)
     lifecycle.set_result(tabpage, session.modified_bufnr, session.modified_win)
