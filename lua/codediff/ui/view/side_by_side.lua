@@ -706,6 +706,7 @@ local function show_single_file(tabpage, opts)
 
   lifecycle.update_layout(tabpage, "side-by-side")
   local orig_win, mod_win = lifecycle.get_windows(tabpage)
+  require("codediff.ui.view_sync").clear(tabpage)
   wrap_alignment.clear_window(orig_win)
   wrap_alignment.clear_window(mod_win)
   local highlights = require("codediff.ui.highlights")

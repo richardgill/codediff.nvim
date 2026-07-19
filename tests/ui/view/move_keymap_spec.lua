@@ -6,6 +6,8 @@ local diff_module = require("codediff.core.diff")
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
 local config = require("codediff.config")
+local display = require("codediff.nvim.display")
+local view_sync = require("codediff.ui.view_sync")
 
 -- Content with a moved block: alpha block moves from top to bottom
 -- The diff engine needs ≥5 contiguous moved lines to detect a move.
@@ -333,14 +335,23 @@ describe("gm align_move keymap", function()
       return vim.fn.winsaveview()
     end)
 
-    assert.are.equal(orig_view_before.topline, orig_view_after.topline,
-      "original window topline should be restored after WinLeave")
-    assert.are.equal(mod_view_before.topline, mod_view_after.topline,
-      "modified window topline should be restored after WinLeave")
-    assert.is_true(vim.wo[session.original_win].scrollbind,
-      "scrollbind should be re-enabled on original window")
-    assert.is_true(vim.wo[session.modified_win].scrollbind,
-      "scrollbind should be re-enabled on modified window")
+    if view_sync.is_supported() then
+      assert.are.equal(display.get_offset(session.original_win), display.get_offset(session.modified_win),
+        "rendered offsets should be restored after WinLeave")
+      assert.is_false(vim.wo[session.original_win].scrollbind,
+        "native scrollbind should remain disabled on original window")
+      assert.is_false(vim.wo[session.modified_win].scrollbind,
+        "native scrollbind should remain disabled on modified window")
+    else
+      assert.are.equal(orig_view_before.topline, orig_view_after.topline,
+        "original window topline should be restored after WinLeave")
+      assert.are.equal(mod_view_before.topline, mod_view_after.topline,
+        "modified window topline should be restored after WinLeave")
+      assert.is_true(vim.wo[session.original_win].scrollbind,
+        "scrollbind should be re-enabled on original window")
+      assert.is_true(vim.wo[session.modified_win].scrollbind,
+        "scrollbind should be re-enabled on modified window")
+    end
   end)
 
   -- ──────────────────────────────────────────────────────────────

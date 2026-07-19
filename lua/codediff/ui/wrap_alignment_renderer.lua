@@ -1,35 +1,23 @@
 local M = {}
 
-local window_namespace = require("codediff.nvim.window_namespace")
+local display = require("codediff.nvim.display")
 
 local pane_states = {}
 local metrics = { rebuild_count = 0, rebuild_reasons = {} }
-local filler_line = { { string.rep("╱", 500), "CodeDiffFiller" } }
 
 local elapsed_ms = function(started_at)
   return (vim.uv.hrtime() - started_at) / 1000000
 end
 
-local clear_state = function(state)
-  if state and state.buf and vim.api.nvim_buf_is_valid(state.buf) then
-    vim.api.nvim_buf_clear_namespace(state.buf, state.ns, 0, -1)
-  end
-  if state then
-    pcall(window_namespace.clear_scope, state.ns)
-  end
-end
-
 local get_pane_state = function(pane)
   local state = pane_states[pane.win]
-  if state and state.buf ~= pane.buf then
-    clear_state(state)
-    state = nil
-  end
   if not state then
-    state = { ns = window_namespace.create("", pane.win), height_cache = {}, padding = {} }
+    state = { layer = display.create_layer(pane.win), height_cache = {} }
     pane_states[pane.win] = state
-  else
-    window_namespace.scope(state.ns, pane.win)
+  elseif state.buf ~= pane.buf then
+    state.height_cache = {}
+    state.measurement_context = nil
+    state.decoration_key = nil
   end
 
   state.buf = pane.buf
@@ -37,20 +25,11 @@ local get_pane_state = function(pane)
 end
 
 local get_fold_ends = function(intervals, pane)
-  local line_count = vim.api.nvim_buf_line_count(pane.buf)
-  return vim.api.nvim_win_call(pane.win, function()
-    local fold_ends = {}
-    for _, interval in ipairs(intervals) do
-      local row = interval.ranges[pane.side].start_row
-      if row >= 0 and row < line_count and fold_ends[row] == nil then
-        local start_line = vim.fn.foldclosed(row + 1)
-        if start_line >= 0 then
-          fold_ends[row] = vim.fn.foldclosedend(row + 1)
-        end
-      end
-    end
-    return fold_ends
-  end)
+  local rows = {}
+  for _, interval in ipairs(intervals) do
+    rows[#rows + 1] = interval.ranges[pane.side].start_row
+  end
+  return display.closed_folds(pane.win, rows)
 end
 
 local merge_interval = function(target, source)
@@ -127,78 +106,34 @@ local collapse_folded_intervals = function(intervals, panes)
   return collapsed
 end
 
-local measure_range = function(win, range)
-  if range.end_row <= range.start_row then
-    return 0
-  end
-  return vim.api.nvim_win_text_height(win, {
-    start_row = range.start_row,
-    start_vcol = 0,
-    end_row = range.end_row - 1,
-  }).all
-end
-
-local get_height_decorated_rows = function(buf, padding_namespace)
-  local rows = {}
-  local extmarks = vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })
-  for _, extmark in ipairs(extmarks) do
-    local details = extmark[4]
-    local affects_height = details.virt_lines or details.virt_text or details.conceal
-    if details.ns_id ~= padding_namespace and affects_height then
-      rows[extmark[2]] = true
-    end
-  end
-  return rows
-end
-
-local get_render_signature = function(pane)
-  local window_info = vim.fn.getwininfo(pane.win)[1]
-  local values = {
-    vim.api.nvim_win_get_width(pane.win),
-    window_info and window_info.textoff or 0,
-    vim.wo[pane.win].linebreak,
-    vim.wo[pane.win].breakindent,
-    vim.wo[pane.win].breakindentopt,
-    vim.wo[pane.win].showbreak,
-    vim.wo[pane.win].list,
-    vim.wo[pane.win].listchars,
-    vim.wo[pane.win].number,
-    vim.wo[pane.win].relativenumber,
-    vim.wo[pane.win].numberwidth,
-    vim.wo[pane.win].signcolumn,
-    vim.wo[pane.win].foldcolumn,
-    vim.wo[pane.win].statuscolumn,
-    vim.wo[pane.win].conceallevel,
-    vim.wo[pane.win].concealcursor,
-    vim.bo[pane.buf].tabstop,
-    vim.bo[pane.buf].vartabstop,
-    vim.o.ambiwidth,
-    vim.o.display,
-  }
-  return table.concat(vim.tbl_map(tostring, values), "\31")
+local get_decoration_key = function(pane, plan_token)
+  return plan_token and string.format("%d:%s", vim.api.nvim_buf_get_changedtick(pane.buf), tostring(plan_token)) or nil
 end
 
 local build_cache_contexts = function(panes, states, compact_mode, plan_token)
   local contexts = {}
+  local needs_layer_clear = false
   for _, pane in ipairs(panes) do
     local state = states[pane.side]
-    local signature = get_render_signature(pane)
-    if state.height_cache_signature ~= signature then
+    local context = display.measurement_context(pane.win, { exclude_layer = state.layer })
+    local layout_changed = not state.measurement_context or not context:has_same_signature(state.measurement_context)
+    local decoration_key = get_decoration_key(pane, plan_token)
+    local context_changed = layout_changed or not decoration_key or state.decoration_key ~= decoration_key
+    if layout_changed then
       state.height_cache = {}
-      state.height_cache_signature = signature
     end
-    local decoration_key = plan_token and string.format("%d:%s", vim.api.nvim_buf_get_changedtick(pane.buf), tostring(plan_token)) or nil
-    if not decoration_key or state.decoration_key ~= decoration_key then
-      state.decorated_rows = get_height_decorated_rows(pane.buf, state.ns)
+    if context_changed then
+      state.measurement_context = context
       state.decoration_key = decoration_key
+      needs_layer_clear = true
     end
     contexts[pane.side] = {
       cache = state.height_cache,
-      decorated_rows = state.decorated_rows,
-      enabled = not compact_mode and vim.wo[pane.win].conceallevel == 0,
+      decorated_rows = state.measurement_context:height_decorated_rows(),
+      enabled = not compact_mode and not state.measurement_context:has_active_conceal(),
     }
   end
-  return contexts
+  return contexts, needs_layer_clear
 end
 
 local get_cacheable_line = function(interval, panes, contexts)
@@ -222,22 +157,7 @@ local get_cacheable_line = function(interval, panes, contexts)
   return line
 end
 
-local insert_padding = function(state, consumed_lines, line_count, count, above_boundary, padding_row)
-  local above = consumed_lines <= 0 or above_boundary
-  local row = padding_row or (above and math.min(consumed_lines, line_count - 1) or math.min(consumed_lines - 1, line_count - 1))
-  local virt_lines = {}
-  for _ = 1, count do
-    virt_lines[#virt_lines + 1] = filler_line
-  end
-
-  return vim.api.nvim_buf_set_extmark(state.buf, state.ns, math.max(row, 0), 0, {
-    virt_lines = virt_lines,
-    virt_lines_above = above,
-    strict = false,
-  })
-end
-
-local build_stats = function(panes, intervals, opts)
+local build_stats = function(intervals, opts)
   local reason = opts.reason or "render"
   metrics.rebuild_count = metrics.rebuild_count + 1
   metrics.rebuild_reasons[reason] = (metrics.rebuild_reasons[reason] or 0) + 1
@@ -249,10 +169,9 @@ local build_stats = function(panes, intervals, opts)
     measurements = opts.measurements,
     cache_hits = opts.cache_hits,
     plan_cache_hits = opts.plan_cache_hits or 0,
-    padding_extmarks_removed = opts.padding_extmarks_removed or 0,
-    padding_extmarks_reused = 0,
-    padding_extmarks_updated = 0,
-    pane_wins = {},
+    layer_entries_removed = opts.layer_entries_removed or 0,
+    layer_entries_reused = 0,
+    layer_entries_updated = 0,
     rebuild_count = metrics.rebuild_count,
     rebuild_reason = reason,
     timings = {
@@ -260,47 +179,30 @@ local build_stats = function(panes, intervals, opts)
       prepare_ms = opts.prepare_ms,
       fold_scan_ms = opts.fold_scan_ms,
       redraw_measure_ms = opts.redraw_measure_ms,
-      padding_ms = opts.padding_ms,
+      padding_ms = 0,
       view_sync_ms = 0,
       total_ms = elapsed_ms(opts.started_at),
     },
   }
-  for _, pane in ipairs(panes) do
-    stats.fillers[pane.side] = 0
-    stats[pane.side .. "_fillers"] = 0
-    stats.pane_wins[#stats.pane_wins + 1] = pane.win
-  end
   metrics.latest = stats
   return stats
 end
 
-local remove_padding_entry = function(state, index)
-  local entry = state.padding[index]
-  if not entry then
-    return 0
+local set_layers = function(states, panes, entries)
+  local stats = { removed = 0, reused = 0, updated = 0 }
+  for _, pane in ipairs(panes) do
+    local layer_stats = display.set_layer(states[pane.side].layer, pane.buf, entries[pane.side])
+    stats.removed = stats.removed + layer_stats.removed
+    stats.reused = stats.reused + layer_stats.reused
+    stats.updated = stats.updated + layer_stats.updated
   end
-  pcall(vim.api.nvim_buf_del_extmark, state.buf, state.ns, entry.id)
-  state.padding[index] = nil
-  return 1
+  return stats
 end
 
-local clear_padding = function(states, panes)
+local clear_layers = function(states, panes)
   local removed = 0
   for _, pane in ipairs(panes) do
-    local state = states[pane.side]
-    for _ in pairs(state.padding) do
-      removed = removed + 1
-    end
-    vim.api.nvim_buf_clear_namespace(state.buf, state.ns, 0, -1)
-    state.padding = {}
-  end
-  return removed
-end
-
-local remove_interval_padding = function(states, panes, index)
-  local removed = 0
-  for _, pane in ipairs(panes) do
-    removed = removed + remove_padding_entry(states[pane.side], index)
+    removed = removed + display.clear_layer(states[pane.side].layer)
   end
   return removed
 end
@@ -314,24 +216,11 @@ local get_cached_heights = function(interval, panes, contexts)
   return cacheable_line, heights
 end
 
-local measure_interval_padding = function(interval, panes, contexts, measurement, counts)
+local calculate_padding = function(interval, panes, natural_heights)
   local heights = {}
   local target_height = 0
   for _, pane in ipairs(panes) do
-    local range = interval.ranges[pane.side]
-    local context = contexts[pane.side]
-    local height = measurement.heights[pane.side]
-    counts.requests = counts.requests + 1
-    if height ~= nil then
-      counts.hits = counts.hits + 1
-    else
-      counts.measurements = counts.measurements + 1
-      height = measure_range(pane.win, range)
-      if measurement.cacheable_line then
-        context.cache[measurement.cacheable_line] = height
-      end
-    end
-    height = height + ((interval.leading_rows and interval.leading_rows[pane.side]) or 0)
+    local height = natural_heights[pane.side] + ((interval.leading_rows and interval.leading_rows[pane.side]) or 0)
     heights[pane.side] = height
     target_height = math.max(target_height, height)
   end
@@ -343,25 +232,77 @@ local measure_interval_padding = function(interval, panes, contexts, measurement
   return padding
 end
 
-local render_interval_padding = function(index, interval, padding, panes, states, stats)
+local measure_pane_ranges = function(pane, intervals, context, measurement_plan, counts)
+  local pending_ranges = {}
+  local pending_indexes = {}
+  for index, interval in ipairs(intervals) do
+    local measurement = measurement_plan[index]
+    counts.requests = counts.requests + 1
+    if measurement.heights[pane.side] ~= nil then
+      counts.hits = counts.hits + 1
+    else
+      pending_ranges[#pending_ranges + 1] = interval.ranges[pane.side]
+      pending_indexes[#pending_indexes + 1] = index
+    end
+  end
+
+  local heights = display.measure_ranges(pane.win, pending_ranges)
+  counts.measurements = counts.measurements + #heights
+  for pending_index, height in ipairs(heights) do
+    local measurement = measurement_plan[pending_indexes[pending_index]]
+    measurement.heights[pane.side] = height
+    if measurement.cacheable_line then
+      context.cache[measurement.cacheable_line] = height
+    end
+  end
+end
+
+local add_padding_entries = function(entries, index, interval, padding, panes)
   for _, pane in ipairs(panes) do
     local count = padding[pane.side]
-    local state = states[pane.side]
-    local existing = state.padding[index]
-    if count <= 0 then
-      stats.padding_extmarks_removed = stats.padding_extmarks_removed + remove_padding_entry(state, index)
-    elseif existing and existing.count == count then
-      stats.padding_extmarks_reused = stats.padding_extmarks_reused + 1
-    else
-      stats.padding_extmarks_removed = stats.padding_extmarks_removed + remove_padding_entry(state, index)
-      local above_boundary = interval.padding_above and interval.padding_above[pane.side]
-      local padding_row = interval.padding_rows and interval.padding_rows[pane.side]
-      local id = insert_padding(state, interval.ranges[pane.side].end_row, pane.line_count, count, above_boundary, padding_row)
-      state.padding[index] = { id = id, count = count }
-      stats.padding_extmarks_updated = stats.padding_extmarks_updated + 1
+    if count > 0 then
+      entries[pane.side][#entries[pane.side] + 1] = {
+        key = index,
+        boundary_row = interval.ranges[pane.side].end_row,
+        anchor_row = interval.padding_rows and interval.padding_rows[pane.side],
+        above = interval.padding_above and interval.padding_above[pane.side] or false,
+        count = count,
+      }
     end
-    stats.fillers[pane.side] = stats.fillers[pane.side] + count
-    stats[pane.side .. "_fillers"] = stats[pane.side .. "_fillers"] + count
+  end
+end
+
+local build_measurement_plan = function(intervals, panes, contexts, retain_cached_padding)
+  local plan = {}
+  local entries = {}
+  local pending_padding = {}
+  for _, pane in ipairs(panes) do
+    entries[pane.side] = {}
+  end
+  for index, interval in ipairs(intervals) do
+    local cacheable_line, heights = get_cached_heights(interval, panes, contexts)
+    local fully_cached = true
+    for _, pane in ipairs(panes) do
+      fully_cached = fully_cached and heights[pane.side] ~= nil
+    end
+    if fully_cached and retain_cached_padding then
+      add_padding_entries(entries, index, interval, calculate_padding(interval, panes, heights), panes)
+    else
+      pending_padding[#pending_padding + 1] = index
+    end
+    plan[index] = { cacheable_line = cacheable_line, heights = heights }
+  end
+  return plan, entries, pending_padding
+end
+
+local set_filler_stats = function(entries, panes, stats)
+  for _, pane in ipairs(panes) do
+    local count = 0
+    for _, entry in ipairs(entries[pane.side]) do
+      count = count + entry.count
+    end
+    stats.fillers[pane.side] = count
+    stats[pane.side .. "_fillers"] = count
   end
 end
 
@@ -370,59 +311,79 @@ function M.apply(opts)
   for _, pane in ipairs(opts.panes) do
     states[pane.side] = get_pane_state(pane)
   end
-  opts.prepare_ms = elapsed_ms(opts.prepare_started_at)
+  local prepare_ms = elapsed_ms(opts.prepare_started_at)
 
   local fold_scan_started_at = vim.uv.hrtime()
   local intervals = opts.intervals
   if opts.compact_mode or opts.fold_tracking then
     intervals = collapse_folded_intervals(intervals, opts.panes)
   end
-  opts.fold_scan_ms = elapsed_ms(fold_scan_started_at)
+  local fold_scan_ms = elapsed_ms(fold_scan_started_at)
 
   local measurement_started_at = vim.uv.hrtime()
   local incremental_padding = opts.plan_cache_hits == 1 and not opts.compact_mode and not opts.fold_tracking
-  opts.padding_extmarks_removed = incremental_padding and 0 or clear_padding(states, opts.panes)
+  local layers_cleared = not incremental_padding
+  local layer_entries_removed = layers_cleared and clear_layers(states, opts.panes) or 0
+  local layer_entries_updated = 0
   vim.cmd("redraw")
-  local contexts = build_cache_contexts(opts.panes, states, opts.compact_mode, opts.plan_token)
-  local measurement_plan = {}
-  for index, interval in ipairs(intervals) do
-    local cacheable_line, heights = get_cached_heights(interval, opts.panes, contexts)
-    local needs_measurement = false
-    for _, pane in ipairs(opts.panes) do
-      needs_measurement = needs_measurement or heights[pane.side] == nil
-    end
-    if needs_measurement then
-      opts.padding_extmarks_removed = opts.padding_extmarks_removed + remove_interval_padding(states, opts.panes, index)
-    end
-    measurement_plan[index] = { cacheable_line = cacheable_line, heights = heights }
-  end
-  if opts.padding_extmarks_removed > 0 then
+
+  local contexts, context_requires_clear = build_cache_contexts(opts.panes, states, opts.compact_mode, opts.plan_token)
+  if context_requires_clear and not layers_cleared then
+    layer_entries_removed = layer_entries_removed + clear_layers(states, opts.panes)
+    layers_cleared = true
     vim.cmd("redraw")
   end
 
-  local counts = { requests = 0, measurements = 0, hits = 0 }
-  local measured_padding = {}
-  for index, interval in ipairs(intervals) do
-    measured_padding[index] = measure_interval_padding(interval, opts.panes, contexts, measurement_plan[index], counts)
-  end
-  opts.measurement_requests = counts.requests
-  opts.measurements = counts.measurements
-  opts.cache_hits = counts.hits
-  opts.redraw_measure_ms = elapsed_ms(measurement_started_at)
+  local measurement_plan, entries, pending_padding = build_measurement_plan(intervals, opts.panes, contexts, not layers_cleared)
 
-  local padding_started_at = vim.uv.hrtime()
-  local stats = build_stats(opts.panes, intervals, opts)
-  for index, interval in ipairs(intervals) do
-    render_interval_padding(index, interval, measured_padding[index], opts.panes, states, stats)
+  if not layers_cleared then
+    local retained_stats = set_layers(states, opts.panes, entries)
+    layer_entries_removed = layer_entries_removed + retained_stats.removed
+    layer_entries_updated = layer_entries_updated + retained_stats.updated
+    if retained_stats.removed > 0 or retained_stats.updated > 0 then
+      vim.cmd("redraw")
+    end
   end
+
+  local counts = { requests = 0, measurements = 0, hits = 0 }
+  for _, pane in ipairs(opts.panes) do
+    measure_pane_ranges(pane, intervals, contexts[pane.side], measurement_plan, counts)
+  end
+  local padding_started_at = vim.uv.hrtime()
+  local stats = build_stats(intervals, {
+    reason = opts.reason,
+    measurement_requests = counts.requests,
+    measurements = counts.measurements,
+    cache_hits = counts.hits,
+    plan_cache_hits = opts.plan_cache_hits,
+    layer_entries_removed = layer_entries_removed,
+    plan_ms = opts.plan_ms,
+    prepare_ms = prepare_ms,
+    fold_scan_ms = fold_scan_ms,
+    redraw_measure_ms = elapsed_ms(measurement_started_at),
+    started_at = opts.started_at,
+  })
+  for _, index in ipairs(pending_padding) do
+    local interval = intervals[index]
+    local padding = calculate_padding(interval, opts.panes, measurement_plan[index].heights)
+    add_padding_entries(entries, index, interval, padding, opts.panes)
+  end
+  set_filler_stats(entries, opts.panes, stats)
+  local installed_stats = set_layers(states, opts.panes, entries)
+  stats.layer_entries_removed = stats.layer_entries_removed + installed_stats.removed
+  stats.layer_entries_reused = installed_stats.reused
+  stats.layer_entries_updated = layer_entries_updated + installed_stats.updated
   stats.timings.padding_ms = elapsed_ms(padding_started_at)
   stats.timings.total_ms = elapsed_ms(opts.started_at)
   return stats
 end
 
 function M.clear_window(win)
-  clear_state(pane_states[win])
-  pane_states[win] = nil
+  local state = pane_states[win]
+  if state then
+    display.destroy_layer(state.layer)
+    pane_states[win] = nil
+  end
 end
 
 function M.invalidate_window(win)

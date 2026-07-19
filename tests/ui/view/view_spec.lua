@@ -5,6 +5,8 @@ local view = require("codediff.ui.view")
 local diff = require('codediff.core.diff')
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
+local display = require("codediff.nvim.display")
+local view_sync = require("codediff.ui.view_sync")
 
 -- Helper to get temp path
 local function get_temp_path(filename)
@@ -159,7 +161,7 @@ describe("Render View", function()
       -- Check that windows have scrollbind enabled (essential for diff view)
       for _, win in ipairs({wins[1], wins[2]}) do
         local scrollbind = vim.api.nvim_win_get_option(win, 'scrollbind')
-        assert.is_true(scrollbind, "Scroll binding should be enabled for diff view")
+        assert.equal(not view_sync.is_supported(), scrollbind, "Native scroll binding should match viewport support")
       end
     end
 
@@ -422,5 +424,61 @@ describe("Render View", function()
       vim.fn.delete(left_path)
       vim.fn.delete(right_path)
     end
+  end)
+
+  it("Keeps a large virtual filler block aligned while scrolling", function()
+    vim.cmd("tabnew")
+    local tabpage = vim.api.nvim_get_current_tabpage()
+    local left_win = vim.api.nvim_get_current_win()
+    local left_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(left_win, left_buf)
+    vim.cmd("vsplit")
+    local right_win = vim.api.nvim_get_current_win()
+    local right_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(right_win, right_buf)
+
+    local left_lines = {}
+    local right_lines = {}
+    for index = 1, 80 do
+      left_lines[index] = "left " .. index
+    end
+    for index = 1, 140 do
+      right_lines[index] = "right " .. index
+    end
+    vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, left_lines)
+    vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, right_lines)
+
+    local filler_lines = {}
+    for index = 1, 60 do
+      filler_lines[index] = { { "filler", "Normal" } }
+    end
+    vim.api.nvim_buf_set_extmark(left_buf, vim.api.nvim_create_namespace("codediff-scrollbind-test"), 19, 0, {
+      virt_lines = filler_lines,
+    })
+
+    assert.is_true(view_sync.setup(tabpage, { left_win, right_win }))
+    vim.api.nvim_set_current_win(right_win)
+    vim.api.nvim_win_set_cursor(right_win, { 40, 0 })
+    vim.cmd("normal! zt")
+    vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(right_win), modeline = false })
+    assert.is_true(vim.wait(100, function()
+      return display.get_offset(left_win) == display.get_offset(right_win)
+    end))
+
+    local filler_view = vim.api.nvim_win_call(left_win, vim.fn.winsaveview)
+    assert.is_true(filler_view.topfill > 0)
+
+    vim.api.nvim_win_set_cursor(right_win, { 100, 0 })
+    vim.cmd("normal! zt")
+    vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(right_win), modeline = false })
+    assert.is_true(vim.wait(100, function()
+      return display.get_offset(left_win) == display.get_offset(right_win)
+    end))
+
+    local aligned_view = vim.api.nvim_win_call(left_win, vim.fn.winsaveview)
+    assert.equal(0, aligned_view.topfill)
+    assert.is_false(vim.wo[left_win].scrollbind)
+    assert.is_false(vim.wo[right_win].scrollbind)
+    view_sync.clear(tabpage)
   end)
 end)

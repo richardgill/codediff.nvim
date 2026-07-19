@@ -143,7 +143,48 @@ describe("wrapped smooth scrolling", function()
     wrap_alignment.release_session(tabpage)
   end)
 
-  it("synchronizes immediately before deferred scroll reconciliation", function()
+  it("reconciles panes when virtual filler rejects the source offset", function()
+    if not wrap_alignment.is_supported() then
+      pending("wrapped alignment is unavailable")
+      return
+    end
+
+    local original_lines = { string.rep("original wrapping ", 80), "second line", "third line" }
+    local modified_lines = { "short", "second line", "third line" }
+    local tabpage, original_win, modified_win, original_buf, modified_buf = create_panes(original_lines, modified_lines)
+    vim.api.nvim_win_set_height(original_win, 8)
+    vim.wo[original_win].smoothscroll = true
+
+    wrap_alignment.apply({
+      original_win = original_win,
+      modified_win = modified_win,
+      original_buf = original_buf,
+      modified_buf = modified_buf,
+      lines_diff = {
+        changes = {
+          {
+            original = { start_line = 1, end_line = 2 },
+            modified = { start_line = 1, end_line = 2 },
+            inner_changes = {},
+          },
+        },
+        moves = {},
+      },
+    })
+
+    set_skipped_rows(original_win, 3)
+    local requested_offset = get_offset(original_win)
+    wrap_alignment.sync_from(tabpage, original_win)
+
+    assert.is_true(get_offset(original_win) >= requested_offset)
+    assert.equal(get_offset(original_win), get_offset(modified_win))
+
+    wrap_alignment.clear_window(original_win)
+    wrap_alignment.clear_window(modified_win)
+    wrap_alignment.release_session(tabpage)
+  end)
+
+  it("synchronizes scroll changes only after the source view settles", function()
     if not wrap_alignment.is_supported() then
       pending("wrapped alignment is unavailable")
       return
@@ -162,14 +203,21 @@ describe("wrapped smooth scrolling", function()
       modified_buf = modified_buf,
       lines_diff = { changes = {}, moves = {} },
     })
+    local rebuild_count = wrap_alignment.get_metrics().rebuild_count
 
     vim.api.nvim_win_call(modified_win, function()
       vim.fn.winrestview({ topline = 150 })
     end)
-    wrap_alignment.sync_from_scroll(tabpage, modified_win)
+    vim.cmd("redraw")
+    vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(modified_win), modeline = false })
 
     assert.is_true(get_offset(modified_win) > 0)
-    assert.equal(get_offset(modified_win), get_offset(original_win))
+    assert.is_true(get_offset(modified_win) ~= get_offset(original_win))
+    local synced = vim.wait(1000, function()
+      return get_offset(modified_win) == get_offset(original_win)
+    end, 20)
+    assert.is_true(synced)
+    assert.equal(rebuild_count, wrap_alignment.get_metrics().rebuild_count)
   end)
 
   it("defers window-scroll synchronization until the source view settles", function()
@@ -194,11 +242,13 @@ describe("wrapped smooth scrolling", function()
       modified_buf = modified_buf,
       lines_diff = lines_diff,
     })
+    local rebuild_count = wrap_alignment.get_metrics().rebuild_count
 
     vim.api.nvim_win_call(modified_win, function()
       vim.fn.winrestview({ topline = 6 })
     end)
-    wrap_alignment.schedule_sync_from(tabpage, modified_win)
+    vim.cmd("redraw")
+    vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(modified_win), modeline = false })
     vim.api.nvim_win_call(modified_win, function()
       vim.fn.winrestview({ topline = 12 })
     end)
@@ -208,6 +258,7 @@ describe("wrapped smooth scrolling", function()
       return modified_offset > 0 and modified_offset == get_offset(original_win)
     end, 20)
     assert.is_true(synced, string.format("offsets should settle: %d/%d", get_offset(original_win), get_offset(modified_win)))
+    assert.equal(rebuild_count, wrap_alignment.get_metrics().rebuild_count)
 
     wrap_alignment.clear_window(original_win)
     wrap_alignment.clear_window(modified_win)

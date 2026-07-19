@@ -198,6 +198,7 @@ Setup entry point:
       compact_context_lines = 3,
       compact_sync_folds = true,
       cycle_hunks_across_files = false,
+      wrap = false,
     },
     explorer = {
       position = "left",
@@ -287,6 +288,34 @@ Setup entry point:
     },
   })
 <
+
+==============================================================================
+WRAPPED DIFFS                                             *codediff-wrapping*
+
+Set `diff.wrap = true` to wrap long lines while preserving semantic alignment
+between panes. Aligned side-by-side and conflict wrapping requires Neovim
+0.12+; older versions retain the existing unwrapped behavior. Complete inline
+wrapping of deleted virtual lines requires Neovim 0.13+; earlier versions retain
+the existing inline overflow behavior.
+
+While aligned wrapping is active, CodeDiff owns the window-local `wrap`,
+`scrollbind`, `smoothscroll`, and `cursorbind` options and restores their prior
+values during cleanup. Cursors remain independent.
+
+CodeDiff automatically rebuilds alignment for its own renders, edits, layout
+changes, supported display options, diagnostics, and conceal changes. External
+virtual text or lines, signs, inlay hints, manual folds, dynamic status columns,
+and decoration providers without an observable event must invalidate alignment
+explicitly. Use `"fold"` for fold changes and `"external-display"` otherwise:
+>lua
+  require("codediff").invalidate_alignment(
+    vim.api.nvim_get_current_tabpage(),
+    "external-display"
+  )
+<
+
+Window-local compensation uses Neovim's experimental scoped-namespace API,
+isolated behind CodeDiff's internal display adapter.
 
 ==============================================================================
 HIGHLIGHT GROUPS                                     *codediff-highlight-groups*

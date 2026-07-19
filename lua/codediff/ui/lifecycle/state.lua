@@ -3,6 +3,7 @@
 local M = {}
 
 local highlights = require("codediff.ui.highlights")
+local view_sync = require("codediff.ui.view_sync")
 
 -- Save buffer state before modifications
 local function save_buffer_state(bufnr)
@@ -100,6 +101,7 @@ local function suspend_diff(tabpage)
   clear_buffer_highlights(diff.original_bufnr)
   clear_buffer_highlights(diff.modified_bufnr)
   local wrap_alignment = require("codediff.ui.wrap_alignment")
+  view_sync.clear(tabpage)
   wrap_alignment.clear_window(diff.original_win)
   wrap_alignment.clear_window(diff.modified_win)
   wrap_alignment.clear_window(diff.result_win)
@@ -253,9 +255,29 @@ local function resume_diff(tabpage)
       end
     end
 
+    if
+      diff.layout ~= "inline"
+      and not wrap_enabled
+      and view_sync.is_supported()
+      and diff.original_win
+      and diff.modified_win
+      and vim.api.nvim_win_is_valid(diff.original_win)
+      and vim.api.nvim_win_is_valid(diff.modified_win)
+    then
+      local windows = { diff.original_win, diff.modified_win }
+      if diff.result_win and vim.api.nvim_win_is_valid(diff.result_win) then
+        windows[#windows + 1] = diff.result_win
+      end
+      local current_win = vim.api.nvim_get_current_win()
+      view_sync.setup(tabpage, windows, vim.tbl_contains(windows, current_win) and current_win or diff.modified_win)
+    elseif diff.layout == "inline" then
+      view_sync.clear(tabpage)
+    end
+
     -- Re-sync scrollbind ONLY if diff was recomputed and not inline mode
     if
       diff_was_recomputed
+      and not view_sync.is_supported()
       and diff.layout ~= "inline"
       and not wrap_enabled
       and diff.original_win

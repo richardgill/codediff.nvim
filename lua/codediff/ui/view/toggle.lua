@@ -28,6 +28,7 @@ local function normalize_inline_layout(tabpage)
 
   local original_win = session.original_win
   local modified_win = session.modified_win
+  require("codediff.ui.view_sync").clear(tabpage)
   wrap_alignment.clear_window(original_win)
   wrap_alignment.clear_window(modified_win)
   local keep_win = (modified_win and vim.api.nvim_win_is_valid(modified_win) and modified_win) or (original_win and vim.api.nvim_win_is_valid(original_win) and original_win)

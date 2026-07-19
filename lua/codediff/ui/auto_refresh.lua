@@ -4,6 +4,7 @@ local M = {}
 
 local diff = require("codediff.core.diff")
 local core = require("codediff.ui.core")
+local view_sync = require("codediff.ui.view_sync")
 
 -- Throttle delay in milliseconds
 local THROTTLE_DELAY_MS = 200
@@ -149,7 +150,16 @@ local function do_diff_update(bufnr, skip_watcher_check)
       result_win = stored_result_win
     end
 
-    if original_win and modified_win and not wrap_enabled then
+    if original_win and modified_win and not wrap_enabled and view_sync.is_supported() then
+      local windows = { original_win, modified_win }
+      if result_win then
+        windows[#windows + 1] = result_win
+      end
+      local current_win = vim.api.nvim_get_current_win()
+      view_sync.setup(tabpage, windows, vim.tbl_contains(windows, current_win) and current_win or modified_win)
+    end
+
+    if original_win and modified_win and not wrap_enabled and not view_sync.is_supported() then
       local current_win = vim.api.nvim_get_current_win()
 
       -- Only resync if user is in one of the diff windows

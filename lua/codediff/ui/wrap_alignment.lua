@@ -2,39 +2,15 @@ local M = {}
 
 local alignment_model = require("codediff.ui.wrap_alignment_model")
 local alignment_renderer = require("codediff.ui.wrap_alignment_renderer")
-local view_sync = require("codediff.ui.wrap_view_sync")
-local window_namespace = require("codediff.nvim.window_namespace")
+local display = require("codediff.nvim.display")
 
 local groups_by_win = {}
-local sync_group = nil
 local scheduled_rebuilds = {}
 local plan_caches = {}
 local option_profiles = {}
 local option_owners = {}
 local fold_tracking = {}
 local owned_option_names = { "wrap", "scrollbind", "smoothscroll", "cursorbind" }
-local display_option_names = {
-  "ambiwidth",
-  "breakindent",
-  "breakindentopt",
-  "concealcursor",
-  "conceallevel",
-  "display",
-  "foldcolumn",
-  "linebreak",
-  "list",
-  "listchars",
-  "number",
-  "numberwidth",
-  "relativenumber",
-  "showbreak",
-  "signcolumn",
-  "statuscolumn",
-  "tabstop",
-  "vartabstop",
-}
-local fold_option_names = { "foldenable", "foldexpr", "foldlevel", "foldmethod", "foldminlines", "foldtext" }
-local global_display_options = { ambiwidth = true, display = true }
 
 local read_owned_options = function(win)
   local options = {}
@@ -99,95 +75,56 @@ local is_valid_pane = function(pane)
   return pane.win and pane.buf and vim.api.nvim_win_is_valid(pane.win) and vim.api.nvim_buf_is_valid(pane.buf) and vim.api.nvim_win_get_buf(pane.win) == pane.buf
 end
 
-local invalidate_matching_groups = function(opts, reason)
-  local invalidated = {}
-  for win, group in pairs(groups_by_win) do
-    local matches = opts.all or win == opts.win
-    for _, pane in ipairs(group.panes) do
-      matches = matches or (opts.buf and pane.buf == opts.buf)
-    end
-    if matches and not invalidated[group.tabpage] then
-      invalidated[group.tabpage] = true
-      M.invalidate(group.tabpage, reason)
-    end
-  end
-end
-
-local handle_winscrolled = function(args)
-  local current_win = vim.api.nvim_get_current_win()
-  local matched_win = tonumber(args.match)
-  local current_change = vim.v.event[tostring(current_win)]
-  local win = current_change and current_win or matched_win
-  local group = win and groups_by_win[win] or nil
-  local change = win and vim.v.event[tostring(win)] or nil
-  if not group or not change or change.width ~= 0 or change.height ~= 0 then
+local unobserve_group = function(group)
+  if not group then
     return
   end
-  if group.ignore_wins and group.ignore_wins[win] and win ~= current_win then
-    group.ignore_wins[win] = nil
-    return
-  end
-  if change.topline == 0 and change.topfill == 0 and change.skipcol == 0 then
-    return
-  end
-
-  M.sync_from_scroll(group.tabpage, win)
-end
-
-local handle_winresized = function()
-  local rebuilt = {}
-  for _, win in ipairs(vim.v.event.windows or {}) do
-    local group = groups_by_win[win]
-    if group and not rebuilt[group.tabpage] then
-      rebuilt[group.tabpage] = true
-      M.schedule_rebuild(group.tabpage, "resize")
+  display.unobserve(group.subscription)
+  group.subscription = nil
+  for _, pane in ipairs(group.panes) do
+    if groups_by_win[pane.win] == group then
+      groups_by_win[pane.win] = nil
     end
   end
 end
 
-local handle_option_set = function(args)
-  local name = args.match
-  local is_fold = vim.tbl_contains(fold_option_names, name)
-  invalidate_matching_groups({
-    all = global_display_options[name] == true,
-    win = vim.api.nvim_get_current_win(),
-    buf = args.buf,
-  }, is_fold and "fold" or "display-option")
-end
-
-local setup_sync_autocmd = function()
-  if sync_group then
-    return
+local observe_group = function(group)
+  local wins = {}
+  for _, pane in ipairs(group.panes) do
+    wins[#wins + 1] = pane.win
   end
-  sync_group = vim.api.nvim_create_augroup("CodeDiffWrapScrollSync", { clear = true })
-  vim.api.nvim_create_autocmd("WinScrolled", {
-    group = sync_group,
-    callback = handle_winscrolled,
-  })
-  vim.api.nvim_create_autocmd("WinResized", {
-    group = sync_group,
-    callback = handle_winresized,
-  })
-  vim.api.nvim_create_autocmd("OptionSet", {
-    group = sync_group,
-    pattern = vim.list_extend(vim.deepcopy(display_option_names), fold_option_names),
-    callback = handle_option_set,
-  })
-  vim.api.nvim_create_autocmd("DiagnosticChanged", {
-    group = sync_group,
-    callback = function(args)
-      invalidate_matching_groups({ buf = args.buf }, "diagnostic")
+  group.subscription = display.observe({
+    wins = wins,
+    on_scroll = function(source_win, offset)
+      display.synchronize(group.subscription, source_win, offset)
     end,
-  })
-  vim.api.nvim_create_autocmd("ModeChanged", {
-    group = sync_group,
-    callback = function()
-      local win = vim.api.nvim_get_current_win()
-      if groups_by_win[win] and vim.wo[win].conceallevel > 0 and vim.wo[win].concealcursor ~= "" then
-        invalidate_matching_groups({ win = win }, "conceal")
+    on_invalidate = function(reason)
+      if reason == "resize" then
+        M.schedule_rebuild(group.tabpage, reason)
+      else
+        M.invalidate(group.tabpage, reason)
       end
     end,
   })
+end
+
+local set_group = function(tabpage, panes)
+  local previous_groups = {}
+  for _, pane in ipairs(panes) do
+    local group = groups_by_win[pane.win]
+    if group then
+      previous_groups[group] = true
+    end
+  end
+  for group in pairs(previous_groups) do
+    unobserve_group(group)
+  end
+
+  local group = { tabpage = tabpage, panes = panes }
+  for _, pane in ipairs(panes) do
+    groups_by_win[pane.win] = group
+  end
+  observe_group(group)
 end
 
 local apply_plan = function(opts)
@@ -220,20 +157,15 @@ local apply_plan = function(opts)
     fold_tracking = fold_tracking[opts.tabpage],
     prepare_started_at = prepare_started_at,
   }))
-  local group = {
-    tabpage = opts.tabpage,
-    panes = opts.panes,
-  }
+  set_group(opts.tabpage, opts.panes)
   for _, pane in ipairs(opts.panes) do
-    groups_by_win[pane.win] = group
     vim.w[pane.win].codediff_wrap_alignment = stats
   end
-  setup_sync_autocmd()
   return stats
 end
 
 function M.is_supported()
-  return vim.fn.has("nvim-0.12") == 1 and window_namespace.is_supported() and type(vim.api.nvim_win_text_height) == "function"
+  return display.is_supported()
 end
 
 function M.is_enabled()
@@ -262,6 +194,15 @@ function M.restore_window(win, release)
 end
 
 function M.release_session(tabpage)
+  local session_groups = {}
+  for _, group in pairs(groups_by_win) do
+    if group.tabpage == tabpage then
+      session_groups[group] = true
+    end
+  end
+  for group in pairs(session_groups) do
+    unobserve_group(group)
+  end
   local owned_windows = {}
   for win, owner in pairs(option_owners) do
     if owner.tabpage == tabpage then
@@ -276,7 +217,18 @@ function M.release_session(tabpage)
 end
 
 function M.capture_views(wins)
-  return view_sync.capture(wins)
+  local current_win = vim.api.nvim_get_current_win()
+  local captured = { panes = {} }
+  for _, win in ipairs(wins) do
+    local anchor = display.capture(win)
+    if anchor then
+      captured.panes[#captured.panes + 1] = { win = win, anchor = anchor }
+      if win == current_win then
+        captured.source_win = win
+      end
+    end
+  end
+  return captured
 end
 
 function M.apply(opts)
@@ -385,20 +337,30 @@ function M.apply_conflict(tabpage, reason)
   })
 end
 
+function M.sync_from(tabpage, source_win)
+  local group = groups_by_win[source_win]
+  if not group or group.tabpage ~= tabpage then
+    return
+  end
+  display.synchronize(group.subscription, source_win)
+end
+
 local finish_views = function(stats, tabpage, saved_views, defer_sync)
   local started_at = vim.uv.hrtime()
-  view_sync.restore(saved_views)
+  for _, pane in ipairs((saved_views and saved_views.panes) or {}) do
+    display.restore(pane.win, pane.anchor)
+  end
   if not defer_sync then
     local source_win = saved_views and saved_views.source_win or nil
-    if source_win and vim.api.nvim_win_is_valid(source_win) then
+    if source_win then
       M.sync_from(tabpage, source_win)
     end
   end
   if stats then
     stats.timings.view_sync_ms = elapsed_ms(started_at)
     stats.timings.total_ms = stats.timings.total_ms + stats.timings.view_sync_ms
-    for _, win in ipairs(stats.pane_wins) do
-      if vim.api.nvim_win_is_valid(win) then
+    for win, group in pairs(groups_by_win) do
+      if group.tabpage == tabpage and vim.api.nvim_win_is_valid(win) then
         vim.w[win].codediff_wrap_alignment = stats
       end
     end
@@ -417,39 +379,6 @@ function M.finish_conflict(opts)
   return finish_views(stats, opts.tabpage, opts.saved_views, opts.defer_sync)
 end
 
-function M.sync_from(tabpage, source_win)
-  local group = groups_by_win[source_win]
-  if not group or group.tabpage ~= tabpage then
-    return
-  end
-  view_sync.sync(group, source_win)
-end
-
-function M.sync_from_scroll(tabpage, source_win)
-  M.sync_from(tabpage, source_win)
-  M.schedule_sync_from(tabpage, source_win)
-end
-
-function M.schedule_sync_from(tabpage, source_win)
-  local group = groups_by_win[source_win]
-  if not group or group.tabpage ~= tabpage then
-    return
-  end
-  group.pending_sync_win = source_win
-  if group.sync_scheduled then
-    return
-  end
-  group.sync_scheduled = true
-  vim.schedule(function()
-    group.sync_scheduled = false
-    local pending_win = group.pending_sync_win
-    group.pending_sync_win = nil
-    if pending_win and groups_by_win[pending_win] == group then
-      M.sync_from(group.tabpage, pending_win)
-    end
-  end)
-end
-
 function M.clear_window(win)
   if not win then
     return
@@ -457,9 +386,9 @@ function M.clear_window(win)
   alignment_renderer.clear_window(win)
   local group = groups_by_win[win]
   for _, pane in ipairs((group and group.panes) or {}) do
-    groups_by_win[pane.win] = nil
     plan_caches[pane.win] = nil
   end
+  unobserve_group(group)
   plan_caches[win] = nil
   if vim.api.nvim_win_is_valid(win) then
     vim.w[win].codediff_wrap_alignment = nil

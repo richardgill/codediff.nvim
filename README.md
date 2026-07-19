@@ -103,6 +103,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       compute_moves = false,              -- Detect moved code blocks (opt-in, matches VSCode experimental.showMoves)
       compact_context_lines = 3,          -- Number of context lines around hunks in compact mode
       compact_sync_folds = true,          -- Sync fold open/close across panes (mirrors Vim diff mode behavior)
+      wrap = false,                       -- Wrap and align diff panes (Neovim 0.12+; complete inline wrapping on 0.13+)
     },
 
     -- Explorer panel configuration
@@ -221,6 +222,16 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 ```
 
 The C library will be downloaded automatically on first use. No `build` step needed!
+
+### Wrapped diffs
+
+Set `diff.wrap = true` to wrap long lines while keeping corresponding semantic rows aligned. CodeDiff measures each pane's rendered height, adds window-local compensation, and synchronizes scrolling without enabling `cursorbind`.
+
+- Aligned side-by-side and conflict wrapping requires Neovim 0.12+. Earlier versions retain the existing unwrapped behavior.
+- Complete inline wrapping, including deleted virtual lines, requires Neovim 0.13+; earlier versions retain the existing inline overflow behavior.
+- CodeDiff temporarily owns `wrap`, `scrollbind`, `smoothscroll`, and `cursorbind` in aligned panes and restores their previous values during cleanup. Pane cursors remain independent.
+- External virtual text/lines, signs, inlay hints, manual folds, dynamic status columns, or decoration providers without observable events must call `require("codediff").invalidate_alignment(tabpage, reason)` after changing rendered height. Use reason `"fold"` for fold changes and `"external-display"` otherwise.
+- Window-local compensation uses Neovim's experimental scoped-namespace API, isolated behind CodeDiff's display adapter.
 
 ### Managing Library Installation
 

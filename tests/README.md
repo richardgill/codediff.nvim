@@ -49,6 +49,17 @@ LSP integration and rendering:
 
 **12 tests**
 
+### ✅ Rendered Display Facade (`nvim/display/`)
+Window-renderer compatibility coverage (42 cases):
+- Opaque viewport capture, restoration, and rendered offsets
+- Settled scroll and display-invalidation events
+- Batch renderer measurements, opaque layout contexts, decoration/layer exclusion, signatures, folds, and dynamic gutters
+- Window-local layer isolation at differing widths, ordinary shared-buffer windows, concurrent ownership, re-scoping, declarative extmark-ID reuse/update/removal, buffer replacement, invalid windows, capability failure, and ordered teardown
+- Architecture enforcement for the display facade and main wrapping modules
+- Unwrapped multi-pane synchronization through a 60-row virtual filler block on Neovim 0.12 and nightly
+
+Wrapping session ownership remains covered in `ui/wrap_session_ownership_spec.lua`, including shared buffers, ordinary-window isolation, window replacement, suspend/resume, and cleanup.
+
 ## Running Tests
 
 ### All tests:
@@ -59,7 +70,7 @@ LSP integration and rendering:
 ### Individual spec:
 ```bash
 nvim --headless --noplugin -u tests/init.lua \
-  -c "lua require('plenary.test_harness').test_directory('tests/ffi_integration_spec.lua')"
+  -c "lua require('plenary.test_harness').test_file('tests/nvim/display/layer_spec.lua', { minimal_init = '$PWD/tests/init.lua' })"
 ```
 
 ## Test Philosophy

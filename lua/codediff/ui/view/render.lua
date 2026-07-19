@@ -5,6 +5,7 @@ local core = require("codediff.ui.core")
 local semantic = require("codediff.ui.semantic_tokens")
 local config = require("codediff.config")
 local diff_module = require("codediff.core.diff")
+local view_sync = require("codediff.ui.view_sync")
 
 --- Establish scrollbind between two windows using the anchor technique.
 --- Anchors at the first unchanged line (past any fillers at the start of file)
@@ -83,9 +84,11 @@ function M.render_two_pane(opts)
     semantic.apply_semantic_tokens(opts.modified_buf, opts.original_buf)
   end
 
+  local tabpage = opts.tabpage or (has_windows and vim.api.nvim_win_get_tabpage(opts.modified_win))
   if wrap_enabled then
+    view_sync.clear(tabpage)
     wrap_alignment.finish_two_pane({
-      tabpage = opts.tabpage or vim.api.nvim_win_get_tabpage(opts.modified_win),
+      tabpage = tabpage,
       original_win = opts.original_win,
       modified_win = opts.modified_win,
       original_buf = opts.original_buf,
@@ -98,6 +101,9 @@ function M.render_two_pane(opts)
   else
     wrap_alignment.clear_window(opts.original_win)
     wrap_alignment.clear_window(opts.modified_win)
+    if has_windows then
+      view_sync.setup(tabpage, { opts.original_win, opts.modified_win })
+    end
   end
   return wrap_enabled
 end
@@ -212,7 +218,8 @@ function M.compute_and_render(
     end
 
     -- Step 3: Establish scrollbind with anchor technique, then restore cursors
-    if wrap_enabled then
+    local custom_sync = not wrap_enabled and view_sync.is_supported()
+    if wrap_enabled or custom_sync then
       pcall(vim.api.nvim_win_set_cursor, original_win, orig_cursor)
       pcall(vim.api.nvim_win_set_cursor, modified_win, mod_cursor)
     else
@@ -226,9 +233,11 @@ function M.compute_and_render(
         vim.cmd("normal! zz")
       end
     end
+    local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
     if wrap_enabled then
-      local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
       require("codediff.ui.wrap_alignment").sync_from(tabpage, modified_win)
+    elseif custom_sync then
+      view_sync.sync_from(tabpage, modified_win)
     end
   end
 
@@ -302,14 +311,16 @@ function M.compute_and_render_conflict(original_buf, modified_buf, base_lines, o
 
   -- Setup window options with scrollbind (filler lines enable proper alignment)
   if original_win and modified_win and vim.api.nvim_win_is_valid(original_win) and vim.api.nvim_win_is_valid(modified_win) then
+    local tabpage = vim.api.nvim_win_get_tabpage(modified_win)
+    local custom_sync = not wrap_enabled and view_sync.is_supported()
     vim.wo[original_win].wrap = wrap_enabled
     vim.wo[modified_win].wrap = wrap_enabled
 
     -- Reset scroll position and enable scrollbind
     vim.api.nvim_win_set_cursor(original_win, { 1, 0 })
     vim.api.nvim_win_set_cursor(modified_win, { 1, 0 })
-    vim.wo[original_win].scrollbind = not wrap_enabled
-    vim.wo[modified_win].scrollbind = not wrap_enabled
+    vim.wo[original_win].scrollbind = not wrap_enabled and not custom_sync
+    vim.wo[modified_win].scrollbind = not wrap_enabled and not custom_sync
 
     -- Scroll to first change in either buffer
     if auto_scroll_to_first_hunk then
@@ -328,6 +339,12 @@ function M.compute_and_render_conflict(original_buf, modified_buf, base_lines, o
           vim.cmd("normal! zz")
         end
       end
+    end
+
+    if custom_sync then
+      view_sync.setup(tabpage, { original_win, modified_win }, modified_win)
+    elseif wrap_enabled then
+      view_sync.clear(tabpage)
     end
   end
 

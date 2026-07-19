@@ -92,7 +92,7 @@ describe("wrapped post-decoration render phase", function()
 
     local cached_stats = vim.w[original_win].codediff_wrap_alignment
     assert.equal(1, cached_stats.plan_cache_hits)
-    assert.is_true(cached_stats.padding_extmarks_reused > 0)
+    assert.is_true(cached_stats.layer_entries_reused > 0)
     assert.equal(3, cached_stats.rebuild_count)
     assert.equal(3, wrap_alignment.get_metrics().rebuild_count)
   end)

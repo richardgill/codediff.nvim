@@ -747,6 +747,8 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     local saved_scrollbind_other = vim.wo[other_win].scrollbind
 
     -- Disable scrollbind
+    local view_sync = require("codediff.ui.view_sync")
+    view_sync.clear(tabpage)
     vim.wo[current_win].scrollbind = false
     vim.wo[other_win].scrollbind = false
 
@@ -810,6 +812,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       local mod_cur = { other_view.lnum, other_view.col }
       if not is_on_original then
         orig_cur, mod_cur = mod_cur, orig_cur
+      end
+      if view_sync.setup(tabpage, { orig_win, mod_win }, current_win) then
+        return
       end
       render.establish_scrollbind(orig_win, mod_win, orig_buf_nr, mod_buf_nr, diff_result, orig_cur, mod_cur)
     end
