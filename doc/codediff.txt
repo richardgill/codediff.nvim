@@ -176,7 +176,7 @@ CodeDiff provides several line-matching strategies implemented in the native
 diff engine.
 
 Line matching determines which changed lines in the old and new versions
-correspond to each other. Paired lines receive character-level refinement,
+correspond to each other. Paired lines receive character-level highlighting,
 while unmatched lines remain line-level changes.
 
 Three strategies are available:

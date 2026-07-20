@@ -12,7 +12,7 @@ local compute = function(original, modified, line_matcher, options)
   )
 end
 
-describe("Native line matching", function()
+describe("Line matching", function()
   after_each(function()
     config.options = vim.deepcopy(config.defaults)
   end)
