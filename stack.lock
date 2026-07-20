@@ -1,7 +1,7 @@
 [stack]
 upstream = 7608f3b436ce1f84a4888f75e53079caa981a2e9
-expectedHead = 387d6fece71a4f1281baf7d9a1e4083e106d9f8b
-expectedTree = 76d260d37c3bb12f66540ebf51dce47086dbee14
+expectedHead = fee6ccf5cf6421863b9512d66363478330e94868
+expectedTree = 53387cacac63d6fdf2a585d5e1ee00f2b0d5bc92
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -115,7 +115,7 @@ originCommit = 1c53d1d58fa3bd701859babb03a4680e495cc0ce
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 
 [patch "intraline-line-matching"]
-description = feat: add native line matching strategies
+description = feat: add line matching strategies
 file = patches/014-intraline-line-matching.patch
 originCommit = 3c961f0e4b70aa367965345e03e68dfadbfe6648
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/459
@@ -123,7 +123,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/459
 [patch "native-gutter-signs"]
 description = Added native gutter signs support
 file = patches/015-native-gutter-signs.patch
-originCommit = a1426003fcc6c4f6f4cc79bbf2567af0a5d2fe04
+originCommit = 37b9f56be84bbe5a7498581691059af45bfba63a
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 
 [patch "local-native-build"]
