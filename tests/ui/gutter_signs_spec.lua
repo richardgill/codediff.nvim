@@ -1,5 +1,6 @@
 local config = require("codediff.config")
 local gutter_signs = require("codediff.ui.gutter_signs")
+local path = require("codediff.core.path")
 local gutter_signs_namespace = vim.api.nvim_create_namespace("codediff-gutter-signs")
 
 local get_signs = function(bufnr)
@@ -219,8 +220,8 @@ describe("Native gutter signs", function()
       tabpage,
       "standalone",
       nil,
-      "",
-      "modified.txt",
+      path.empty(),
+      path.make_ref("modified.txt", nil),
       nil,
       nil,
       session.original_bufnr,
@@ -250,8 +251,8 @@ describe("Native gutter signs", function()
       tabpage,
       "standalone",
       nil,
-      "original.txt",
-      "modified.txt",
+      path.make_ref("original.txt", nil),
+      path.make_ref("modified.txt", nil),
       nil,
       nil,
       session.original_bufnr,

@@ -3,6 +3,7 @@
 local M = {}
 
 local highlights = require("codediff.ui.highlights")
+local path = require("codediff.core.path")
 
 -- Save buffer state before modifications
 local function save_buffer_state(bufnr)
@@ -188,9 +189,9 @@ local function resume_diff(tabpage)
       core.render_diff(diff.original_bufnr, diff.modified_bufnr, original_lines, modified_lines, lines_diff)
       if diff.single_pane then
         local gutter_signs = require("codediff.ui.gutter_signs")
-        if diff.original_path and diff.original_path ~= "" and diff.original_win and vim.api.nvim_win_is_valid(diff.original_win) then
+        if not path.is_empty(diff.original) and diff.original_win and vim.api.nvim_win_is_valid(diff.original_win) then
           gutter_signs.set_whole_file(diff.original_bufnr, "original")
-        elseif diff.modified_path and diff.modified_path ~= "" and diff.modified_win and vim.api.nvim_win_is_valid(diff.modified_win) then
+        elseif not path.is_empty(diff.modified) and diff.modified_win and vim.api.nvim_win_is_valid(diff.modified_win) then
           gutter_signs.set_whole_file(diff.modified_bufnr, "modified")
         end
       end
