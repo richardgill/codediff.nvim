@@ -6,6 +6,7 @@ local diff_module = require("codediff.core.diff")
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
 local config = require("codediff.config")
+local path = require("codediff.core.path")
 
 -- Content with a moved block: alpha block moves from top to bottom
 -- The diff engine needs ≥5 contiguous moved lines to detect a move.
@@ -79,6 +80,17 @@ local function wait_for_session(tabpage, timeout_ms)
   return ok, session
 end
 
+local function standalone_config(left_path, right_path)
+  return {
+    mode = "standalone",
+    git_root = nil,
+    original = path.make_ref(left_path, nil),
+    modified = path.make_ref(right_path, nil),
+    original_revision = nil,
+    modified_revision = nil,
+  }
+end
+
 --- Check whether buffer has a normal-mode keymap with the given lhs
 local function buf_has_keymap(bufnr, lhs)
   local maps = vim.api.nvim_buf_get_keymap(bufnr, "n")
@@ -111,14 +123,7 @@ describe("gm align_move keymap", function()
 
     left_path, right_path = write_temp_files(make_original_lines(), make_modified_lines())
 
-    view.create({
-      mode = "standalone",
-      git_root = nil,
-      original_path = left_path,
-      modified_path = right_path,
-      original_revision = nil,
-      modified_revision = nil,
-    })
+    view.create(standalone_config(left_path, right_path))
 
     local tabpage = vim.api.nvim_get_current_tabpage()
     local ok, session = wait_for_session_with_moves(tabpage)
@@ -138,14 +143,7 @@ describe("gm align_move keymap", function()
 
     left_path, right_path = write_temp_files(make_original_lines(), make_modified_lines())
 
-    view.create({
-      mode = "standalone",
-      git_root = nil,
-      original_path = left_path,
-      modified_path = right_path,
-      original_revision = nil,
-      modified_revision = nil,
-    })
+    view.create(standalone_config(left_path, right_path))
 
     local tabpage = vim.api.nvim_get_current_tabpage()
     local ok, session = wait_for_session(tabpage)
@@ -164,14 +162,7 @@ describe("gm align_move keymap", function()
 
     left_path, right_path = write_temp_files(make_original_lines(), make_modified_lines())
 
-    view.create({
-      mode = "standalone",
-      git_root = nil,
-      original_path = left_path,
-      modified_path = right_path,
-      original_revision = nil,
-      modified_revision = nil,
-    })
+    view.create(standalone_config(left_path, right_path))
 
     local tabpage = vim.api.nvim_get_current_tabpage()
     local ok, session = wait_for_session_with_moves(tabpage)
@@ -227,14 +218,7 @@ describe("gm align_move keymap", function()
 
     left_path, right_path = write_temp_files(make_original_lines(), make_modified_lines())
 
-    view.create({
-      mode = "standalone",
-      git_root = nil,
-      original_path = left_path,
-      modified_path = right_path,
-      original_revision = nil,
-      modified_revision = nil,
-    })
+    view.create(standalone_config(left_path, right_path))
 
     local tabpage = vim.api.nvim_get_current_tabpage()
     local ok, session = wait_for_session_with_moves(tabpage)
@@ -285,14 +269,7 @@ describe("gm align_move keymap", function()
 
     left_path, right_path = write_temp_files(make_original_lines(), make_modified_lines())
 
-    view.create({
-      mode = "standalone",
-      git_root = nil,
-      original_path = left_path,
-      modified_path = right_path,
-      original_revision = nil,
-      modified_revision = nil,
-    })
+    view.create(standalone_config(left_path, right_path))
 
     local tabpage = vim.api.nvim_get_current_tabpage()
     local ok, session = wait_for_session_with_moves(tabpage)
@@ -352,14 +329,7 @@ describe("gm align_move keymap", function()
 
     left_path, right_path = write_temp_files(make_original_lines(), make_modified_lines())
 
-    view.create({
-      mode = "standalone",
-      git_root = nil,
-      original_path = left_path,
-      modified_path = right_path,
-      original_revision = nil,
-      modified_revision = nil,
-    })
+    view.create(standalone_config(left_path, right_path))
 
     local tabpage = vim.api.nvim_get_current_tabpage()
     local ok, session = wait_for_session_with_moves(tabpage)
@@ -415,8 +385,8 @@ describe("gm align_move keymap", function()
           local view = require("codediff.ui.view")
           view.create({
             mode = "standalone",
-            original_path = orig_path,
-            modified_path = mod_path,
+            original = path.make_ref(orig_path, nil),
+            modified = path.make_ref(mod_path, nil),
           })
           vim.cmd("redraw")
           vim.wait(500)

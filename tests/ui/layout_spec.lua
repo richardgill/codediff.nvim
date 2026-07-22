@@ -4,6 +4,7 @@
 local layout = require("codediff.ui.layout")
 local lifecycle = require("codediff.ui.lifecycle")
 local config = require("codediff.config")
+local path = require("codediff.core.path")
 
 -- Tolerance for width assertions (Neovim may round or add separators)
 local WIDTH_TOLERANCE = 2
@@ -894,8 +895,8 @@ describe("Layout Manager", function()
     session_mod.get_active_diffs()[tabpage] = {
       mode = "explorer",
       git_root = "/tmp",
-      original_path = "",
-      modified_path = "",
+      original = path.empty(),
+      modified = path.empty(),
       original_revision = nil,
       modified_revision = nil,
       original_bufnr = orig_buf,
@@ -972,8 +973,8 @@ describe("Layout Manager", function()
     session_mod.get_active_diffs()[tabpage] = {
       mode = "explorer",
       git_root = "/tmp",
-      original_path = "",
-      modified_path = "",
+      original = path.empty(),
+      modified = path.empty(),
       original_revision = nil,
       modified_revision = nil,
       original_bufnr = orig_buf,
@@ -1038,8 +1039,8 @@ describe("Layout Manager", function()
     session_mod.get_active_diffs()[tabpage] = {
       mode = "explorer",
       git_root = "/tmp",
-      original_path = "",
-      modified_path = "",
+      original = path.empty(),
+      modified = path.empty(),
       original_revision = "abc123",
       modified_revision = "def456",
       original_bufnr = orig_buf,
@@ -1109,8 +1110,8 @@ describe("Layout Manager", function()
     session_mod.get_active_diffs()[tabpage] = {
       mode = "explorer",
       git_root = "/tmp",
-      original_path = "",
-      modified_path = "",
+      original = path.empty(),
+      modified = path.empty(),
       original_revision = "abc123",
       modified_revision = "def456",
       original_bufnr = orig_buf,
