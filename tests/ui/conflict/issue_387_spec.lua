@@ -6,6 +6,7 @@
 -- renderer's red/green scheme.
 
 local h = require('tests.helpers')
+local path = require("codediff.core.path")
 
 describe('Issue #387 regression — conflict-mode input panes stay green on TextChanged', function()
   local repo
@@ -46,8 +47,8 @@ describe('Issue #387 regression — conflict-mode input panes stay green on Text
     view.create({
       mode = "standalone",
       git_root = repo.dir,
-      original_path = "file.txt",
-      modified_path = "file.txt",
+      original = path.make_ref("file.txt", repo.dir),
+      modified = path.make_ref("file.txt", repo.dir),
       original_revision = ":3",
       modified_revision = ":2",
       conflict = true,

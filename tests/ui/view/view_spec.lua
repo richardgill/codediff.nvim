@@ -5,6 +5,7 @@ local view = require("codediff.ui.view")
 local diff = require('codediff.core.diff')
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
+local path = require("codediff.core.path")
 
 -- Helper to get temp path
 local function get_temp_path(filename)
@@ -19,8 +20,8 @@ local function create_test_diff_view(original_lines, modified_lines, left_path, 
   local session_config = {
     mode = "standalone",  -- view.create will create new tab
     git_root = nil,
-    original_path = left_path,
-    modified_path = right_path,
+    original = path.make_ref(left_path, nil),
+    modified = path.make_ref(right_path, nil),
     original_revision = nil,  -- Real files, not virtual
     modified_revision = nil,
   }
