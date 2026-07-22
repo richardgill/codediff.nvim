@@ -1,24 +1,24 @@
-From 3afb81c209b62e9477a841b1476b266b4bf238f8 Mon Sep 17 00:00:00 2001
+From ea1ee6f382df03f21264d4cfdb44e1cbaa384234 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 16:30:00 +0100
 Subject: [PATCH] fix: build fork native library locally
 
 ---
  README.md                           |  28 ++--
- build.cmd                           |  23 ++--
- build.sh                            |  62 ++++-----
- libvscode-diff/build.cmd.in         |  23 ++--
- libvscode-diff/build.sh.in          |  62 ++++-----
+ build.cmd                           |  22 ++--
+ build.sh                            |  63 ++++-----
+ libvscode-diff/build.cmd.in         |  22 ++--
+ libvscode-diff/build.sh.in          |  63 ++++-----
  lua/codediff/commands.lua           |   2 +-
  lua/codediff/core/diff.lua          |  16 +--
  lua/codediff/core/local_builder.lua | 191 ++++++++++++++++++++++++++++
  tests/core/local_builder_spec.lua   |  42 ++++++
- 9 files changed, 342 insertions(+), 107 deletions(-)
+ 9 files changed, 340 insertions(+), 109 deletions(-)
  create mode 100644 lua/codediff/core/local_builder.lua
  create mode 100644 tests/core/local_builder_spec.lua
 
 diff --git a/README.md b/README.md
-index 30edf2b..807b4aa 100644
+index 5960bd3..31bf0e0 100644
 --- a/README.md
 +++ b/README.md
 @@ -38,8 +38,11 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -35,16 +35,16 @@ index 30edf2b..807b4aa 100644
  
  ### Using lazy.nvim
  
-@@ -381,7 +384,7 @@ Three strategies are available:
+@@ -383,7 +386,7 @@ require("codediff").setup({
  
- Custom Lua matcher callbacks are not supported.
+ `redraw()` only reruns the configured formatters against the existing tree. It does not replace nodes or change selection or fold state, and runs no Git commands. `refresh()` performs the normal asynchronous Git refresh and rebuilds the explorer. Both safely become no-ops after the explorer closes. Custom mappings are installed after built-in mappings, so the same key replaces the built-in mapping.
  
 -The C library will be downloaded automatically on first use. No `build` step needed!
 +The C library is built locally and cached automatically on first use.
  
  ### Native gutter signs
  
-@@ -418,25 +421,22 @@ vim.opt.statuscolumn = "%C%=%l %s"
+@@ -420,25 +423,22 @@ vim.opt.statuscolumn = "%C%=%l %s"
  
  ### Managing Library Installation
  
@@ -79,7 +79,7 @@ index 30edf2b..807b4aa 100644
  
  If you prefer to install manually without a plugin manager:
 diff --git a/build.cmd b/build.cmd
-index fb99b03..71c243b 100644
+index ffad2ff..71c243b 100644
 --- a/build.cmd
 +++ b/build.cmd
 @@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
@@ -104,15 +104,7 @@ index fb99b03..71c243b 100644
  
  echo Building vscode_diff (standalone mode)...
  echo Platform: Windows
-@@ -23,6 +27,7 @@ set SOURCES=^
- default_lines_diff_computer.c ^
- src\char_level.c ^
- src\line_level.c ^
-+src\line_matcher.c ^
- src\myers.c ^
- src\optimize.c ^
- src\sequence.c ^
-@@ -72,7 +77,7 @@ if !errorlevel! == 0 (
+@@ -73,7 +77,7 @@ if !errorlevel! == 0 (
  ) else (
      echo OpenMP: disabled
  )
@@ -121,7 +113,7 @@ index fb99b03..71c243b 100644
  goto :build_done
  
  :build_clang
-@@ -89,7 +94,7 @@ if !errorlevel! == 0 (
+@@ -90,7 +94,7 @@ if !errorlevel! == 0 (
      echo OpenMP: disabled
  )
  del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
@@ -130,7 +122,7 @@ index fb99b03..71c243b 100644
  goto :build_done
  
  :build_gcc
-@@ -106,7 +111,7 @@ if !errorlevel! == 0 (
+@@ -107,7 +111,7 @@ if !errorlevel! == 0 (
      echo OpenMP: disabled
  )
  del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
@@ -139,7 +131,7 @@ index fb99b03..71c243b 100644
  goto :build_done
  
  :build_done
-@@ -116,11 +121,7 @@ if !errorlevel! neq 0 (
+@@ -117,11 +121,7 @@ if !errorlevel! neq 0 (
      exit /b 1
  )
  
@@ -153,7 +145,7 @@ index fb99b03..71c243b 100644
  cd ..
  endlocal
 diff --git a/build.sh b/build.sh
-index fd09ca3..58d9ed0 100755
+index fe0acb8..58d9ed0 100755
 --- a/build.sh
 +++ b/build.sh
 @@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
@@ -204,7 +196,7 @@ index fd09ca3..58d9ed0 100755
          echo "OpenMP: enabled"
      fi
      rm -f /tmp/omp_test.c /tmp/omp_test
-@@ -74,34 +77,33 @@ if [ "$USE_OPENMP" -eq 0 ]; then
+@@ -74,35 +77,33 @@ if [ "$USE_OPENMP" -eq 0 ]; then
  fi
  
  # Source files (including bundled utf8proc)
@@ -212,6 +204,7 @@ index fd09ca3..58d9ed0 100755
 -default_lines_diff_computer.c \
 -src/char_level.c \
 -src/line_level.c \
+-src/line_matcher.c \
 -src/myers.c \
 -src/optimize.c \
 -src/sequence.c \
@@ -261,7 +254,7 @@ index fd09ca3..58d9ed0 100755
 +echo "✓ Build successful: $OUTPUT_PATH"
  cd ..
 diff --git a/libvscode-diff/build.cmd.in b/libvscode-diff/build.cmd.in
-index fb99b03..71c243b 100644
+index ffad2ff..71c243b 100644
 --- a/libvscode-diff/build.cmd.in
 +++ b/libvscode-diff/build.cmd.in
 @@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
@@ -286,15 +279,7 @@ index fb99b03..71c243b 100644
  
  echo Building vscode_diff (standalone mode)...
  echo Platform: Windows
-@@ -23,6 +27,7 @@ set SOURCES=^
- default_lines_diff_computer.c ^
- src\char_level.c ^
- src\line_level.c ^
-+src\line_matcher.c ^
- src\myers.c ^
- src\optimize.c ^
- src\sequence.c ^
-@@ -72,7 +77,7 @@ if !errorlevel! == 0 (
+@@ -73,7 +77,7 @@ if !errorlevel! == 0 (
  ) else (
      echo OpenMP: disabled
  )
@@ -303,7 +288,7 @@ index fb99b03..71c243b 100644
  goto :build_done
  
  :build_clang
-@@ -89,7 +94,7 @@ if !errorlevel! == 0 (
+@@ -90,7 +94,7 @@ if !errorlevel! == 0 (
      echo OpenMP: disabled
  )
  del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
@@ -312,7 +297,7 @@ index fb99b03..71c243b 100644
  goto :build_done
  
  :build_gcc
-@@ -106,7 +111,7 @@ if !errorlevel! == 0 (
+@@ -107,7 +111,7 @@ if !errorlevel! == 0 (
      echo OpenMP: disabled
  )
  del /q %TEMP%\omp_test.c %TEMP%\omp_test.exe 2>nul
@@ -321,7 +306,7 @@ index fb99b03..71c243b 100644
  goto :build_done
  
  :build_done
-@@ -116,11 +121,7 @@ if !errorlevel! neq 0 (
+@@ -117,11 +121,7 @@ if !errorlevel! neq 0 (
      exit /b 1
  )
  
@@ -335,7 +320,7 @@ index fb99b03..71c243b 100644
  cd ..
  endlocal
 diff --git a/libvscode-diff/build.sh.in b/libvscode-diff/build.sh.in
-index fd09ca3..58d9ed0 100644
+index fe0acb8..58d9ed0 100644
 --- a/libvscode-diff/build.sh.in
 +++ b/libvscode-diff/build.sh.in
 @@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
@@ -386,7 +371,7 @@ index fd09ca3..58d9ed0 100644
          echo "OpenMP: enabled"
      fi
      rm -f /tmp/omp_test.c /tmp/omp_test
-@@ -74,34 +77,33 @@ if [ "$USE_OPENMP" -eq 0 ]; then
+@@ -74,35 +77,33 @@ if [ "$USE_OPENMP" -eq 0 ]; then
  fi
  
  # Source files (including bundled utf8proc)
@@ -394,6 +379,7 @@ index fd09ca3..58d9ed0 100644
 -default_lines_diff_computer.c \
 -src/char_level.c \
 -src/line_level.c \
+-src/line_matcher.c \
 -src/myers.c \
 -src/optimize.c \
 -src/sequence.c \
@@ -443,10 +429,10 @@ index fd09ca3..58d9ed0 100644
 +echo "✓ Build successful: $OUTPUT_PATH"
  cd ..
 diff --git a/lua/codediff/commands.lua b/lua/codediff/commands.lua
-index 5a73b3c..2563bee 100644
+index 15c87d0..3cf346a 100644
 --- a/lua/codediff/commands.lua
 +++ b/lua/codediff/commands.lua
-@@ -774,7 +774,7 @@ function M.vscode_diff(opts)
+@@ -784,7 +784,7 @@ function M.vscode_diff(opts)
      -- :CodeDiff install or :CodeDiff install!
      -- Handle both :CodeDiff! install and :CodeDiff install!
      local force = opts.bang or subcommand == "install!"

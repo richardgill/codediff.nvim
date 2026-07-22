@@ -1,4 +1,4 @@
-From e9015a42d1126c1009a082d03143ee11b0fa8a76 Mon Sep 17 00:00:00 2001
+From cd53ede460b8d7fa4a6075bbe3a4fcae5699e8a7 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 15:35:41 +0100
 Subject: [PATCH] fix: keep Neovim open when closing the last diff tab
@@ -19,10 +19,10 @@ Subject: [PATCH] fix: keep Neovim open when closing the last diff tab
  create mode 100644 tests/ui/lifecycle/close_spec.lua
 
 diff --git a/README.md b/README.md
-index eab86fc..20c581f 100644
+index 6c5391e..4b0d13d 100644
 --- a/README.md
 +++ b/README.md
-@@ -440,6 +440,7 @@ The history panel shows a list of commits. Each commit can be expanded to show i
+@@ -441,6 +441,7 @@ The history panel shows a list of commits. Each commit can be expanded to show i
  - `--reverse` or `-r`: Show commits in chronological order (oldest first) instead of reverse chronological. Useful for following development story from beginning to end, or reviewing PR changes in the order they were made.
  - `--base` or `-b`: Compare each commit against a fixed revision instead of its parent. Accepts any git revision (`HEAD`, branch name, commit hash) or `WORKING` for the current working tree.
  - `--inline` / `--side-by-side`: Override the diff layout for this invocation. These flags work with all `:CodeDiff` subcommands.
@@ -30,7 +30,7 @@ index eab86fc..20c581f 100644
  
  **Visual selection:** When called with a visual range (`:'<,'>CodeDiff history`), only commits that modified the selected lines are shown. This uses `git log -L` under the hood and is useful for tracing the evolution of a specific function or block in a large file.
  
-@@ -452,7 +453,7 @@ Use CodeDiff as your git merge tool for resolving conflicts:
+@@ -453,7 +454,7 @@ Use CodeDiff as your git merge tool for resolving conflicts:
  
  ```bash
  git config --global merge.tool codediff
@@ -39,7 +39,7 @@ index eab86fc..20c581f 100644
  ```
  
  ### Git Diff Tool
-@@ -461,7 +462,7 @@ Use CodeDiff as your git diff tool for viewing changes:
+@@ -462,7 +463,7 @@ Use CodeDiff as your git diff tool for viewing changes:
  
  ```bash
  git config --global diff.tool codediff
@@ -49,10 +49,10 @@ index eab86fc..20c581f 100644
  
  Then use `git difftool` to view diffs:
 diff --git a/lua/codediff/commands.lua b/lua/codediff/commands.lua
-index f3c5634..8f69583 100644
+index 3830295..cdd33d5 100644
 --- a/lua/codediff/commands.lua
 +++ b/lua/codediff/commands.lua
-@@ -85,6 +85,7 @@ local function handle_git_diff(revision, revision2, global_opts)
+@@ -95,6 +95,7 @@ local function handle_git_diff(revision, revision2, global_opts)
                    original_revision = commit_hash,
                    modified_revision = commit_hash2,
                    layout = global_opts.layout,
@@ -60,7 +60,7 @@ index f3c5634..8f69583 100644
                  }
                  view.create(session_config, filetype)
                end)
-@@ -102,6 +103,7 @@ local function handle_git_diff(revision, revision2, global_opts)
+@@ -112,6 +113,7 @@ local function handle_git_diff(revision, revision2, global_opts)
                original_revision = commit_hash,
                modified_revision = "WORKING",
                layout = global_opts.layout,
@@ -68,7 +68,7 @@ index f3c5634..8f69583 100644
              }
              view.create(session_config, filetype)
            end)
-@@ -130,6 +132,7 @@ local function handle_file_diff(file_a, file_b, global_opts)
+@@ -140,6 +142,7 @@ local function handle_file_diff(file_a, file_b, global_opts)
      original_revision = nil,
      modified_revision = nil,
      layout = global_opts.layout,
@@ -76,7 +76,7 @@ index f3c5634..8f69583 100644
    }
    view.create(session_config, filetype)
  
-@@ -192,6 +195,7 @@ local function handle_dir_diff(dir1, dir2, global_opts)
+@@ -202,6 +205,7 @@ local function handle_dir_diff(dir1, dir2, global_opts)
      original_revision = nil,
      modified_revision = nil,
      layout = global_opts.layout,
@@ -84,7 +84,7 @@ index f3c5634..8f69583 100644
      explorer_data = {
        status_result = status_result,
      },
-@@ -270,6 +274,7 @@ local function handle_history(range, file_path, flags, line_range, global_opts)
+@@ -280,6 +284,7 @@ local function handle_history(range, file_path, flags, line_range, global_opts)
            original_revision = nil,
            modified_revision = nil,
            layout = global_opts.layout,
@@ -92,7 +92,7 @@ index f3c5634..8f69583 100644
            history_data = {
              commits = commits,
              range = range,
-@@ -353,6 +358,7 @@ local function handle_explorer(revision, revision2, global_opts)
+@@ -363,6 +368,7 @@ local function handle_explorer(revision, revision2, global_opts)
            original_revision = original_rev,
            modified_revision = modified_rev,
            layout = global_opts.layout,
@@ -100,7 +100,7 @@ index f3c5634..8f69583 100644
            explorer_data = {
              status_result = status_result,
              focus_file = focus_file, -- Focus on current file if changed
-@@ -517,7 +523,8 @@ local function handle_git_diff_merge_base(base_rev, target_rev, global_opts)
+@@ -527,7 +533,8 @@ local function handle_git_diff_merge_base(base_rev, target_rev, global_opts)
    end)
  end
  
@@ -110,7 +110,7 @@ index f3c5634..8f69583 100644
    local args = opts.fargs
    if #args == 0 then
      vim.notify("Usage: :CodeDiff merge <filename>", vim.log.levels.ERROR)
-@@ -582,6 +589,7 @@ function M.vscode_merge(opts)
+@@ -592,6 +599,7 @@ function M.vscode_merge(opts)
          original_revision = original_rev,
          modified_revision = modified_rev,
          conflict = true,
@@ -118,7 +118,7 @@ index f3c5634..8f69583 100644
        }
  
        view.create(session_config, filetype, function()
-@@ -607,16 +615,7 @@ function M.vscode_diff(opts)
+@@ -617,16 +625,7 @@ function M.vscode_diff(opts)
    -- Check if current tab is a diff view and toggle (close) it if so
    local current_tab = vim.api.nvim_get_current_tabpage()
    if lifecycle.get_session(current_tab) then
@@ -136,7 +136,7 @@ index f3c5634..8f69583 100644
      return
    end
  
-@@ -628,6 +627,8 @@ function M.vscode_diff(opts)
+@@ -638,6 +637,8 @@ function M.vscode_diff(opts)
        global_opts.layout = "inline"
      elseif arg == "--side-by-side" then
        global_opts.layout = "side-by-side"
@@ -145,7 +145,7 @@ index f3c5634..8f69583 100644
      else
        table.insert(args, arg)
      end
-@@ -657,7 +658,7 @@ function M.vscode_diff(opts)
+@@ -667,7 +668,7 @@ function M.vscode_diff(opts)
        vim.notify("Usage: :CodeDiff merge <filename>", vim.log.levels.ERROR)
        return
      end
@@ -155,7 +155,7 @@ index f3c5634..8f69583 100644
      if #args == 2 then
        -- Check for triple-dot syntax: :CodeDiff file main...
 diff --git a/lua/codediff/ui/lifecycle/cleanup.lua b/lua/codediff/ui/lifecycle/cleanup.lua
-index 7bbdf56..9d1e349 100644
+index 5c00e99..aa492b7 100644
 --- a/lua/codediff/ui/lifecycle/cleanup.lua
 +++ b/lua/codediff/ui/lifecycle/cleanup.lua
 @@ -240,7 +240,7 @@ end
@@ -213,7 +213,7 @@ index cb234d0..bc5b24d 100644
  M.setup = cleanup.setup
  
 diff --git a/lua/codediff/ui/lifecycle/session.lua b/lua/codediff/ui/lifecycle/session.lua
-index bbfdb06..d5d58ef 100644
+index a58a943..4aac930 100644
 --- a/lua/codediff/ui/lifecycle/session.lua
 +++ b/lua/codediff/ui/lifecycle/session.lua
 @@ -64,7 +64,8 @@ function M.create_session(
@@ -235,7 +235,7 @@ index bbfdb06..d5d58ef 100644
      stored_diff_result = lines_diff,
      changedtick = {
 diff --git a/lua/codediff/ui/view/init.lua b/lua/codediff/ui/view/init.lua
-index ae8dc28..9b95035 100644
+index ca414f6..1291eae 100644
 --- a/lua/codediff/ui/view/init.lua
 +++ b/lua/codediff/ui/view/init.lua
 @@ -31,6 +31,7 @@ end
@@ -247,7 +247,7 @@ index ae8dc28..9b95035 100644
  ---@field history_data table? For history mode: { commits, range, file_path, line_range }
  ---@field line_range table? For history line-range mode: { start_line, end_line }
 diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
-index 936eb7f..69f6019 100644
+index 6654616..95f4775 100644
 --- a/lua/codediff/ui/view/inline_view.lua
 +++ b/lua/codediff/ui/view/inline_view.lua
 @@ -145,7 +145,8 @@ function M.create(session_config, filetype, on_ready)
@@ -271,7 +271,7 @@ index 936eb7f..69f6019 100644
  
        mark_inline(tabpage)
 diff --git a/lua/codediff/ui/view/keymaps.lua b/lua/codediff/ui/view/keymaps.lua
-index 4e68f4a..a30eba8 100644
+index 5607021..70e3e89 100644
 --- a/lua/codediff/ui/view/keymaps.lua
 +++ b/lua/codediff/ui/view/keymaps.lua
 @@ -34,22 +34,6 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
@@ -297,7 +297,7 @@ index 4e68f4a..a30eba8 100644
    -- Helper: Toggle explorer visibility (explorer mode only)
    local function toggle_explorer()
      local explorer_obj = lifecycle.get_explorer(tabpage)
-@@ -581,7 +565,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+@@ -596,7 +580,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
  
    -- Quit keymap (q)
    if keymaps.quit then
@@ -309,7 +309,7 @@ index 4e68f4a..a30eba8 100644
  
    -- Hunk navigation (]c, [c)
 diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
-index 59fd80a..fb1ff87 100644
+index e51f5b0..e0cfc79 100644
 --- a/lua/codediff/ui/view/side_by_side.lua
 +++ b/lua/codediff/ui/view/side_by_side.lua
 @@ -155,7 +155,8 @@ function M.create(session_config, filetype, on_ready)

@@ -1,15 +1,20 @@
-From 1c2c7dddd3ee1b2d79d69c08a3c82a561d9f8213 Mon Sep 17 00:00:00 2001
+From 9aa87a1f40efddd36e9c8c0e052c00123778a542 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:25:25 +0100
 Subject: [PATCH] Added native line matcher implementation and tests
 
 ---
  README.md                                    |   53 +
+ build.cmd                                    |    1 +
+ build.sh                                     |    1 +
  doc/codediff.txt                             |   63 +
  doc/tags                                     |    1 +
  docs/performance.md                          |   19 +-
  libvscode-diff/CMakeLists.txt                |    3 +
+ libvscode-diff/build.cmd.in                  |    1 +
+ libvscode-diff/build.sh.in                   |    1 +
  libvscode-diff/default_lines_diff_computer.c | 1129 +++++++-----------
+ libvscode-diff/diff_tool.c                   |    4 +-
  libvscode-diff/include/line_matcher.h        |   14 +
  libvscode-diff/include/types.h               |   16 +
  libvscode-diff/src/line_matcher.c            |  380 ++++++
@@ -22,14 +27,14 @@ Subject: [PATCH] Added native line matcher implementation and tests
  tests/core/line_matcher_spec.lua             |  215 ++++
  tests/ui/core_spec.lua                       |   23 +
  tests/ui/inline_spec.lua                     |    4 +-
- 18 files changed, 1607 insertions(+), 806 deletions(-)
+ 23 files changed, 1614 insertions(+), 807 deletions(-)
  create mode 100644 libvscode-diff/include/line_matcher.h
  create mode 100644 libvscode-diff/src/line_matcher.c
  create mode 100644 libvscode-diff/tests/test_line_matcher.c
  create mode 100644 tests/core/line_matcher_spec.lua
 
 diff --git a/README.md b/README.md
-index f232663..792de00 100644
+index 4313777..7965608 100644
 --- a/README.md
 +++ b/README.md
 @@ -90,6 +90,10 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -43,7 +48,7 @@ index f232663..792de00 100644
        hide_merge_artifacts = false,       -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
        original_position = "left",         -- Position of original (old) content: "left" or "right"
        conflict_ours_position = "right",   -- Position of ours (:2) in conflict view: "left" or "right"
-@@ -224,6 +228,55 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -225,6 +229,55 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
  
  `diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
  
@@ -51,7 +56,7 @@ index f232663..792de00 100644
 +
 +CodeDiff provides several line-matching strategies implemented in the native diff engine.
 +
-+Line matching determines which changed lines in the old and new versions correspond to each other. Paired lines receive character-level refinement, while unmatched lines remain line-level changes.
++Line matching determines which changed lines in the old and new versions correspond to each other. Paired lines receive character-level highlighting, while unmatched lines remain line-level changes.
 +
 +Three strategies are available:
 +
@@ -99,8 +104,32 @@ index f232663..792de00 100644
  The C library will be downloaded automatically on first use. No `build` step needed!
  
  ### Managing Library Installation
+diff --git a/build.cmd b/build.cmd
+index fb99b03..ffad2ff 100644
+--- a/build.cmd
++++ b/build.cmd
+@@ -23,6 +23,7 @@ set SOURCES=^
+ default_lines_diff_computer.c ^
+ src\char_level.c ^
+ src\line_level.c ^
++src\line_matcher.c ^
+ src\myers.c ^
+ src\optimize.c ^
+ src\sequence.c ^
+diff --git a/build.sh b/build.sh
+index fd09ca3..fe0acb8 100755
+--- a/build.sh
++++ b/build.sh
+@@ -78,6 +78,7 @@ SOURCES="\
+ default_lines_diff_computer.c \
+ src/char_level.c \
+ src/line_level.c \
++src/line_matcher.c \
+ src/myers.c \
+ src/optimize.c \
+ src/sequence.c \
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 058fe82..fa2cba9 100644
+index 048dc80..96ffc0e 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -190,6 +190,65 @@ The toggle keymap can be customized:
@@ -113,7 +142,7 @@ index 058fe82..fa2cba9 100644
 +diff engine.
 +
 +Line matching determines which changed lines in the old and new versions
-+correspond to each other. Paired lines receive character-level refinement,
++correspond to each other. Paired lines receive character-level highlighting,
 +while unmatched lines remain line-level changes.
 +
 +Three strategies are available:
@@ -193,7 +222,7 @@ index 5ee5d4c..9953104 100644
  codediff-moved-code	codediff.txt	/*codediff-moved-code*
  codediff-quickstart	codediff.txt	/*codediff-quickstart*
 diff --git a/docs/performance.md b/docs/performance.md
-index 4292685..e6376ab 100644
+index 4292685..6bc477a 100644
 --- a/docs/performance.md
 +++ b/docs/performance.md
 @@ -4,14 +4,15 @@ This plugin provides high-quality character-level diff highlighting similar to V
@@ -285,6 +314,30 @@ index f4f1249..dca3653 100644
  add_diff_test(test_char_level)
  add_diff_test(test_dp_algorithm)
  add_diff_test(test_char_boundary_categories)
+diff --git a/libvscode-diff/build.cmd.in b/libvscode-diff/build.cmd.in
+index fb99b03..ffad2ff 100644
+--- a/libvscode-diff/build.cmd.in
++++ b/libvscode-diff/build.cmd.in
+@@ -23,6 +23,7 @@ set SOURCES=^
+ default_lines_diff_computer.c ^
+ src\char_level.c ^
+ src\line_level.c ^
++src\line_matcher.c ^
+ src\myers.c ^
+ src\optimize.c ^
+ src\sequence.c ^
+diff --git a/libvscode-diff/build.sh.in b/libvscode-diff/build.sh.in
+index fd09ca3..fe0acb8 100644
+--- a/libvscode-diff/build.sh.in
++++ b/libvscode-diff/build.sh.in
+@@ -78,6 +78,7 @@ SOURCES="\
+ default_lines_diff_computer.c \
+ src/char_level.c \
+ src/line_level.c \
++src/line_matcher.c \
+ src/myers.c \
+ src/optimize.c \
+ src/sequence.c \
 diff --git a/libvscode-diff/default_lines_diff_computer.c b/libvscode-diff/default_lines_diff_computer.c
 index 1ebf8b8..5e35e23 100644
 --- a/libvscode-diff/default_lines_diff_computer.c
@@ -1473,6 +1526,21 @@ index 1ebf8b8..5e35e23 100644
 -    return VSCODE_DIFF_VERSION;
 -}
 +const char *get_version(void) { return VSCODE_DIFF_VERSION; }
+diff --git a/libvscode-diff/diff_tool.c b/libvscode-diff/diff_tool.c
+index 33ba9e6..9f37c92 100644
+--- a/libvscode-diff/diff_tool.c
++++ b/libvscode-diff/diff_tool.c
+@@ -234,7 +234,9 @@ int main(int argc, char* argv[]) {
+         .ignore_trim_whitespace = false,
+         .max_computation_time_ms = timeout_ms,
+         .compute_moves = true,
+-        .extend_to_subwords = false
++        .extend_to_subwords = false,
++        .line_matcher_strategy = LINE_MATCHER_VSCODE,
++        .line_matcher_threshold = 0.75
+     };
+ 
+     // Compute diff with timing
 diff --git a/libvscode-diff/include/line_matcher.h b/libvscode-diff/include/line_matcher.h
 new file mode 100644
 index 0000000..c214c40
@@ -2179,7 +2247,7 @@ index 0000000..f4ced82
 +  return passed ? 0 : 1;
 +}
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 106aeaf..06efc8e 100644
+index 0ec2a65..0de3120 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -34,6 +34,10 @@ M.defaults = {
@@ -2193,7 +2261,7 @@ index 106aeaf..06efc8e 100644
      hide_merge_artifacts = false, -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
      original_position = "left", -- Position of original (old) content: "left" or "right"
      conflict_ours_position = "right", -- Position of ours (:2) in conflict view: "left" or "right" (independent of original_position)
-@@ -168,8 +172,50 @@ M.defaults = {
+@@ -169,8 +173,50 @@ M.defaults = {
  
  M.options = vim.deepcopy(M.defaults)
  
@@ -2576,7 +2644,7 @@ index 78ef1cf..51d5ebd 100644
        -- Add to conflict blocks for action handling
 diff --git a/tests/core/line_matcher_spec.lua b/tests/core/line_matcher_spec.lua
 new file mode 100644
-index 0000000..8dded93
+index 0000000..f72880c
 --- /dev/null
 +++ b/tests/core/line_matcher_spec.lua
 @@ -0,0 +1,215 @@
@@ -2594,7 +2662,7 @@ index 0000000..8dded93
 +  )
 +end
 +
-+describe("Native line matching", function()
++describe("Line matching", function()
 +  after_each(function()
 +    config.options = vim.deepcopy(config.defaults)
 +  end)

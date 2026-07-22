@@ -1,12 +1,12 @@
-From 3b64aacb15950c163e1c5838178c3de94398cdca Mon Sep 17 00:00:00 2001
+From 426be878341a9a9758febbb53bfd6d53767f339c Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 12:36:09 +0100
 Subject: [PATCH] fix: include zero-hunk files in cross-file cycling
 
 ---
  lua/codediff/ui/view/navigation.lua           |  4 +-
- .../ui/view/cycle_hunks_across_files_spec.lua | 75 ++++++++++++++++---
- 2 files changed, 67 insertions(+), 12 deletions(-)
+ .../ui/view/cycle_hunks_across_files_spec.lua | 77 ++++++++++++++++---
+ 2 files changed, 67 insertions(+), 14 deletions(-)
 
 diff --git a/lua/codediff/ui/view/navigation.lua b/lua/codediff/ui/view/navigation.lua
 index 9a7b9b4..a2b7d5f 100644
@@ -31,7 +31,7 @@ index 9a7b9b4..a2b7d5f 100644
  
    local current_buf = vim.api.nvim_get_current_buf()
 diff --git a/tests/ui/view/cycle_hunks_across_files_spec.lua b/tests/ui/view/cycle_hunks_across_files_spec.lua
-index c0b7405..4611138 100644
+index 51f7fea..9a050ba 100644
 --- a/tests/ui/view/cycle_hunks_across_files_spec.lua
 +++ b/tests/ui/view/cycle_hunks_across_files_spec.lua
 @@ -20,10 +20,13 @@ describe("cycle_hunks_across_files (#161)", function()
@@ -48,7 +48,7 @@ index c0b7405..4611138 100644
  
      nav = require("codediff.ui.view.navigation")
      lifecycle = require("codediff.ui.lifecycle")
-@@ -37,9 +40,16 @@ describe("cycle_hunks_across_files (#161)", function()
+@@ -39,9 +42,16 @@ describe("cycle_hunks_across_files (#161)", function()
      end
    end)
  
@@ -67,18 +67,16 @@ index c0b7405..4611138 100644
      vim.cmd("edit " .. repo.dir .. "/" .. focus_file)
      require("codediff.commands").vscode_diff({ fargs = {} })
  
-@@ -47,9 +57,7 @@ describe("cycle_hunks_across_files (#161)", function()
+@@ -49,7 +59,7 @@ describe("cycle_hunks_across_files (#161)", function()
        for _, tp in ipairs(vim.api.nvim_list_tabpages()) do
          local s = lifecycle.get_session(tp)
          local e = lifecycle.get_explorer(tp)
--        if s and s.stored_diff_result and s.stored_diff_result.changes
--            and #s.stored_diff_result.changes > 0
--            and e and e.current_file_path then
+-        if s and s.stored_diff_result and s.stored_diff_result.changes and #s.stored_diff_result.changes > 0 and e and e.current_file_path then
 +        if has_expected_hunk_count(s, expected_hunk_count) and e and e.current_file_path == focus_file then
            return true
          end
        end
-@@ -64,7 +72,7 @@ describe("cycle_hunks_across_files (#161)", function()
+@@ -68,7 +78,7 @@ describe("cycle_hunks_across_files (#161)", function()
    end
  
    -- Wait for the displayed file to switch AND its diff to fully re-render.
@@ -87,23 +85,27 @@ index c0b7405..4611138 100644
      local switched = vim.wait(8000, function()
        local e = lifecycle.get_explorer(tabpage)
        return e and e.current_file_path and e.current_file_path ~= from_file
-@@ -73,10 +81,10 @@ describe("cycle_hunks_across_files (#161)", function()
+@@ -79,14 +89,10 @@ describe("cycle_hunks_across_files (#161)", function()
      return vim.wait(8000, function()
        local s = lifecycle.get_session(tabpage)
        local e = lifecycle.get_explorer(tabpage)
--      return s and s.modified_path and e and e.current_file_path
--        and s.modified_path:find(e.current_file_path, 1, true) ~= nil
--        and s.stored_diff_result and s.stored_diff_result.changes
+-      return s
+-        and s.modified
+-        and e
+-        and e.current_file_path
+-        and s.modified.absolute:find(e.current_file_path, 1, true) ~= nil
+-        and s.stored_diff_result
+-        and s.stored_diff_result.changes
 -        and #s.stored_diff_result.changes > 0
-+      local session_path = s and s.modified_path ~= "" and s.modified_path or s and s.original_path
++      local session_path = s and s.modified.absolute ~= "" and s.modified.absolute or s and s.original.absolute
 +      return session_path and e and e.current_file_path
 +        and session_path:find(e.current_file_path, 1, true) ~= nil
 +        and has_expected_hunk_count(s, expected_hunk_count)
      end, 20)
    end
  
-@@ -107,6 +115,53 @@ describe("cycle_hunks_across_files (#161)", function()
-       "with cross-file off, ]c at the last hunk must NOT change file")
+@@ -115,6 +121,53 @@ describe("cycle_hunks_across_files (#161)", function()
+     assert.equal(starting_file, explorer.current_file_path, "with cross-file off, ]c at the last hunk must NOT change file")
    end)
  
 +  it("OFF: hunk navigation does not leave a file with no hunks", function()

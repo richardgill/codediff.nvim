@@ -1,4 +1,4 @@
-From 9c219cd4df063e4e7bd4a8822c1242ac13dea9be Mon Sep 17 00:00:00 2001
+From 75c27f9eba666412bdf2703f6b7dc0235d2f6aaa Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 11:56:21 +0000
 Subject: [PATCH] chore: add local benchmark suites

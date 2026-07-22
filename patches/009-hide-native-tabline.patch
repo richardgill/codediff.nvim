@@ -1,4 +1,4 @@
-From 9afe7abd85a0a1f5dac1d3a5e7c7a18e5918595d Mon Sep 17 00:00:00 2001
+From de2a462bd048c834724160fd4b4aca64f10f24f1 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 17:51:22 +0100
 Subject: [PATCH] fix: hide the native tabline in CodeDiff views
@@ -12,7 +12,7 @@ Subject: [PATCH] fix: hide the native tabline in CodeDiff views
  5 files changed, 87 insertions(+), 4 deletions(-)
 
 diff --git a/lua/codediff/ui/lifecycle/cleanup.lua b/lua/codediff/ui/lifecycle/cleanup.lua
-index 9d1e349..dae75cd 100644
+index aa492b7..3fa76e3 100644
 --- a/lua/codediff/ui/lifecycle/cleanup.lua
 +++ b/lua/codediff/ui/lifecycle/cleanup.lua
 @@ -34,6 +34,10 @@ local function cleanup_diff(tabpage)
@@ -47,7 +47,7 @@ index bc5b24d..f993986 100644
  -- Delegate to cleanup module
  M.setup_autocmds = cleanup.setup_autocmds
 diff --git a/lua/codediff/ui/lifecycle/session.lua b/lua/codediff/ui/lifecycle/session.lua
-index d5d58ef..e481542 100644
+index 4aac930..b16befd 100644
 --- a/lua/codediff/ui/lifecycle/session.lua
 +++ b/lua/codediff/ui/lifecycle/session.lua
 @@ -35,6 +35,23 @@ function M.get_active_diffs()
@@ -127,7 +127,7 @@ index d5d58ef..e481542 100644
            if sess.reapply_keymaps then
              pcall(sess.reapply_keymaps)
 diff --git a/lua/codediff/ui/view/toggle.lua b/lua/codediff/ui/view/toggle.lua
-index 7d2a815..9737286 100644
+index d8fec6a..ee89443 100644
 --- a/lua/codediff/ui/view/toggle.lua
 +++ b/lua/codediff/ui/view/toggle.lua
 @@ -123,6 +123,7 @@ function M.toggle(tabpage)
@@ -139,10 +139,10 @@ index 7d2a815..9737286 100644
  end
  
 diff --git a/tests/ui/view/layout_toggle_spec.lua b/tests/ui/view/layout_toggle_spec.lua
-index 97fde21..13b780c 100644
+index 513eab1..55f45f0 100644
 --- a/tests/ui/view/layout_toggle_spec.lua
 +++ b/tests/ui/view/layout_toggle_spec.lua
-@@ -200,6 +200,7 @@ describe("Layout toggle", function()
+@@ -201,6 +201,7 @@ describe("Layout toggle", function()
    local repo
    local paths = {}
    local original_cwd
@@ -150,7 +150,7 @@ index 97fde21..13b780c 100644
  
    local function track(path)
      table.insert(paths, path)
-@@ -221,6 +222,7 @@ describe("Layout toggle", function()
+@@ -222,6 +223,7 @@ describe("Layout toggle", function()
      repo = nil
      paths = {}
      original_cwd = vim.fn.getcwd()
@@ -158,7 +158,7 @@ index 97fde21..13b780c 100644
    end)
  
    after_each(function()
-@@ -235,6 +237,57 @@ describe("Layout toggle", function()
+@@ -236,6 +238,57 @@ describe("Layout toggle", function()
        repo.cleanup()
      end
      vim.fn.chdir(original_cwd)
@@ -179,11 +179,11 @@ index 97fde21..13b780c 100644
 +    vim.o.showtabline = 2
 +    assert.is_true(view.update(tabpage, {
 +      mode = "standalone",
-+      original_path = next_left,
-+      modified_path = next_right,
++      original = path.make_ref(next_left, nil),
++      modified = path.make_ref(next_right, nil),
 +    }, false))
 +    wait_for(tabpage, function(session)
-+      return session.original_path == next_left and session.modified_path == next_right and session.stored_diff_result ~= nil
++      return session.original.absolute == next_left and session.modified.absolute == next_right and session.stored_diff_result ~= nil
 +    end, "File switch should finish rendering")
 +    assert.equals(0, vim.o.showtabline)
 +

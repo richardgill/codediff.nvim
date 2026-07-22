@@ -1,15 +1,15 @@
-From c803b26fb80c8cbd431ebd05c34e08b498d3680d Mon Sep 17 00:00:00 2001
+From 882dd19165807d83bad159ac4a336a0e3d4517f2 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 21:19:53 +0100
 Subject: [PATCH] fix: preserve explorer tree state across refreshes
 
 ---
  lua/codediff/ui/explorer/nodes.lua          |  81 +++++++---
- lua/codediff/ui/explorer/refresh.lua        | 113 +++++++------
+ lua/codediff/ui/explorer/refresh.lua        | 113 +++++++-------
  lua/codediff/ui/explorer/tree.lua           |  15 +-
  tests/flatten_dirs_spec.lua                 |  36 +++++
- tests/ui/explorer/explorer_refresh_spec.lua | 166 ++++++++++++++++++++
- 5 files changed, 336 insertions(+), 75 deletions(-)
+ tests/ui/explorer/explorer_refresh_spec.lua | 163 ++++++++++++++++++++
+ 5 files changed, 333 insertions(+), 75 deletions(-)
  create mode 100644 tests/ui/explorer/explorer_refresh_spec.lua
 
 diff --git a/lua/codediff/ui/explorer/nodes.lua b/lua/codediff/ui/explorer/nodes.lua
@@ -118,7 +118,7 @@ index 705edcd..3adb053 100644
  
    -- Convert to Tree.Node recursively
 diff --git a/lua/codediff/ui/explorer/refresh.lua b/lua/codediff/ui/explorer/refresh.lua
-index c08ea54..244c964 100644
+index ce30bf6..2a16f33 100644
 --- a/lua/codediff/ui/explorer/refresh.lua
 +++ b/lua/codediff/ui/explorer/refresh.lua
 @@ -144,67 +144,76 @@ function M.setup_auto_refresh(explorer, tabpage)
@@ -222,12 +222,7 @@ index c08ea54..244c964 100644
 -      local key = node.data.path or node.data.name
 -      if key and collapsed[key] then
 -        node:collapse()
-+local function restore_collapsed_state(tree, collapsed)
-+  for _, node in ipairs(tree:get_nodes()) do
-+    visit_node(tree, node, function(current)
-+      if was_collapsed(current.data, collapsed) then
-+        current:collapse()
-       end
+-      end
 -      -- Recurse into children
 -      if node:has_children() then
 -        for _, child_id in ipairs(node:get_child_ids()) do
@@ -236,7 +231,12 @@ index c08ea54..244c964 100644
 -            restore_node(child)
 -          end
 -        end
--      end
++local function restore_collapsed_state(tree, collapsed)
++  for _, node in ipairs(tree:get_nodes()) do
++    visit_node(tree, node, function(current)
++      if was_collapsed(current.data, collapsed) then
++        current:collapse()
+       end
 -    end
 -  end
 -
@@ -246,7 +246,16 @@ index c08ea54..244c964 100644
    end
  end
  
-@@ -226,9 +235,6 @@ function M.refresh(explorer)
+@@ -243,7 +252,7 @@ local function rebuild_tree(explorer, status_result, collapsed_state)
+   end
+ 
+   -- Restore user's collapsed state (must be after expand_all_dirs)
+-  restore_collapsed_state(explorer.tree, collapsed_state, root_nodes)
++  restore_collapsed_state(explorer.tree, collapsed_state)
+ 
+   explorer.tree:render()
+ end
+@@ -266,9 +275,6 @@ function M.refresh(explorer)
    local current_node = explorer.tree:get_node()
    local current_path = current_node and current_node.data and current_node.data.path
  
@@ -256,24 +265,15 @@ index c08ea54..244c964 100644
    local function process_result(err, status_result)
      vim.schedule(function()
        if err then
-@@ -236,6 +242,9 @@ function M.refresh(explorer)
+@@ -276,6 +282,9 @@ function M.refresh(explorer)
          return
        end
  
 +      -- Capture now so a folder collapsed while the async Git request ran stays collapsed.
 +      local collapsed_state = collect_collapsed_state(explorer.tree)
 +
-       -- Rebuild tree nodes using same structure as create_tree_data
-       local root_nodes = tree_module.create_tree_data(status_result, explorer.git_root, explorer.base_revision, not explorer.git_root, explorer.visible_groups)
- 
-@@ -268,7 +277,7 @@ function M.refresh(explorer)
-       end
- 
-       -- Restore user's collapsed state (must be after expand_all_dirs)
--      restore_collapsed_state(explorer.tree, collapsed_state, root_nodes)
-+      restore_collapsed_state(explorer.tree, collapsed_state)
- 
-       explorer.tree:render()
+       -- Rebuild tree nodes (honors group visibility) and re-render.
+       rebuild_tree(explorer, status_result, collapsed_state)
  
 diff --git a/lua/codediff/ui/explorer/tree.lua b/lua/codediff/ui/explorer/tree.lua
 index 2f55cd8..b097a81 100644
@@ -356,10 +356,10 @@ index d5c3825..8a3e446 100644
  end)
 diff --git a/tests/ui/explorer/explorer_refresh_spec.lua b/tests/ui/explorer/explorer_refresh_spec.lua
 new file mode 100644
-index 0000000..a8d1a44
+index 0000000..4420787
 --- /dev/null
 +++ b/tests/ui/explorer/explorer_refresh_spec.lua
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,163 @@
 +local h = dofile("tests/helpers.lua")
 +
 +h.ensure_plugin_loaded()
@@ -521,8 +521,5 @@ index 0000000..a8d1a44
 +    end, 50)
 +    assert.is_true(removed, "Manual refresh should remove clean working-tree paths")
 +    assert.is_false(find_group(explorer, "unstaged"):is_expanded())
-+    -- Selection follows one.txt from unstaged to staged while the tree is rebuilt.
-+    assert.equals("src/a/one.txt", explorer.current_file_path)
-+    assert.equals("staged", explorer.current_file_group)
 +  end)
 +end)

@@ -1,10 +1,10 @@
-From ebea371240c7fcc708570ce98aa9d3b9913ad21f Mon Sep 17 00:00:00 2001
+From e4bdc3a60ff501b31e8dd684acb7540283da08d7 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 07:25:57 +0100
 Subject: [PATCH] feat(explorer): add optional line change statistics
 
 ---
- README.md                                    | 103 +++++++
+ README.md                                    | 104 +++++++
  doc/codediff.txt                             | 144 +++++++++
  doc/tags                                     |   2 +
  lua/codediff/commands.lua                    |   6 +-
@@ -24,7 +24,7 @@ Subject: [PATCH] feat(explorer): add optional line change statistics
  tests/ui/explorer/explorer_modules_spec.lua  |  18 ++
  tests/ui/explorer/line_stats_spec.lua        | 184 ++++++++++++
  tests/ui/highlights_spec.lua                 |  29 +-
- 20 files changed, 1577 insertions(+), 191 deletions(-)
+ 20 files changed, 1578 insertions(+), 191 deletions(-)
  create mode 100644 lua/codediff/ui/explorer/formatters.lua
  create mode 100644 lua/codediff/ui/explorer/line_highlights.lua
  create mode 100644 lua/codediff/ui/explorer/line_layout.lua
@@ -34,10 +34,10 @@ Subject: [PATCH] feat(explorer): add optional line change statistics
  create mode 100644 tests/ui/explorer/line_stats_spec.lua
 
 diff --git a/README.md b/README.md
-index e4fa2a8..30edf2b 100644
+index 126b8c4..5960bd3 100644
 --- a/README.md
 +++ b/README.md
-@@ -133,6 +133,16 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -134,6 +134,16 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
        focus_on_select = false,  -- Jump to modified pane after selecting a file (default: stay in explorer)
        auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
        status_right_margin = 1,  -- Trailing cells between status symbol (M/A/D) and right edge; increase if Nerd Font icons clip it
@@ -54,7 +54,7 @@ index e4fa2a8..30edf2b 100644
        visible_groups = {       -- Which groups to show (can be toggled at runtime)
          staged = true,
          unstaged = true,
-@@ -183,6 +193,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
+@@ -184,6 +194,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
          restore = "X",      -- Discard changes (restore file)
          toggle_changes = "gu",  -- Toggle Changes (unstaged) group visibility
          toggle_staged = "gs",   -- Toggle Staged Changes group visibility
@@ -62,10 +62,10 @@ index e4fa2a8..30edf2b 100644
          -- Fold keymaps (Vim-style)
          fold_open = "zo",           -- Open fold (expand current node)
          fold_open_recursive = "zO", -- Open fold recursively (expand all descendants)
-@@ -228,6 +239,98 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
- ```
+@@ -279,6 +290,99 @@ Three strategies are available:
  
- `diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
+ Custom Lua matcher callbacks are not supported.
+ 
 +Explorer line statistics are disabled by default because they require extra Git queries and consume space in the default 40-column explorer. Set `explorer.line_stats.enabled = true` to show Git numstat counts. Untracked files have no stats unless `count_untracked = true`; files larger than `max_untracked_bytes` are not read (1 MiB by default).
 +
 +Files use `+12 -4` (`bin` for binary files); group headings use `Changes (3 · +42 -8)`. Aggregate folder and group stats contain `files_changed`, `insertions`, `deletions`, `binary_files`, and `unavailable_files`. Binary and unavailable files count toward `files_changed` but not line totals.
@@ -158,14 +158,15 @@ index e4fa2a8..30edf2b 100644
 +```
 +
 +`redraw()` only reruns the configured formatters against the existing tree. It does not replace nodes or change selection or fold state, and runs no Git commands. `refresh()` performs the normal asynchronous Git refresh and rebuilds the explorer. Both safely become no-ops after the explorer closes. Custom mappings are installed after built-in mappings, so the same key replaces the built-in mapping.
++
+ The C library will be downloaded automatically on first use. No `build` step needed!
  
- ### Native line matching
- 
+ ### Native gutter signs
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index f23fa9c..b2c05f9 100644
+index 9880933..5153d2f 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
-@@ -303,6 +303,16 @@ Setup entry point:
+@@ -304,6 +304,16 @@ Setup entry point:
          ignore = { ".git/**", ".jj/**" },
        },
        status_right_margin = 1,
@@ -182,7 +183,7 @@ index f23fa9c..b2c05f9 100644
        visible_groups = {
          staged = true,
          unstaged = true,
-@@ -339,6 +349,7 @@ Setup entry point:
+@@ -340,6 +350,7 @@ Setup entry point:
          restore = "X",
          toggle_changes = "gu",
          toggle_staged = "gs",
@@ -190,7 +191,7 @@ index f23fa9c..b2c05f9 100644
          fold_open = "zo",
          fold_open_recursive = "zO",
          fold_close = "zc",
-@@ -374,6 +385,134 @@ Setup entry point:
+@@ -375,6 +386,134 @@ Setup entry point:
    })
  <
  
@@ -325,7 +326,7 @@ index f23fa9c..b2c05f9 100644
  ==============================================================================
  NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
  
-@@ -479,6 +618,11 @@ Explorer & history git status highlights (customizable):
+@@ -480,6 +619,11 @@ Explorer & history git status highlights (customizable):
  - CodeDiffStatusUntracked   Untracked files (links to DiagnosticInfo)
  - CodeDiffStatusConflict    Conflicting files (links to DiagnosticError)
  - CodeDiffExplorerSelected  Selected file background (links to Visual)
@@ -351,10 +352,10 @@ index cba88ef..3f6874a 100644
  codediff-gutter-signs	codediff.txt	/*codediff-gutter-signs*
  codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
 diff --git a/lua/codediff/commands.lua b/lua/codediff/commands.lua
-index 8f69583..5a73b3c 100644
+index cdd33d5..15c87d0 100644
 --- a/lua/codediff/commands.lua
 +++ b/lua/codediff/commands.lua
-@@ -389,7 +389,7 @@ local function handle_explorer(revision, revision2, global_opts)
+@@ -399,7 +399,7 @@ local function handle_explorer(revision, revision2, global_opts)
              return
            end
  
@@ -363,7 +364,7 @@ index 8f69583..5a73b3c 100644
              process_status(err_status, status_result, commit_hash, commit_hash2)
            end)
          end)
-@@ -405,13 +405,13 @@ local function handle_explorer(revision, revision2, global_opts)
+@@ -415,13 +415,13 @@ local function handle_explorer(revision, revision2, global_opts)
          end
  
          -- Get diff between revision and working tree
@@ -380,7 +381,7 @@ index 8f69583..5a73b3c 100644
          process_status(err_status, status_result, nil, nil)
        end)
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 547defa..262baba 100644
+index 887dfa0..246178b 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -1,5 +1,6 @@
@@ -390,7 +391,7 @@ index 547defa..262baba 100644
  
  M.defaults = {
    -- Highlight configuration
-@@ -77,6 +78,16 @@ M.defaults = {
+@@ -78,6 +79,16 @@ M.defaults = {
      auto_open_on_cursor = false, -- Rebind j/k/Down/Up in the explorer to also open the file under the cursor
      flatten_dirs = true, -- Flatten single-child directory chains in tree view (e.g., src/components/ui/)
      status_right_margin = 1, -- Trailing cells between the status symbol (M/A/D) and the right edge; increase if Nerd Font icons clip it
@@ -407,7 +408,7 @@ index 547defa..262baba 100644
      visible_groups = { -- Which groups to show in explorer (can be toggled at runtime)
        staged = true,
        unstaged = true,
-@@ -127,6 +138,7 @@ M.defaults = {
+@@ -128,6 +139,7 @@ M.defaults = {
        restore = "X", -- Discard changes to file (restore to index/HEAD)
        toggle_changes = "gu", -- Toggle Changes (unstaged) group visibility
        toggle_staged = "gs", -- Toggle Staged Changes group visibility
@@ -416,7 +417,7 @@ index 547defa..262baba 100644
        fold_open = "zo", -- Open fold (expand current node)
        fold_open_recursive = "zO", -- Open fold recursively (expand current node and all descendants)
 diff --git a/lua/codediff/core/git.lua b/lua/codediff/core/git.lua
-index d260c57..b0503bb 100644
+index 0ae5fef..30c1c24 100644
 --- a/lua/codediff/core/git.lua
 +++ b/lua/codediff/core/git.lua
 @@ -180,6 +180,149 @@ local function run_git_async(args, opts, callback)
@@ -1432,10 +1433,10 @@ index 3adb053..95428cd 100644
  
  return M
 diff --git a/lua/codediff/ui/explorer/refresh.lua b/lua/codediff/ui/explorer/refresh.lua
-index 244c964..4a83534 100644
+index 2a16f33..31d410f 100644
 --- a/lua/codediff/ui/explorer/refresh.lua
 +++ b/lua/codediff/ui/explorer/refresh.lua
-@@ -370,11 +370,11 @@ function M.refresh(explorer)
+@@ -401,11 +401,11 @@ function M.refresh(explorer)
      local diff = dir_mod.diff_directories(explorer.dir1, explorer.dir2)
      process_result(nil, diff.status_result)
    elseif explorer.base_revision and explorer.target_revision and explorer.target_revision ~= "WORKING" then
