@@ -516,7 +516,9 @@ describe("Explorer Mode", function()
     callback()
 
     assert.equals(previous_tab, vim.api.nvim_get_current_tabpage())
-    assert.equals(vim.fs.normalize(vim.fs.joinpath(temp_dir, target_path)), vim.fs.normalize(vim.api.nvim_buf_get_name(0)))
+    local expected_path = vim.uv.fs_realpath(vim.fs.joinpath(temp_dir, target_path))
+    local actual_path = vim.uv.fs_realpath(vim.api.nvim_buf_get_name(0))
+    assert.equals(expected_path, actual_path)
   end)
 
   -- Test: auto_open_on_cursor opens the file under cursor after j/k
