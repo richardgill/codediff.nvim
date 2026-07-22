@@ -476,4 +476,76 @@ describe("compact mode (#344)", function()
         "modified pane: corresponding line " .. mod_target .. " should also be inside a closed fold (synced), got " .. mod_after)
     end)
   end)
+
+  describe("open in compact mode by default (diff.compact)", function()
+    local function counts_with_changes()
+      local original = {}
+      for i = 1, 30 do
+        original[i] = "line " .. i
+      end
+      local modified = vim.deepcopy(original)
+      modified[10] = "CHANGED 10"
+      modified[20] = "CHANGED 20"
+      return original, modified
+    end
+
+    it("auto-enables compact mode on open when diff.compact = true", function()
+      local config = require("codediff.config")
+      config.options = vim.deepcopy(config.defaults)
+      require("codediff").setup({ diff = { compact = true, compact_context_lines = 3 } })
+      highlights.setup()
+
+      local original, modified = counts_with_changes()
+      local tabpage = create_session(original, modified)
+
+      assert.is_true(
+        vim.wait(3000, function()
+          local s = lifecycle.get_session(tabpage)
+          return s and s.compact_mode == true
+        end, 20),
+        "diff.compact=true should auto-enable compact mode on open"
+      )
+      local s = lifecycle.get_session(tabpage)
+      assert.equals("expr", vim.wo[s.modified_win].foldmethod, "compact should apply the fold-expr to the modified window on open")
+    end)
+
+    it("does not auto-enable compact mode when diff.compact = false", function()
+      local config = require("codediff.config")
+      config.options = vim.deepcopy(config.defaults)
+      require("codediff").setup({ diff = { compact = false } })
+      highlights.setup()
+
+      local original, modified = counts_with_changes()
+      local tabpage = create_session(original, modified)
+      vim.wait(500)
+
+      local s = lifecycle.get_session(tabpage)
+      assert.is_not.equal(true, s.compact_mode, "compact should stay off when diff.compact is false (the default)")
+    end)
+
+    it("does not re-enable compact after a manual gc toggle-off (persists per session)", function()
+      local config = require("codediff.config")
+      config.options = vim.deepcopy(config.defaults)
+      require("codediff").setup({ diff = { compact = true, compact_context_lines = 3 } })
+      highlights.setup()
+
+      local original, modified = counts_with_changes()
+      local tabpage = create_session(original, modified)
+      assert.is_true(
+        vim.wait(3000, function()
+          local s = lifecycle.get_session(tabpage)
+          return s and s.compact_mode == true
+        end, 20),
+        "should auto-enable on open"
+      )
+
+      -- User turns it off with gc
+      compact.disable(tabpage)
+      assert.is_not.equal(true, lifecycle.get_session(tabpage).compact_mode)
+
+      -- A file switch re-runs the lifecycle hook; the default must NOT force compact back on
+      compact.refresh(tabpage)
+      assert.is_not.equal(true, lifecycle.get_session(tabpage).compact_mode, "compact must stay off after a manual toggle-off, even with diff.compact=true")
+    end)
+  end)
 end)

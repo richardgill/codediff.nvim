@@ -856,8 +856,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     lifecycle.set_tab_keymap(tabpage, "n", keymaps.align_move, align_move, { desc = "Align moved code block" })
   end
 
-  -- Re-apply compact mode folds if active (persists across file switches)
-  compact.reapply(tabpage)
+  -- Keep compact mode in sync when the diff view is (re)built — applies the
+  -- configured default on open and re-folds on file switches (no-op if off).
+  compact.refresh(tabpage)
 end
 
 return M
