@@ -174,7 +174,7 @@ describe("Inline diff with explorer", function()
         return false
       end
       -- Check that buffers have changed or diff result updated
-      return s.modified_bufnr ~= mod_buf_a or s.modified.absolute == right_b
+      return s.modified_bufnr ~= mod_buf_a or s.modified.absolute == path.make_ref(right_b, nil).absolute
     end, 20)
 
     -- Old buffer extmarks should be cleared
@@ -223,13 +223,13 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(200, function()
       local session = lifecycle.get_session(tabpage)
-      return session and session.modified.absolute == untracked_path
+      return session and session.modified.absolute == path.make_ref(untracked_path, nil).absolute
     end, 20)
 
     -- Verify: session updated to point at the file
     local session = lifecycle.get_session(tabpage)
     assert.is_not_nil(session, "Session should exist")
-    assert.equal(untracked_path, session.modified.absolute, "modified path should be the untracked file")
+    assert.equal(path.make_ref(untracked_path, nil).absolute, session.modified.absolute, "modified path should be the untracked file")
 
     -- Verify: the buffer should contain the file content
     local mod_buf = session.modified_bufnr
@@ -270,7 +270,7 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(200, function()
       local s = lifecycle.get_session(tabpage)
-      return s and s.modified.absolute == untracked_path
+      return s and s.modified.absolute == path.make_ref(untracked_path, nil).absolute
     end, 20)
 
     -- Verify no extmarks after single file
@@ -342,7 +342,7 @@ describe("Inline diff with explorer", function()
     vim.cmd("redraw")
     vim.wait(200, function()
       local s = lifecycle.get_session(tabpage)
-      return s and s.modified.absolute == file_path
+      return s and s.modified.absolute == path.make_ref(file_path, nil).absolute
     end, 20)
 
     local session_first = lifecycle.get_session(tabpage)

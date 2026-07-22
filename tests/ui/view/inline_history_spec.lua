@@ -185,7 +185,7 @@ describe("Inline diff with history-like configurations", function()
 
     -- Path should be updated to the single file
     local _, modified_ref = lifecycle.get_paths(tabpage)
-    assert.equals(single_path, modified_ref.absolute, "Modified path should be updated to single file path")
+    assert.equals(path.make_ref(single_path, nil).absolute, modified_ref.absolute, "Modified path should be updated to single file path")
 
     -- Original path should be empty (no comparison side)
     local original_ref, _ = lifecycle.get_paths(tabpage)
