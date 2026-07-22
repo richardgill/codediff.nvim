@@ -1,7 +1,7 @@
 [stack]
-upstream = 240f1ef950225fe558edae5d5a78eaf2c991ae2f
-expectedHead = 7a9529772068d00404099e6d18eff2abf2f20b95
-expectedTree = e1aa19e8a638dc9af301fd11c09ed2b09a125d6f
+upstream = 2fe8af3c91a5060a63bc150c3cc375f8f3f4cce0
+expectedHead = a37d477dfb44f30f4c8fabafc551eed2d67dfb83
+expectedTree = d3ad625a4e9205867c9277a36781c7d60dcf6c98
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -14,7 +14,6 @@ patches =
     local-benchmarks
     explorer-gf
     initial-explorer-selection
-    zero-hunk-navigation
     safe-last-diff-close
     hide-native-tabline
     special-file-highlights
@@ -44,12 +43,6 @@ description = fix(explorer): select the first visible file on initial open
 file = patches/005-initial-explorer-selection.patch
 originCommit = 4801ee41a7d54feb51a63d5dae8cbf481d0c42a8
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/460
-
-[patch "zero-hunk-navigation"]
-description = fix(navigation): include zero-hunk files in cross-file cycling
-file = patches/006-zero-hunk-navigation.patch
-originCommit = 59a2d04337ad5ac0a8c5ce40552f5da656883436
-pullRequest = https://github.com/esmuellert/codediff.nvim/pull/438
 
 [patch "safe-last-diff-close"]
 description = fix: keep Neovim open when closing the last diff tab

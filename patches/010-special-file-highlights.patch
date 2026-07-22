@@ -1,4 +1,4 @@
-From 1aa61d0b1ea60f0702c3bd8176bb53dab450743b Mon Sep 17 00:00:00 2001
+From c5aa623a2412fd99ead5b205a92935cf0d73068b Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 20:05:38 +0100
 Subject: [PATCH] feat: highlight added and deleted single-file views

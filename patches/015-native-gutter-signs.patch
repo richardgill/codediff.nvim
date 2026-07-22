@@ -1,4 +1,4 @@
-From 4e797e072f118dfc784d74e7cfed430f4d5bfff9 Mon Sep 17 00:00:00 2001
+From 182423bc9c4f0d7bb9106f0e6c0e2f86bf67eb81 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 20:18:52 +0100
 Subject: [PATCH] Added native gutter signs support
@@ -462,7 +462,7 @@ index c91b95e..70f65c1 100644
  end
  
 diff --git a/lua/codediff/ui/lifecycle/accessors.lua b/lua/codediff/ui/lifecycle/accessors.lua
-index 0a39973..3ef72bd 100644
+index b29e4b6..1a355c0 100644
 --- a/lua/codediff/ui/lifecycle/accessors.lua
 +++ b/lua/codediff/ui/lifecycle/accessors.lua
 @@ -12,6 +12,12 @@ local function is_virtual_revision(revision)

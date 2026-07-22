@@ -1,4 +1,4 @@
-From b4c1470d20b062bca8500de89db02f9094ffb7ca Mon Sep 17 00:00:00 2001
+From fee435bdc3089e0868d07e499d7efec586f214a6 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 09:09:09 +0100
 Subject: [PATCH] fix: allow gf from the explorer pane
@@ -13,7 +13,7 @@ Subject: [PATCH] fix: allow gf from the explorer pane
  6 files changed, 84 insertions(+), 39 deletions(-)
 
 diff --git a/lua/codediff/ui/lifecycle/accessors.lua b/lua/codediff/ui/lifecycle/accessors.lua
-index b9405e0..0a39973 100644
+index e921ed2..b29e4b6 100644
 --- a/lua/codediff/ui/lifecycle/accessors.lua
 +++ b/lua/codediff/ui/lifecycle/accessors.lua
 @@ -338,6 +338,9 @@ function M.set_explorer(tabpage, explorer)
