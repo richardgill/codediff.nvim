@@ -34,7 +34,9 @@ describe("cycle_hunks_across_files (#161)", function()
   end)
 
   after_each(function()
-    if repo then repo.cleanup() end
+    if repo then
+      repo.cleanup()
+    end
     while vim.fn.tabpagenr("$") > 1 do
       vim.cmd("tabclose")
     end
@@ -63,11 +65,15 @@ describe("cycle_hunks_across_files (#161)", function()
       end
       return false
     end, 50)
-    if not ok then return nil end
+    if not ok then
+      return nil
+    end
     for _, tp in ipairs(vim.api.nvim_list_tabpages()) do
       local s = lifecycle.get_session(tp)
       local e = lifecycle.get_explorer(tp)
-      if s and e then return tp, s, e end
+      if s and e then
+        return tp, s, e
+      end
     end
   end
 
@@ -77,11 +83,13 @@ describe("cycle_hunks_across_files (#161)", function()
       local e = lifecycle.get_explorer(tabpage)
       return e and e.current_file_path and e.current_file_path ~= from_file
     end, 20)
-    if not switched then return false end
+    if not switched then
+      return false
+    end
     return vim.wait(8000, function()
       local s = lifecycle.get_session(tabpage)
       local e = lifecycle.get_explorer(tabpage)
-      local session_path = s and s.modified_path ~= "" and s.modified_path or s and s.original_path
+      local session_path = s and s.modified.absolute ~= "" and s.modified.absolute or s and s.original.absolute
       return session_path and e and e.current_file_path
         and session_path:find(e.current_file_path, 1, true) ~= nil
         and has_expected_hunk_count(s, expected_hunk_count)
@@ -98,8 +106,7 @@ describe("cycle_hunks_across_files (#161)", function()
     local tabpage, session, explorer = open_explorer("a.txt")
     assert.is_not_nil(session)
     assert.is_not_nil(explorer)
-    assert.is_false(config.options.diff.cycle_hunks_across_files,
-      "option must be false for this test")
+    assert.is_false(config.options.diff.cycle_hunks_across_files, "option must be false for this test")
 
     local starting_file = explorer.current_file_path
     local changes = session.stored_diff_result.changes
@@ -111,8 +118,7 @@ describe("cycle_hunks_across_files (#161)", function()
     nav.next_hunk()
     vim.wait(150)
 
-    assert.equal(starting_file, explorer.current_file_path,
-      "with cross-file off, ]c at the last hunk must NOT change file")
+    assert.equal(starting_file, explorer.current_file_path, "with cross-file off, ]c at the last hunk must NOT change file")
   end)
 
   it("OFF: hunk navigation does not leave a file with no hunks", function()
@@ -178,14 +184,12 @@ describe("cycle_hunks_across_files (#161)", function()
 
     nav.next_hunk()
 
-    assert.is_true(wait_for_file_switch(tabpage, first_file),
-      "after ]c at boundary, explorer must switch to a different file")
+    assert.is_true(wait_for_file_switch(tabpage, first_file), "after ]c at boundary, explorer must switch to a different file")
 
     local new_session = lifecycle.get_session(tabpage)
     local first_hunk_line = new_session.stored_diff_result.changes[1].modified.start_line
     local cursor_after = vim.api.nvim_win_get_cursor(new_session.modified_win)[1]
-    assert.equal(first_hunk_line, cursor_after,
-      "after ]c hop, cursor must land on the FIRST hunk of the new file")
+    assert.equal(first_hunk_line, cursor_after, "after ]c hop, cursor must land on the FIRST hunk of the new file")
   end)
 
   it("ON: [c on the first hunk hops to the LAST hunk of the previous file", function()
@@ -204,15 +208,12 @@ describe("cycle_hunks_across_files (#161)", function()
 
     nav.prev_hunk()
 
-    assert.is_true(wait_for_file_switch(tabpage, first_file),
-      "after [c at boundary, explorer must switch to a different file")
+    assert.is_true(wait_for_file_switch(tabpage, first_file), "after [c at boundary, explorer must switch to a different file")
 
     local new_session = lifecycle.get_session(tabpage)
-    local last_hunk_line =
-      new_session.stored_diff_result.changes[#new_session.stored_diff_result.changes].modified.start_line
+    local last_hunk_line = new_session.stored_diff_result.changes[#new_session.stored_diff_result.changes].modified.start_line
     local cursor_after = vim.api.nvim_win_get_cursor(new_session.modified_win)[1]
-    assert.equal(last_hunk_line, cursor_after,
-      "after [c hop, cursor must land on the LAST hunk of the previous file (natural backward walk)")
+    assert.equal(last_hunk_line, cursor_after, "after [c hop, cursor must land on the LAST hunk of the previous file (natural backward walk)")
   end)
 
   it("ON: pending_cursor_landing is consumed (one-shot, cleared after use)", function()
@@ -230,8 +231,7 @@ describe("cycle_hunks_across_files (#161)", function()
 
     -- The pending landing flag must have been cleared by the render path.
     local s = lifecycle.get_session(tabpage)
-    assert.is_nil(s.pending_cursor_landing,
-      "pending_cursor_landing must be cleared after use; otherwise it would leak to the next render")
+    assert.is_nil(s.pending_cursor_landing, "pending_cursor_landing must be cleared after use; otherwise it would leak to the next render")
   end)
 
   it("ON in INLINE mode: [c on first hunk hops to LAST hunk of previous file", function()
@@ -252,15 +252,12 @@ describe("cycle_hunks_across_files (#161)", function()
     vim.api.nvim_win_set_cursor(session.modified_win, { changes[1].modified.start_line, 0 })
 
     nav.prev_hunk()
-    assert.is_true(wait_for_file_switch(tabpage, first_file),
-      "inline mode: explorer must switch to a different file after [c at boundary")
+    assert.is_true(wait_for_file_switch(tabpage, first_file), "inline mode: explorer must switch to a different file after [c at boundary")
 
     local new_session = lifecycle.get_session(tabpage)
-    local last_hunk_line =
-      new_session.stored_diff_result.changes[#new_session.stored_diff_result.changes].modified.start_line
+    local last_hunk_line = new_session.stored_diff_result.changes[#new_session.stored_diff_result.changes].modified.start_line
     local cursor_after = vim.api.nvim_win_get_cursor(new_session.modified_win)[1]
-    assert.equal(last_hunk_line, cursor_after,
-      "inline mode: cursor must land on the LAST hunk of the previous file (not the first)")
+    assert.equal(last_hunk_line, cursor_after, "inline mode: cursor must land on the LAST hunk of the previous file (not the first)")
   end)
 
   it("ON: [c lands on the MODIFIED-side last hunk when original/modified line numbers diverge", function()
@@ -283,15 +280,15 @@ describe("cycle_hunks_across_files (#161)", function()
     repo.write_file("a.txt", {
       "k1 EDIT",
       "k2",
-      "INS-1",  -- inserted
-      "INS-2",  -- inserted
-      "INS-3",  -- inserted
-      "INS-4",  -- inserted
-      "INS-5",  -- inserted
+      "INS-1", -- inserted
+      "INS-2", -- inserted
+      "INS-3", -- inserted
+      "INS-4", -- inserted
+      "INS-5", -- inserted
       "k3",
       "k4",
       "k5",
-      "k6 EDIT",   -- second hunk: modified line ~11, original line ~6
+      "k6 EDIT", -- second hunk: modified line ~11, original line ~6
       "k7",
     })
     repo.write_file("b.txt", { "b1 EDIT", "b2", "b3", "b4 EDIT", "b5" })
@@ -312,12 +309,9 @@ describe("cycle_hunks_across_files (#161)", function()
     local last_original = last_change.original.start_line
     -- Sanity: the two line numbers must actually diverge for this test to
     -- be meaningful. If they're equal, the bug wouldn't manifest.
-    assert.is_true(last_modified ~= last_original,
-      "test scaffold: modified and original line numbers must diverge (got both = " .. last_modified .. ")")
+    assert.is_true(last_modified ~= last_original, "test scaffold: modified and original line numbers must diverge (got both = " .. last_modified .. ")")
 
     local cursor_after = vim.api.nvim_win_get_cursor(new_session.modified_win)[1]
-    assert.equal(last_modified, cursor_after,
-      "cursor must land on the MODIFIED-side last-hunk line ("
-        .. last_modified .. "), not the original-side (" .. last_original .. ")")
+    assert.equal(last_modified, cursor_after, "cursor must land on the MODIFIED-side last-hunk line (" .. last_modified .. "), not the original-side (" .. last_original .. ")")
   end)
 end)
