@@ -82,13 +82,13 @@ local function open_initial_explorer(temp_dir, view_mode, ignore_patterns)
     if not session or type(session.original) ~= "table" or type(session.modified) ~= "table" then
       return false
     end
-    return session.original.relative ~= "" and session.modified.absolute ~= ""
+    return session.original.relative ~= "" and session.modified.relative ~= ""
   end, 20)
   assert.is_true(ready, "Explorer should complete its initial selection")
   return explorer, session
 end
 
-local function assert_first_visible_file_selected(temp_dir, explorer, session, expected_path)
+local function assert_first_visible_file_selected(explorer, session, expected_path)
   local first_path
   for line = 1, vim.api.nvim_buf_line_count(explorer.bufnr) do
     local node = explorer.tree:get_node(line)
@@ -104,7 +104,7 @@ local function assert_first_visible_file_selected(temp_dir, explorer, session, e
   assert.equals(first_path, explorer.current_file_path)
   assert.equals(first_path, cursor_node.data.path)
   assert.equals(first_path, session.original.relative)
-  assert.equals(h.normalize_path(temp_dir .. "/" .. first_path), h.normalize_path(session.modified.absolute))
+  assert.equals(first_path, session.modified.relative)
 end
 
 describe("Explorer Mode", function()
@@ -415,17 +415,17 @@ describe("Explorer Mode", function()
   -- Test 6: First file is auto-selected and displayed
   it("Selects the first visible file in list view", function()
     local explorer, session = open_initial_explorer(temp_dir, "list")
-    assert_first_visible_file_selected(temp_dir, explorer, session, "file1.txt")
+    assert_first_visible_file_selected(explorer, session, "file1.txt")
   end)
 
   it("Selects the first visible file in tree view", function()
     local explorer, session = open_initial_explorer(temp_dir, "tree")
-    assert_first_visible_file_selected(temp_dir, explorer, session, "nested/deep.txt")
+    assert_first_visible_file_selected(explorer, session, "nested/deep.txt")
   end)
 
   it("Does not select files excluded from the explorer", function()
     local explorer, session = open_initial_explorer(temp_dir, "list", { "file1.txt", "file3.txt" })
-    assert_first_visible_file_selected(temp_dir, explorer, session, "nested/deep.txt")
+    assert_first_visible_file_selected(explorer, session, "nested/deep.txt")
   end)
 
   -- Test 7: Lifecycle session is created correctly
