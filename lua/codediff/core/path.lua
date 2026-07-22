@@ -17,9 +17,11 @@ function M.get_plugin_root()
   end
 
   -- Strategy 1: Navigate up from this file
-  -- lua/codediff/core/path.lua -> 4 levels up to plugin root
+  -- lua/codediff/core/path.lua -> 4 levels up to plugin root.
+  -- ":p" first so a relative module source (Neovim's rtp loader can report
+  -- "./lua/..." on Windows) still resolves to an absolute plugin root.
   local this_file = debug.getinfo(1, "S").source:sub(2)
-  local root = vim.fn.fnamemodify(this_file, ":h:h:h:h")
+  local root = vim.fn.fnamemodify(this_file, ":p:h:h:h:h")
 
   -- Validate by checking for a known marker file
   if vim.fn.filereadable(root .. "/VERSION") == 1 then
