@@ -79,7 +79,10 @@ local function open_initial_explorer(temp_dir, view_mode, ignore_patterns)
       return false
     end
     session = lifecycle.get_session(explorer.tabpage)
-    return session and session.modified_path ~= ""
+    if not session or type(session.original) ~= "table" or type(session.modified) ~= "table" then
+      return false
+    end
+    return session.original.relative ~= "" and session.modified.absolute ~= ""
   end, 20)
   assert.is_true(ready, "Explorer should complete its initial selection")
   return explorer, session
@@ -100,8 +103,8 @@ local function assert_first_visible_file_selected(temp_dir, explorer, session, e
   assert.equals(expected_path, first_path)
   assert.equals(first_path, explorer.current_file_path)
   assert.equals(first_path, cursor_node.data.path)
-  assert.equals(first_path, session.original_path)
-  assert.equals(h.normalize_path(temp_dir .. "/" .. first_path), h.normalize_path(session.modified_path))
+  assert.equals(first_path, session.original.relative)
+  assert.equals(h.normalize_path(temp_dir .. "/" .. first_path), h.normalize_path(session.modified.absolute))
 end
 
 describe("Explorer Mode", function()
