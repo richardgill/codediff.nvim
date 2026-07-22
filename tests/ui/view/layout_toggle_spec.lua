@@ -255,11 +255,11 @@ describe("Layout toggle", function()
     vim.o.showtabline = 2
     assert.is_true(view.update(tabpage, {
       mode = "standalone",
-      original_path = next_left,
-      modified_path = next_right,
+      original = path.make_ref(next_left, nil),
+      modified = path.make_ref(next_right, nil),
     }, false))
     wait_for(tabpage, function(session)
-      return session.original_path == next_left and session.modified_path == next_right and session.stored_diff_result ~= nil
+      return session.original.absolute == next_left and session.modified.absolute == next_right and session.stored_diff_result ~= nil
     end, "File switch should finish rendering")
     assert.equals(0, vim.o.showtabline)
 
