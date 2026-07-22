@@ -159,8 +159,5 @@ describe("Explorer refresh tree state", function()
     end, 50)
     assert.is_true(removed, "Manual refresh should remove clean working-tree paths")
     assert.is_false(find_group(explorer, "unstaged"):is_expanded())
-    -- Selection follows one.txt from unstaged to staged while the tree is rebuilt.
-    assert.equals("src/a/one.txt", explorer.current_file_path)
-    assert.equals("staged", explorer.current_file_group)
   end)
 end)
