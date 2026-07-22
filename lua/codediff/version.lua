@@ -2,7 +2,8 @@
 local M = {}
 
 -- Load VERSION once at module load time
--- Navigate from lua/vscode-diff/version.lua -> lua/vscode-diff/ -> lua/ -> plugin root
+-- Resolve the plugin root via core.path (single source of truth; it handles
+-- relative vs absolute module source paths).
 do
   local plugin_root = require("codediff.core.path").get_plugin_root()
   local version_file = plugin_root .. "/VERSION"
