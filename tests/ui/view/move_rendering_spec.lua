@@ -6,6 +6,7 @@ local view = require("codediff.ui.view")
 local diff = require("codediff.core.diff")
 local highlights = require("codediff.ui.highlights")
 local lifecycle = require("codediff.ui.lifecycle")
+local path = require("codediff.core.path")
 
 local ns_highlight = highlights.ns_highlight
 
@@ -34,8 +35,8 @@ local function create_move_view(original_lines, modified_lines, suffix, setup_op
   local session_config = {
     mode = "standalone",
     git_root = nil,
-    original_path = left_path,
-    modified_path = right_path,
+    original = path.make_ref(left_path, nil),
+    modified = path.make_ref(right_path, nil),
     original_revision = nil,
     modified_revision = nil,
   }
@@ -299,8 +300,8 @@ describe("Move rendering (side-by-side)", function()
 
           view.create({
             mode = "standalone",
-            original_path = orig_path,
-            modified_path = mod_path,
+            original = path.make_ref(orig_path, nil),
+            modified = path.make_ref(mod_path, nil),
           })
           vim.cmd("redraw")
           vim.wait(500)
