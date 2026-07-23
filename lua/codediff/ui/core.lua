@@ -34,27 +34,20 @@ end
 -- ============================================================================
 
 local function apply_line_highlights(bufnr, line_range, hl_group)
-  if line_range.end_line <= line_range.start_line then
+  local start_row = line_range.start_line - 1
+  local end_row = math.min(line_range.end_line - 1, vim.api.nvim_buf_line_count(bufnr))
+  if end_row <= start_row then
     return
   end
 
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-
-  for line = line_range.start_line, line_range.end_line - 1 do
-    if line > line_count then
-      break
-    end
-
-    local line_idx = line - 1
-
-    vim.api.nvim_buf_set_extmark(bufnr, ns_highlight, line_idx, 0, {
-      end_line = line_idx + 1,
-      end_col = 0,
-      hl_group = hl_group,
-      hl_eol = true,
-      priority = config.options.diff.highlight_priority,
-    })
-  end
+  -- Use one ranged extmark to avoid per-line API calls and extmark objects for large contiguous changes.
+  vim.api.nvim_buf_set_extmark(bufnr, ns_highlight, start_row, 0, {
+    end_row = end_row,
+    end_col = 0,
+    hl_group = hl_group,
+    hl_eol = true,
+    priority = config.options.diff.highlight_priority,
+  })
 end
 
 -- ============================================================================
@@ -353,6 +346,41 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines, 
     left_fillers = total_left_fillers,
     right_fillers = total_right_fillers,
   }
+end
+
+-- ============================================================================
+-- Whole File Rendering
+-- ============================================================================
+
+--- Render a one-sided file with highlighting across all logical lines.
+---@param bufnr number
+---@param side "original"|"modified"
+function M.render_whole_file(bufnr, side)
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_highlight, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_filler, 0, -1)
+
+  if not config.options.diff.highlight_added_deleted_files then
+    return
+  end
+
+  local highlight_groups = {
+    original = "CodeDiffLineDelete",
+    modified = "CodeDiffLineInsert",
+  }
+  local hl_group = highlight_groups[side]
+  if not hl_group then
+    error("Invalid whole-file diff side: " .. tostring(side))
+  end
+
+  vim.api.nvim_buf_set_extmark(bufnr, ns_highlight, 0, 0, {
+    end_row = vim.api.nvim_buf_line_count(bufnr),
+    end_col = 0,
+    hl_group = hl_group,
+    hl_eol = true,
+    priority = config.options.diff.highlight_priority,
+    right_gravity = false,
+    end_right_gravity = true,
+  })
 end
 
 -- ============================================================================
