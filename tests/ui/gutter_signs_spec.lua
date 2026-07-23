@@ -231,8 +231,7 @@ describe("Native gutter signs", function()
       { changes = {}, moves = {} }
     )
     local tracked = lifecycle.get_session(tabpage)
-    tracked.single_pane = true
-    tracked.original_win = nil
+    tracked.single_side = "modified"
     gutter_signs.set_whole_file(session.modified_bufnr, "modified")
 
     state.suspend_diff(tabpage)
