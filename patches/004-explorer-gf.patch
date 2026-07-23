@@ -1,4 +1,4 @@
-From 94e45642d094d516680e0f491bdd357408c82bd1 Mon Sep 17 00:00:00 2001
+From 6336c5115ba5a755b8ca84be1571e41c1e269a48 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 09:09:09 +0100
 Subject: [PATCH] fix: allow gf from the explorer pane
@@ -27,10 +27,10 @@ index e921ed2..b29e4b6 100644
  end
  
 diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
-index 4a0a076..95f4775 100644
+index 048a35f..825b768 100644
 --- a/lua/codediff/ui/view/inline_view.lua
 +++ b/lua/codediff/ui/view/inline_view.lua
-@@ -152,9 +152,7 @@ function M.create(session_config, filetype, on_ready)
+@@ -162,9 +162,7 @@ function M.create(session_config, filetype, on_ready)
      mark_inline(tabpage)
      -- Setup panels via shared module
      panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
@@ -41,7 +41,7 @@ index 4a0a076..95f4775 100644
  
      layout.arrange(tabpage)
  
-@@ -312,9 +310,7 @@ function M.create(session_config, filetype, on_ready)
+@@ -322,9 +320,7 @@ function M.create(session_config, filetype, on_ready)
  
    -- Setup panels for non-placeholder explorer/history mode
    panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
@@ -164,10 +164,10 @@ index a89b258..c6957b7 100644
  
  return M
 diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
-index dab3790..e0cfc79 100644
+index 1fda052..d9b3de1 100644
 --- a/lua/codediff/ui/view/side_by_side.lua
 +++ b/lua/codediff/ui/view/side_by_side.lua
-@@ -365,9 +365,7 @@ function M.create(session_config, filetype, on_ready)
+@@ -366,9 +366,7 @@ function M.create(session_config, filetype, on_ready)
  
    -- Setup panels (explorer sidebar, history panel)
    panel.setup_explorer(tabpage, session_config, original_win, modified_win)

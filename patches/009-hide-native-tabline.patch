@@ -1,4 +1,4 @@
-From 614e6bda80835535decc6b1998e09616b4004f3b Mon Sep 17 00:00:00 2001
+From a0cb06d952e25a424a9690acd8b18c99614974fb Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 17:51:22 +0100
 Subject: [PATCH] fix: hide the native tabline in CodeDiff views
@@ -47,10 +47,10 @@ index bc5b24d..f993986 100644
  -- Delegate to cleanup module
  M.setup_autocmds = cleanup.setup_autocmds
 diff --git a/lua/codediff/ui/lifecycle/session.lua b/lua/codediff/ui/lifecycle/session.lua
-index 4aac930..b16befd 100644
+index 6de79d7..890c951 100644
 --- a/lua/codediff/ui/lifecycle/session.lua
 +++ b/lua/codediff/ui/lifecycle/session.lua
-@@ -35,6 +35,23 @@ function M.get_active_diffs()
+@@ -36,6 +36,23 @@ function M.get_active_diffs()
    return active_diffs
  end
  
@@ -74,7 +74,7 @@ index 4aac930..b16befd 100644
  -- Check if a revision represents a virtual buffer
  local function is_virtual_revision(revision)
    return revision ~= nil and revision ~= "WORKING"
-@@ -71,6 +88,8 @@ function M.create_session(
+@@ -72,6 +89,8 @@ function M.create_session(
    -- Save buffer states
    local original_state = state.save_buffer_state(original_bufnr)
    local modified_state = state.save_buffer_state(modified_bufnr)
@@ -83,7 +83,7 @@ index 4aac930..b16befd 100644
  
    -- Create complete session in one step
    active_diffs[tabpage] = {
-@@ -112,8 +131,10 @@ function M.create_session(
+@@ -114,8 +133,10 @@ function M.create_session(
      result_win = nil,
      conflict_files = {}, -- Tracks files opened in conflict mode for unsaved warning
      reapply_keymaps = reapply_keymaps,
@@ -94,7 +94,7 @@ index 4aac930..b16befd 100644
    welcome_window.capture_session_profiles(active_diffs[tabpage])
  
    -- Mark windows with restore flag
-@@ -170,6 +191,7 @@ function M.create_session(
+@@ -172,6 +193,7 @@ function M.create_session(
        end
        local win = vim.api.nvim_get_current_win()
        if win == sess.original_win or win == sess.modified_win then
@@ -102,7 +102,7 @@ index 4aac930..b16befd 100644
          sync_window_ui(sess, win)
          -- Re-apply critical window options that might get reset by ftplugins/autocmds
          vim.wo[win].wrap = false
-@@ -182,7 +204,9 @@ function M.create_session(
+@@ -184,7 +206,9 @@ function M.create_session(
      group = tab_augroup,
      callback = function()
        local current_tab = vim.api.nvim_get_current_tabpage()
@@ -113,7 +113,7 @@ index 4aac930..b16befd 100644
          accessors.clear_tab_keymaps(tabpage)
          state.suspend_diff(tabpage)
        end
-@@ -192,9 +216,10 @@ function M.create_session(
+@@ -194,9 +218,10 @@ function M.create_session(
    vim.api.nvim_create_autocmd("TabEnter", {
      group = tab_augroup,
      callback = function()

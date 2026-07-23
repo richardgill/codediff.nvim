@@ -1,4 +1,4 @@
-From b764b5a6fa9e45eb2cc5856bc6935eb32d16bbf3 Mon Sep 17 00:00:00 2001
+From 8beed672f4ae3c8a023a7346ab99ba27fd86c0d8 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 00:01:45 +0100
 Subject: [PATCH] fix(highlights): preserve character group attributes
