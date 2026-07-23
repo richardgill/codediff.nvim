@@ -26,55 +26,55 @@ patches =
 [patch "local-benchmarks"]
 description = Add local performance benchmarks
 file = patches/003-local-benchmarks.patch
-originCommit = 029be427afe81b0547ce50777a3c55355a2e0799
+originCommit = cfd02bb94a4906b344bcdb573e38b552d4d3f27a
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/458
 
 [patch "explorer-gf"]
 description = fix: "gf" shortcut should open selected explorer file in previous tab
 file = patches/004-explorer-gf.patch
-originCommit = 633bee4b88a928ea87a407596728ae5ce1c56123
+originCommit = c705be714f92cf3364fc4e51363e9bf2979d6b01
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/321
 
 [patch "initial-explorer-selection"]
 description = fix(explorer): select the first visible file on initial open
 file = patches/005-initial-explorer-selection.patch
-originCommit = 4801ee41a7d54feb51a63d5dae8cbf481d0c42a8
+originCommit = 5cd6863e6220528b220612de35988379fac37f68
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/460
 
 [patch "hide-native-tabline"]
 description = fix(ui): hide the native tabline in CodeDiff views
 file = patches/009-hide-native-tabline.patch
-originCommit = e92ad41e5394066c157319d23db97080640b4867
+originCommit = 59f06411b7bc9c89a41c67d0e20dcdb79c88a6a5
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/441
 
 [patch "preserve-explorer-state"]
 description = fix(explorer): preserve tree state across refreshes
 file = patches/011-preserve-explorer-state.patch
-originCommit = 6b81b9892a3d1203431a27b0447d2805c061152d
+originCommit = 47c55ba63c21960d479c38d40486b45f26ddbdfb
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/443
 
 [patch "highlight-attributes"]
 description = fix(highlights): preserve character group attributes
 file = patches/013-highlight-attributes.patch
-originCommit = f951b3e864f7a828f61e35b8328cfa661769a28b
+originCommit = dab51ea7ee1eed05ec4a2c7eb918783ea3b8a606
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/447
 
 [patch "explorer-line-statistics"]
 description = feat(explorer): Git stats + Explorer Keymaps + Explorer line renderer
 file = patches/016-explorer-line-statistics.patch
-originCommit = 6923e7af5ebc452e32c2b675a77c5f3196dda94c
+originCommit = fa861a647e059ea115fd70f3adb9b6246412de57
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/448
 
 [patch "intraline-line-matching"]
 description = feat: add line matching strategies
 file = patches/014-intraline-line-matching.patch
-originCommit = 41446eecb10adaf17a17dc129a7263dcca996ef7
+originCommit = 46adf53a909a2842633186adc51d1c85eca40047
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/459
 
 [patch "native-gutter-signs"]
 description = Added native gutter signs support
 file = patches/015-native-gutter-signs.patch
-originCommit = a7e0ee9eebe4bdccd85a289bb66daf73bf6806d8
+originCommit = 67f7c483a8ef05447ec1d4a412a4e7553bade06b
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 
 [patch "local-native-build"]
