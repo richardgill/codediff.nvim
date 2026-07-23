@@ -1,4 +1,4 @@
-From 17d1a644c4a14e9ea5a3bcc5912e4739faaef563 Mon Sep 17 00:00:00 2001
+From 824006ce25f9f26dd01294968f8b2578f89994b3 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Fri, 17 Jul 2026 20:18:52 +0100
 Subject: [PATCH] Added native gutter signs support

@@ -1,7 +1,7 @@
 [stack]
-upstream = 4602ae6062f803ad5479a1d5247ae315985d93a9
-expectedHead = ce030587982b61023c9c29045c6e6758734ba117
-expectedTree = 6f0bf158865db23d5a6d71d1f1f2181dd1c15a54
+upstream = 2253030fc17c8356a2ff1026f25cb9b570bdd91f
+expectedHead = 887768dba06f77f9fe031b905a10fc7f6cf93145
+expectedTree = bacd5aaa9786876ae20927b41531a829260b43c6
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -16,7 +16,6 @@ patches =
     initial-explorer-selection
     hide-native-tabline
     preserve-explorer-state
-    configurable-fillers
     highlight-attributes
     intraline-line-matching
     native-gutter-signs
@@ -53,12 +52,6 @@ description = fix(explorer): preserve tree state across refreshes
 file = patches/011-preserve-explorer-state.patch
 originCommit = 6b81b9892a3d1203431a27b0447d2805c061152d
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/443
-
-[patch "configurable-fillers"]
-description = feat: make filler text configurable
-file = patches/012-configurable-fillers.patch
-originCommit = 5bf364a8c16bbc376982a0c1ae6f41084a6a6046
-pullRequest = https://github.com/esmuellert/codediff.nvim/pull/444
 
 [patch "highlight-attributes"]
 description = fix(highlights): preserve character group attributes
