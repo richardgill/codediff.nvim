@@ -36,6 +36,10 @@ describe("Render Core", function()
     highlights.setup()
   end)
 
+  it("disables whole-file highlights by default", function()
+    assert.is_false(config.defaults.diff.highlight_added_deleted_files)
+  end)
+
   -- Test 1: Basic added lines rendering
   it("Renders added lines with correct highlights", function()
     local left_buf = vim.api.nvim_create_buf(false, true)
