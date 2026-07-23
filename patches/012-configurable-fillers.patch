@@ -1,4 +1,4 @@
-From 738d2fd64cfeadebfb86a3628af834d824b098d5 Mon Sep 17 00:00:00 2001
+From e8326d060d798406a3f4700c43edd6a0f02c330b Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 20:57:49 +0100
 Subject: [PATCH] feat: make filler text configurable
@@ -17,7 +17,7 @@ Subject: [PATCH] feat: make filler text configurable
  create mode 100644 tests/ui/filler_spec.lua
 
 diff --git a/README.md b/README.md
-index 6fbd5fc..4313777 100644
+index 6f55c9b..7830b5e 100644
 --- a/README.md
 +++ b/README.md
 @@ -86,6 +86,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -47,7 +47,7 @@ index 6fbd5fc..4313777 100644
  - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
  
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 883c9fc..048dc80 100644
+index 86d6a5f..654451e 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -130,6 +130,26 @@ Set the layout in your config:
@@ -107,7 +107,7 @@ index 2895631..5ee5d4c 100644
  codediff-history	codediff.txt	/*codediff-history*
  codediff-history-line-range	codediff.txt	/*codediff-history-line-range*
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 9d36f13..0ec2a65 100644
+index f36d927..26fe304 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -30,6 +30,7 @@ M.defaults = {

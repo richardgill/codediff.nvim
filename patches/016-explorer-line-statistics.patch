@@ -1,4 +1,4 @@
-From a69360df02fbcdcf0caad9711e91f22f42b09f19 Mon Sep 17 00:00:00 2001
+From 3a0f4bc54eaaa462e47a62e2f3c8ef373bf86a22 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 07:25:57 +0100
 Subject: [PATCH] feat(explorer): add optional line change statistics
@@ -34,7 +34,7 @@ Subject: [PATCH] feat(explorer): add optional line change statistics
  create mode 100644 tests/ui/explorer/line_stats_spec.lua
 
 diff --git a/README.md b/README.md
-index 126b8c4..5960bd3 100644
+index f65f61c..d626eef 100644
 --- a/README.md
 +++ b/README.md
 @@ -134,6 +134,16 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -163,7 +163,7 @@ index 126b8c4..5960bd3 100644
  
  ### Native gutter signs
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 9880933..5153d2f 100644
+index 0a83bb7..813e01c 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -304,6 +304,16 @@ Setup entry point:
@@ -326,7 +326,7 @@ index 9880933..5153d2f 100644
  ==============================================================================
  NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
  
-@@ -480,6 +619,11 @@ Explorer & history git status highlights (customizable):
+@@ -479,6 +618,11 @@ Explorer & history git status highlights (customizable):
  - CodeDiffStatusUntracked   Untracked files (links to DiagnosticInfo)
  - CodeDiffStatusConflict    Conflicting files (links to DiagnosticError)
  - CodeDiffExplorerSelected  Selected file background (links to Visual)
@@ -381,7 +381,7 @@ index cdd33d5..15c87d0 100644
          process_status(err_status, status_result, nil, nil)
        end)
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 887dfa0..246178b 100644
+index bb47197..645297f 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -1,5 +1,6 @@

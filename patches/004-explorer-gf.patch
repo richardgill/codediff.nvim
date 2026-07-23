@@ -1,4 +1,4 @@
-From fee435bdc3089e0868d07e499d7efec586f214a6 Mon Sep 17 00:00:00 2001
+From 94e45642d094d516680e0f491bdd357408c82bd1 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 09:09:09 +0100
 Subject: [PATCH] fix: allow gf from the explorer pane
@@ -27,10 +27,10 @@ index e921ed2..b29e4b6 100644
  end
  
 diff --git a/lua/codediff/ui/view/inline_view.lua b/lua/codediff/ui/view/inline_view.lua
-index 09674a7..6654616 100644
+index 4a0a076..95f4775 100644
 --- a/lua/codediff/ui/view/inline_view.lua
 +++ b/lua/codediff/ui/view/inline_view.lua
-@@ -151,9 +151,7 @@ function M.create(session_config, filetype, on_ready)
+@@ -152,9 +152,7 @@ function M.create(session_config, filetype, on_ready)
      mark_inline(tabpage)
      -- Setup panels via shared module
      panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
@@ -41,7 +41,7 @@ index 09674a7..6654616 100644
  
      layout.arrange(tabpage)
  
-@@ -310,9 +308,7 @@ function M.create(session_config, filetype, on_ready)
+@@ -312,9 +310,7 @@ function M.create(session_config, filetype, on_ready)
  
    -- Setup panels for non-placeholder explorer/history mode
    panel.setup_explorer(tabpage, session_config, modified_win, modified_win)
@@ -53,7 +53,7 @@ index 09674a7..6654616 100644
    layout.arrange(tabpage)
  
 diff --git a/lua/codediff/ui/view/keymaps.lua b/lua/codediff/ui/view/keymaps.lua
-index 0e93398..5607021 100644
+index 2319de3..70e3e89 100644
 --- a/lua/codediff/ui/view/keymaps.lua
 +++ b/lua/codediff/ui/view/keymaps.lua
 @@ -8,6 +8,22 @@ local navigation = require("codediff.ui.view.navigation")
@@ -79,7 +79,7 @@ index 0e93398..5607021 100644
  -- Centralized keymap setup for all diff view keymaps
  -- This function sets up ALL keymaps in one place for better maintainability
  function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explorer_mode)
-@@ -275,16 +291,24 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+@@ -259,16 +275,24 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
        side = "modified"
      end
  
@@ -108,7 +108,7 @@ index 0e93398..5607021 100644
        local original, modified = lifecycle.get_paths(tabpage)
        local ref = side == "original" and original or modified
        if not ref or ref.absolute == "" then
-@@ -300,7 +324,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+@@ -284,7 +308,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
        end
      end
  
@@ -117,7 +117,7 @@ index 0e93398..5607021 100644
      local current_tab = vim.api.nvim_get_current_tabpage()
      local tabs = vim.api.nvim_list_tabpages()
  
-@@ -332,7 +356,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+@@ -316,7 +340,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
      end
  
      local ok, err
@@ -126,7 +126,7 @@ index 0e93398..5607021 100644
        ok, err = pcall(vim.cmd, "edit " .. vim.fn.fnameescape(target_file))
      else
        ok, err = pcall(vim.api.nvim_win_set_buf, target_win, current_buf)
-@@ -342,7 +366,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
+@@ -326,7 +350,9 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
        return
      end
  
@@ -164,10 +164,10 @@ index a89b258..c6957b7 100644
  
  return M
 diff --git a/lua/codediff/ui/view/side_by_side.lua b/lua/codediff/ui/view/side_by_side.lua
-index 49f7721..e51f5b0 100644
+index dab3790..e0cfc79 100644
 --- a/lua/codediff/ui/view/side_by_side.lua
 +++ b/lua/codediff/ui/view/side_by_side.lua
-@@ -362,9 +362,7 @@ function M.create(session_config, filetype, on_ready)
+@@ -365,9 +365,7 @@ function M.create(session_config, filetype, on_ready)
  
    -- Setup panels (explorer sidebar, history panel)
    panel.setup_explorer(tabpage, session_config, original_win, modified_win)

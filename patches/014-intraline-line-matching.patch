@@ -1,4 +1,4 @@
-From 83c56279d2976f2158513c989315197ea1d74b50 Mon Sep 17 00:00:00 2001
+From dced98461fc02bb740cc68fdfbea0aad3aa155aa Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:25:25 +0100
 Subject: [PATCH] Added native line matcher implementation and tests
@@ -34,7 +34,7 @@ Subject: [PATCH] Added native line matcher implementation and tests
  create mode 100644 tests/core/line_matcher_spec.lua
 
 diff --git a/README.md b/README.md
-index 4313777..7965608 100644
+index 7830b5e..be48767 100644
 --- a/README.md
 +++ b/README.md
 @@ -90,6 +90,10 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -129,7 +129,7 @@ index fd09ca3..fe0acb8 100755
  src/optimize.c \
  src/sequence.c \
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 048dc80..96ffc0e 100644
+index 654451e..0270660 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -190,6 +190,65 @@ The toggle keymap can be customized:
@@ -2247,7 +2247,7 @@ index 0000000..f4ced82
 +  return passed ? 0 : 1;
 +}
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 0ec2a65..0de3120 100644
+index 26fe304..46a8a47 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -34,6 +34,10 @@ M.defaults = {
@@ -2864,10 +2864,10 @@ index 0000000..f72880c
 +  end)
 +end)
 diff --git a/tests/ui/core_spec.lua b/tests/ui/core_spec.lua
-index 4c7d700..43cfaec 100644
+index d269b05..58a27ea 100644
 --- a/tests/ui/core_spec.lua
 +++ b/tests/ui/core_spec.lua
-@@ -127,6 +127,29 @@ describe("Render Core", function()
+@@ -131,6 +131,29 @@ describe("Render Core", function()
      vim.api.nvim_buf_delete(right_buf, {force = true})
    end)
  

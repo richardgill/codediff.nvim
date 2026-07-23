@@ -1,7 +1,7 @@
 [stack]
-upstream = 2fe8af3c91a5060a63bc150c3cc375f8f3f4cce0
-expectedHead = a37d477dfb44f30f4c8fabafc551eed2d67dfb83
-expectedTree = d3ad625a4e9205867c9277a36781c7d60dcf6c98
+upstream = 6bece3fa7af987bf6d265d8e948cea2ae29ceb1c
+expectedHead = 0e49c3a06e1612a1ec818c1674a5b6daec95ba26
+expectedTree = 5ec0cd3dcd7ba290a7b8c6bda6a69c732f38b6e5
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -14,7 +14,6 @@ patches =
     local-benchmarks
     explorer-gf
     initial-explorer-selection
-    safe-last-diff-close
     hide-native-tabline
     special-file-highlights
     preserve-explorer-state
@@ -44,12 +43,6 @@ file = patches/005-initial-explorer-selection.patch
 originCommit = 4801ee41a7d54feb51a63d5dae8cbf481d0c42a8
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/460
 
-[patch "safe-last-diff-close"]
-description = fix: keep Neovim open when closing the last diff tab
-file = patches/007-safe-last-diff-close.patch
-originCommit = e4ce2bdb637d6bc4adbf9f81c4a4e2383c7bd089
-pullRequest = https://github.com/esmuellert/codediff.nvim/pull/440
-
 [patch "hide-native-tabline"]
 description = fix(ui): hide the native tabline in CodeDiff views
 file = patches/009-hide-native-tabline.patch
@@ -59,7 +52,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/441
 [patch "special-file-highlights"]
 description = feat: highlight added and deleted single-file views
 file = patches/010-special-file-highlights.patch
-originCommit = cf76557f0ece3d54c0d41a731ab6817e0910139b
+originCommit = c3968d44791babee3854944b38d9467213979dc4
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/442
 
 [patch "preserve-explorer-state"]

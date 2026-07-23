@@ -1,4 +1,4 @@
-From 1024dc1360f9b67b7bff5ab0b59e4c5df61cb60d Mon Sep 17 00:00:00 2001
+From 614e6bda80835535decc6b1998e09616b4004f3b Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Thu, 16 Jul 2026 17:51:22 +0100
 Subject: [PATCH] fix: hide the native tabline in CodeDiff views
