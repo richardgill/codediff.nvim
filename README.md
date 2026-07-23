@@ -86,6 +86,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
     -- Diff view behavior
     diff = {
       layout = "side-by-side",             -- Diff layout: "side-by-side" (two panes) or "inline" (single pane with virtual lines)
+      filler_text = "╱",                   -- Repeated filler pattern; use "" for blank alignment rows
       disable_inlay_hints = true,         -- Disable inlay hints in diff windows for cleaner view
       max_computation_time_ms = 5000,     -- Maximum time for diff computation (VSCode default)
       ignore_trim_whitespace = false,     -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
@@ -221,6 +222,8 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
   },
 }
 ```
+
+`diff.filler_text` accepts any non-empty text pattern and repeats it across filler rows. Set it to `""` to hide the decoration while preserving the rows that keep side-by-side and conflict panes aligned. Non-empty patterns use the `CodeDiffFiller` highlight group.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 
@@ -610,7 +613,7 @@ The plugin defines highlight groups matching VSCode's diff colors:
 - `CodeDiffLineDelete` - Light red background for deleted lines
 - `CodeDiffCharInsert` - Deep/dark green for inserted characters
 - `CodeDiffCharDelete` - Deep/dark red for deleted characters
-- `CodeDiffFiller` - Gray foreground for filler line slashes (`╱╱╱`)
+- `CodeDiffFiller` - Gray foreground for non-empty filler line patterns
 - `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
 - `CodeDiffMoveTo` - Sign column and annotation color for move indicators
 
