@@ -10,6 +10,31 @@ function M.setup(opts)
   render.setup_highlights()
 end
 
+function M.render_aligned_modified_virtual_lines(opts)
+  return require("codediff.ui.move").render_aligned_modified_virtual_lines(opts)
+end
+
+function M.get_diff_context(bufnr)
+  local lifecycle = require("codediff.ui.lifecycle")
+  local tabpage = lifecycle.find_tabpage_by_buffer(bufnr)
+  local session = tabpage and lifecycle.get_session(tabpage)
+  if not session then
+    return nil
+  end
+
+  local side = session.original_bufnr == bufnr and "original" or session.modified_bufnr == bufnr and "modified" or nil
+  if not side then
+    return nil
+  end
+
+  return {
+    tabpage = tabpage,
+    side = side,
+    git_root = session.git_root,
+    path = side == "original" and session.original_path or session.modified_path,
+  }
+end
+
 -- Navigate to next hunk in the current diff view
 -- Returns true if navigation succeeded, false otherwise
 function M.next_hunk()
