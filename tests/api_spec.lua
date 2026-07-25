@@ -52,9 +52,9 @@ describe("Public API", function()
         return {
           git_root = "/repo",
           original_bufnr = 10,
-          original_path = "before.lua",
+          original = { absolute = "/repo/before.lua" },
           modified_bufnr = 11,
-          modified_path = "after.lua",
+          modified = { absolute = "/repo/after.lua" },
         }
       end
 
@@ -63,8 +63,8 @@ describe("Public API", function()
       lifecycle.find_tabpage_by_buffer = original_find_tabpage
       lifecycle.get_session = original_get_session
 
-      assert.are.same({ tabpage = 7, side = "original", git_root = "/repo", path = "before.lua" }, original)
-      assert.are.same({ tabpage = 7, side = "modified", git_root = "/repo", path = "after.lua" }, modified)
+      assert.are.same({ tabpage = 7, side = "original", git_root = "/repo", path = "/repo/before.lua" }, original)
+      assert.are.same({ tabpage = 7, side = "modified", git_root = "/repo", path = "/repo/after.lua" }, modified)
     end)
   end)
 

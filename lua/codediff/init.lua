@@ -27,11 +27,12 @@ function M.get_diff_context(bufnr)
     return nil
   end
 
+  local ref = side == "original" and session.original or session.modified
   return {
     tabpage = tabpage,
     side = side,
     git_root = session.git_root,
-    path = side == "original" and session.original_path or session.modified_path,
+    path = ref and ref.absolute or nil,
   }
 end
 
