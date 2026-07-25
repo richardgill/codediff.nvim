@@ -709,13 +709,20 @@ git.get_git_root("/path/to/file.lua", function(err, git_root)
 end)
 ```
 
+### Diff View Integrations
+
+`require("codediff").get_diff_context(bufnr)` returns the buffer's `tabpage`, `side`, `git_root`, and `path` when it belongs to a diff view.
+
+`require("codediff").render_aligned_modified_virtual_lines(opts)` places caller-owned virtual lines in the modified buffer and balancing filler in the original buffer. It returns `false` when the tab is not an active two-pane side-by-side diff. `opts` contains `tabpage`, zero-based `line`, `namespace`, `virt_lines`, and optional `priority`.
+
 ### User Autocmd Events
 
 CodeDiff emits `User` autocmd events at key lifecycle points, allowing you to customize behavior without config flags:
 
 | Event | When | Data |
 |-------|------|------|
-| `CodeDiffOpen` | After diff view is fully ready | `tabpage`, `mode` |
+| `CodeDiffOpen` | After the diff tab opens | `tabpage`, `mode` |
+| `CodeDiffViewUpdated` | After diff buffers render or the selected file changes | `tabpage` |
 | `CodeDiffClose` | Before cleanup starts | `tabpage`, `mode` |
 | `CodeDiffFileSelect` | When a file is selected in explorer | `tabpage`, `path`, `status` |
 
