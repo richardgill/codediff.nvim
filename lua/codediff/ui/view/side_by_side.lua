@@ -32,6 +32,14 @@ local setup_auto_refresh = render.setup_auto_refresh
 local setup_conflict_result_window = conflict_window.setup_conflict_result_window
 local setup_all_keymaps = view_keymaps.setup_all_keymaps
 
+local function emit_view_updated(tabpage)
+  vim.api.nvim_exec_autocmds("User", {
+    pattern = "CodeDiffViewUpdated",
+    modeline = false,
+    data = { tabpage = tabpage },
+  })
+end
+
 -- ============================================================================
 -- Create
 -- ============================================================================
@@ -260,6 +268,7 @@ function M.create(session_config, filetype, on_ready)
                 conflict.setup_keymaps(tabpage)
               end
 
+              emit_view_updated(tabpage)
               -- Signal that view is ready
               if on_ready then
                 on_ready()
@@ -315,6 +324,7 @@ function M.create(session_config, filetype, on_ready)
           -- Setup auto-sync on file switch (after session is complete!)
           lifecycle.setup_auto_sync_on_file_switch(tabpage, original_is_virtual, modified_is_virtual)
 
+          emit_view_updated(tabpage)
           -- Signal that view is ready
           if on_ready then
             on_ready()
@@ -529,6 +539,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
               setup_all_keymaps(tabpage, original_info.bufnr, modified_info.bufnr, is_explorer_mode)
               local conflict = require("codediff.ui.conflict")
               conflict.setup_keymaps(tabpage)
+              emit_view_updated(tabpage)
             end
           end
         end)
@@ -563,6 +574,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
         if saved_current_win and vim.api.nvim_win_is_valid(saved_current_win) then
           vim.api.nvim_set_current_win(saved_current_win)
         end
+        emit_view_updated(tabpage)
       end
     end
   end
@@ -838,6 +850,7 @@ local function show_single_file(tabpage, opts)
   if keep_win and vim.api.nvim_win_is_valid(keep_win) then
     welcome_window.sync_later(keep_win)
   end
+  emit_view_updated(tabpage)
 end
 
 -- Load a real file from disk, return bufnr
