@@ -102,6 +102,57 @@ describe("Move annotation virt_lines", function()
     assert.is_true(#lines_diff.moves >= 1, "Should detect at least 1 move")
   end)
 
+  it("renders external virtual lines with balancing filler", function()
+    local left_buf, right_buf, lines_diff = setup_move_buffers()
+    local lifecycle = require("codediff.ui.lifecycle")
+    local original_get_session = lifecycle.get_session
+    lifecycle.get_session = function()
+      return {
+        original_bufnr = left_buf,
+        modified_bufnr = right_buf,
+        layout = "side-by-side",
+        stored_diff_result = lines_diff,
+      }
+    end
+    local namespace = vim.api.nvim_create_namespace("codediff-external-annotation-test")
+
+    local rendered = require("codediff.ui.move").render_aligned_modified_virtual_lines({
+      line = 0,
+      namespace = namespace,
+      virt_lines = { { { "note: inspect this", "DiagnosticInfo" } } },
+    })
+    lifecycle.get_session = original_get_session
+
+    assert.is_true(rendered)
+    local annotation_marks = collect_virt_line_marks(right_buf, namespace)
+    local filler_marks = collect_virt_line_marks(left_buf, namespace)
+    assert.are.equal("note: inspect this", annotation_marks[1].texts[1])
+    assert.is_truthy(filler_marks[1].texts[1]:find("╱", 1, true))
+
+    vim.api.nvim_buf_delete(left_buf, { force = true })
+    vim.api.nvim_buf_delete(right_buf, { force = true })
+  end)
+
+  it("leaves unaligned layouts to the caller", function()
+    local lifecycle = require("codediff.ui.lifecycle")
+    local original_get_session = lifecycle.get_session
+    local session = { layout = "inline", stored_diff_result = { changes = {} } }
+    lifecycle.get_session = function()
+      return session
+    end
+    local opts = {
+      line = 0,
+      namespace = vim.api.nvim_create_namespace("codediff-unaligned-annotation-test"),
+      virt_lines = { { { "note: inspect this", "DiagnosticInfo" } } },
+    }
+
+    assert.is_false(require("codediff.ui.move").render_aligned_modified_virtual_lines(opts))
+    session.layout = "side-by-side"
+    session.single_pane = true
+    assert.is_false(require("codediff.ui.move").render_aligned_modified_virtual_lines(opts))
+    lifecycle.get_session = original_get_session
+  end)
+
   -- 1. Annotation virt_line exists above moved block on original (left) side.
   it("places annotation virt_line above moved block on original side", function()
     local left_buf, right_buf, lines_diff = setup_move_buffers()
