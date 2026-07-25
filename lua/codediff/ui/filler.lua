@@ -60,7 +60,7 @@ function M.place(bufnr, after_line_0idx, count, opts)
     virt_lines[index] = line == "" and {} or { { line, "CodeDiffFiller" } }
   end
 
-  return vim.api.nvim_buf_set_extmark(bufnr, highlights.ns_filler, after_line_0idx, 0, {
+  return vim.api.nvim_buf_set_extmark(bufnr, opts.namespace or highlights.ns_filler, after_line_0idx, 0, {
     virt_lines = virt_lines,
     virt_lines_above = above,
     priority = opts.priority,

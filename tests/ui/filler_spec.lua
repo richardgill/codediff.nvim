@@ -46,6 +46,17 @@ describe("Configurable filler rendering", function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
 
+  it("can place fillers in a caller namespace", function()
+    local bufnr = create_buffer()
+    local namespace = vim.api.nvim_create_namespace("codediff-filler-caller-test")
+    filler.place(bufnr, 0, 1, { namespace = namespace })
+
+    local marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })
+    assert.equal(1, #marks)
+    assert.equal(string.rep("╱", 500), marks[1][4].virt_lines[1][1][1])
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
   it("keeps blank alignment rows when filler text is empty", function()
     config.setup({ diff = { filler_text = "" } })
     local bufnr = create_buffer()

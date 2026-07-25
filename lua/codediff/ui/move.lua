@@ -160,9 +160,44 @@ local function place_annotation(ann_bufnr, filler_bufnr, ann_line, label, change
   })
 end
 
+local function place_aligned_modified_filler(session, opts)
+  local filler_bufnr = session.original_bufnr
+  local changes = session.stored_diff_result.changes or {}
+  local annotation_line = opts.line + 1
+  local change = find_change_for_mod(annotation_line, changes)
+  local filler_anchor, filler_above = compute_filler_position(annotation_line, change, false, changes, vim.api.nvim_buf_line_count(filler_bufnr))
+  pcall(filler_renderer.place, filler_bufnr, filler_anchor, #opts.virt_lines, {
+    above = filler_above,
+    priority = opts.priority or 300,
+    namespace = opts.namespace,
+  })
+end
+
 -- ============================================================================
 -- Public API
 -- ============================================================================
+
+function M.render_aligned_modified_virtual_lines(opts)
+  local lifecycle = require("codediff.ui.lifecycle")
+  local session = lifecycle.get_session(opts.tabpage or vim.api.nvim_get_current_tabpage())
+  if not session or session.layout ~= "side-by-side" or session.single_pane or not session.stored_diff_result then
+    return false
+  end
+
+  local ann_bufnr = session.modified_bufnr
+  local filler_bufnr = session.original_bufnr
+  if not ann_bufnr or not filler_bufnr or not vim.api.nvim_buf_is_valid(ann_bufnr) or not vim.api.nvim_buf_is_valid(filler_bufnr) then
+    return false
+  end
+
+  pcall(vim.api.nvim_buf_set_extmark, ann_bufnr, opts.namespace, opts.line, 0, {
+    virt_lines = opts.virt_lines,
+    virt_lines_above = true,
+    priority = opts.priority or 300,
+  })
+  place_aligned_modified_filler(session, opts)
+  return true
+end
 
 --- Render all moved code indicators on both buffers.
 --- @param left_bufnr number original buffer
