@@ -198,6 +198,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
         restore = "X",      -- Discard changes (restore file)
         toggle_changes = "gu",  -- Toggle Changes (unstaged) group visibility
         toggle_staged = "gs",   -- Toggle Staged Changes group visibility
+        custom = {}, -- Additional { key, desc, callback } explorer keymaps
         -- Fold keymaps (Vim-style)
         fold_open = "zo",           -- Open fold (expand current node)
         fold_open_recursive = "zO", -- Open fold recursively (expand all descendants)
@@ -368,6 +369,40 @@ Three strategies are available:
    ```
 
 Custom Lua matcher callbacks are not supported.
+
+#### Custom explorer keymaps
+
+`keymaps.explorer.custom` adds buffer-local mappings to the Explorer. Each mapping has `key`, `desc`, and `callback`:
+
+```lua
+require("codediff").setup({
+  keymaps = {
+    explorer = {
+      custom = {
+        {
+          key = "gy",
+          desc = "Copy explorer path",
+          callback = function(ctx)
+            if ctx.entry.path then
+              vim.fn.setreg("+", ctx.entry.path)
+            end
+          end,
+        },
+      },
+    },
+  },
+})
+```
+
+The callback receives the selected Explorer row as `ctx.entry`:
+
+```lua
+{ kind = "file", path, old_path, group, status, stats }
+{ kind = "directory", name, path, group, stats, files }
+{ kind = "group", name, group, stats, files }
+```
+
+Directory and group `files` use the normalized `{ path, old_path, group, status, stats }` shape. `stats` is `nil` when line statistics are disabled. `ctx.redraw()` renders the existing tree again without rebuilding nodes, changing selection or fold state, or running Git. `ctx.refresh()` starts the normal asynchronous Explorer refresh. Both functions become no-ops after the Explorer closes. Custom mappings override matching built-ins, appear in the `g?` keymap help, and are restored or removed with the Explorer lifecycle.
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 
