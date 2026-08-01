@@ -19,6 +19,7 @@ M.clear_highlights = state.clear_buffer_highlights
 
 -- Delegate to session module
 M.create_session = session.create_session
+M.hide_tabline = session.hide_tabline
 
 -- Delegate to cleanup module
 M.setup_autocmds = cleanup.setup_autocmds

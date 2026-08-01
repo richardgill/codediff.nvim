@@ -34,6 +34,10 @@ local function cleanup_diff(tabpage)
     },
   })
 
+  -- Stop session callbacks before restoring UI so teardown events cannot re-hide it
+  pcall(vim.api.nvim_del_augroup_by_name, "codediff_lifecycle_tab_" .. tabpage)
+  session.restore_tabline(tabpage)
+
   -- Disable auto-refresh for both buffers
   local auto_refresh = require("codediff.ui.auto_refresh")
   auto_refresh.disable(diff.original_bufnr)
@@ -117,7 +121,6 @@ local function cleanup_diff(tabpage)
   diff.conflict_files = {}
 
   -- Clear tab-specific autocmd groups
-  pcall(vim.api.nvim_del_augroup_by_name, "codediff_lifecycle_tab_" .. tabpage)
   pcall(vim.api.nvim_del_augroup_by_name, "codediff_working_sync_" .. tabpage)
   pcall(vim.api.nvim_del_augroup_by_name, "CodeDiffConflictSigns_" .. tabpage)
 

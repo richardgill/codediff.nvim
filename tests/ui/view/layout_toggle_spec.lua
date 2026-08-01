@@ -201,6 +201,7 @@ describe("Layout toggle", function()
   local repo
   local paths = {}
   local original_cwd
+  local original_showtabline
 
   local function track(path)
     table.insert(paths, path)
@@ -222,6 +223,7 @@ describe("Layout toggle", function()
     repo = nil
     paths = {}
     original_cwd = vim.fn.getcwd()
+    original_showtabline = vim.o.showtabline
   end)
 
   after_each(function()
@@ -236,6 +238,57 @@ describe("Layout toggle", function()
       repo.cleanup()
     end
     vim.fn.chdir(original_cwd)
+    vim.o.showtabline = original_showtabline
+  end)
+
+  it("hides the path tabline across file and layout switches, then restores it", function()
+    vim.o.showtabline = 2
+    local previous_tab = vim.api.nvim_get_current_tabpage()
+    local tabpage, left, right = create_standalone_diff({ "one", "left" }, { "one", "right" })
+    track(left)
+    track(right)
+
+    assert.equals(0, vim.o.showtabline)
+
+    local next_left = track(temp_file("layout_toggle_next_left.txt", { "before" }))
+    local next_right = track(temp_file("layout_toggle_next_right.txt", { "after" }))
+    vim.o.showtabline = 2
+    assert.is_true(view.update(tabpage, {
+      mode = "standalone",
+      original = path.make_ref(next_left, nil),
+      modified = path.make_ref(next_right, nil),
+    }, false))
+    wait_for(tabpage, function(session)
+      return session.original.absolute == next_left and session.modified.absolute == next_right and session.stored_diff_result ~= nil
+    end, "File switch should finish rendering")
+    assert.equals(0, vim.o.showtabline)
+
+    vim.o.showtabline = 2
+    assert.is_true(view.toggle_layout(tabpage))
+    wait_for(tabpage, function(session)
+      return session.layout == "inline" and session.original_win == session.modified_win
+    end, "Layout switch should finish rendering")
+    assert.equals(0, vim.o.showtabline)
+
+    vim.api.nvim_set_current_tabpage(previous_tab)
+    assert.equals(2, vim.o.showtabline)
+    vim.api.nvim_set_current_tabpage(tabpage)
+    assert.equals(0, vim.o.showtabline)
+
+    local showtabline_on_close
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "CodeDiffClose",
+      once = true,
+      callback = function()
+        showtabline_on_close = vim.o.showtabline
+      end,
+    })
+    lifecycle.cleanup(tabpage)
+    assert.equals(0, showtabline_on_close)
+    assert.equals(2, vim.o.showtabline)
+
+    vim.cmd("tabclose!")
+    assert.equals(2, vim.o.showtabline)
   end)
 
   it("toggles a normal diff per session without changing the default layout", function()
