@@ -1,4 +1,4 @@
-From 7ce6854a94188e0df7c7b5dc7844c76ebae1c6f6 Mon Sep 17 00:00:00 2001
+From f39023a7c1e643b198c56a485d311460ce3243d6 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 16:30:00 +0100
 Subject: [PATCH] fix: build fork native library locally
@@ -18,12 +18,12 @@ Subject: [PATCH] fix: build fork native library locally
  create mode 100644 tests/core/local_builder_spec.lua
 
 diff --git a/README.md b/README.md
-index 0bb0c82..d7c4e6d 100644
+index 19ab066..88ab0f4 100644
 --- a/README.md
 +++ b/README.md
-@@ -381,7 +381,7 @@ The callback receives the selected Explorer row as `ctx.entry`:
+@@ -404,7 +404,7 @@ The callback receives the selected Explorer row as `ctx.entry`:
  
- Directory and group `files` use the normalized `{ path, old_path, group, status, stats }` shape. `stats` is `nil` when line statistics are disabled. `ctx.redraw()` renders the existing tree again without rebuilding nodes, changing selection or fold state, or running Git. `ctx.refresh()` starts the normal asynchronous Explorer refresh. Both functions become no-ops after the Explorer closes. Custom mappings are installed after built-in Explorer mappings, so matching keys intentionally override them.
+ Directory and group `files` use the normalized `{ path, old_path, group, status, stats }` shape. `stats` is `nil` when line statistics are disabled. `ctx.redraw()` renders the existing tree again without rebuilding nodes, changing selection or fold state, or running Git. `ctx.refresh()` starts the normal asynchronous Explorer refresh. Both functions become no-ops after the Explorer closes. Custom mappings override matching built-ins, appear in the `g?` keymap help, and are restored or removed with the Explorer lifecycle.
  
 -The C library will be downloaded automatically on first use. No `build` step needed!
 +The C library is built locally and cached automatically on first use.

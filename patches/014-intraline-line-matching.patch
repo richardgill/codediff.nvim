@@ -1,4 +1,4 @@
-From e27dbaba08ed248565e734a1e2ade9b4a85af064 Mon Sep 17 00:00:00 2001
+From ebff7363830589d7461829149dff0d2791442d2f Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:25:25 +0100
 Subject: [PATCH] Added native line matcher implementation and tests
@@ -25,8 +25,8 @@ Subject: [PATCH] Added native line matcher implementation and tests
  lua/codediff/ui/core.lua                     |  174 ++-
  lua/codediff/ui/merge_alignment.lua          |    4 +-
  tests/core/line_matcher_spec.lua             |  215 ++++
- tests/ui/core_spec.lua                       |   23 +
  tests/ui/inline_spec.lua                     |    4 +-
+ tests/ui/render_core_spec.lua                |   23 +
  23 files changed, 1614 insertions(+), 807 deletions(-)
  create mode 100644 libvscode-diff/include/line_matcher.h
  create mode 100644 libvscode-diff/src/line_matcher.c
@@ -34,7 +34,7 @@ Subject: [PATCH] Added native line matcher implementation and tests
  create mode 100644 tests/core/line_matcher_spec.lua
 
 diff --git a/README.md b/README.md
-index f26566e..edb07ae 100644
+index ca13382..9c3bd5a 100644
 --- a/README.md
 +++ b/README.md
 @@ -90,6 +90,10 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -48,7 +48,7 @@ index f26566e..edb07ae 100644
        hide_merge_artifacts = false,       -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
        original_position = "left",         -- Position of original (old) content: "left" or "right"
        conflict_ours_position = "right",   -- Position of ours (:2) in conflict view: "left" or "right"
-@@ -292,6 +296,55 @@ require("codediff").setup({
+@@ -315,6 +319,55 @@ require("codediff").setup({
  })
  ```
  
@@ -2863,10 +2863,32 @@ index 0000000..f72880c
 +    end
 +  end)
 +end)
-diff --git a/tests/ui/core_spec.lua b/tests/ui/core_spec.lua
-index d269b05..58a27ea 100644
---- a/tests/ui/core_spec.lua
-+++ b/tests/ui/core_spec.lua
+diff --git a/tests/ui/inline_spec.lua b/tests/ui/inline_spec.lua
+index 35cfce0..69526ec 100644
+--- a/tests/ui/inline_spec.lua
++++ b/tests/ui/inline_spec.lua
+@@ -105,7 +105,7 @@ describe("Inline Diff Rendering", function()
+     local buf = vim.api.nvim_create_buf(false, true)
+ 
+     local original = { "hello world" }
+-    local modified = { "hello earth" }
++    local modified = { "hello whirl" }
+ 
+     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
+ 
+@@ -235,7 +235,7 @@ describe("Inline Diff Rendering", function()
+     local buf = vim.api.nvim_create_buf(false, true)
+ 
+     local original = { "hello world" }
+-    local modified = { "hello earth" }
++    local modified = { "hello whirl" }
+ 
+     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
+ 
+diff --git a/tests/ui/render_core_spec.lua b/tests/ui/render_core_spec.lua
+index 98d8fdb..a2755e2 100644
+--- a/tests/ui/render_core_spec.lua
++++ b/tests/ui/render_core_spec.lua
 @@ -131,6 +131,29 @@ describe("Render Core", function()
      vim.api.nvim_buf_delete(right_buf, {force = true})
    end)
@@ -2897,25 +2919,3 @@ index d269b05..58a27ea 100644
    -- Test 5: Character-level diff highlights
    it("Renders character-level differences within modified lines", function()
      local left_buf = vim.api.nvim_create_buf(false, true)
-diff --git a/tests/ui/inline_spec.lua b/tests/ui/inline_spec.lua
-index 35cfce0..69526ec 100644
---- a/tests/ui/inline_spec.lua
-+++ b/tests/ui/inline_spec.lua
-@@ -105,7 +105,7 @@ describe("Inline Diff Rendering", function()
-     local buf = vim.api.nvim_create_buf(false, true)
- 
-     local original = { "hello world" }
--    local modified = { "hello earth" }
-+    local modified = { "hello whirl" }
- 
-     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
- 
-@@ -235,7 +235,7 @@ describe("Inline Diff Rendering", function()
-     local buf = vim.api.nvim_create_buf(false, true)
- 
-     local original = { "hello world" }
--    local modified = { "hello earth" }
-+    local modified = { "hello whirl" }
- 
-     vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
- 

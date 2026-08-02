@@ -1,7 +1,7 @@
 [stack]
-upstream = 26e5ff7465e8c0471c670a05afe09566d50cd051
-expectedHead = 11d327e56c7002394a889771145ee66ee71954bd
-expectedTree = eb21d7a690f85b8a030b6272c570388ce0197393
+upstream = 31510a9b34c032b6fe98fc158d4066702f68cff2
+expectedHead = 203657d7a062af9a7b0d62bc9f71c3b332631f63
+expectedTree = aa193c0a8fa1093a4bfa4b21403a9a289775f6b2
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -28,7 +28,7 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/458
 [patch "explorer-custom-keymaps"]
 description = feat(explorer): custom keymaps
 file = patches/022-explorer-custom-keymaps.patch
-originCommit = 190653b1d0638601f22be2390bebfa08f2240b04
+originCommit = 35f3f81d58873503214f2de1a1335686f056d724
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/492
 
 [patch "intraline-line-matching"]

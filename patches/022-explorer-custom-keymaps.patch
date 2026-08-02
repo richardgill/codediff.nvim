@@ -1,21 +1,23 @@
-From 7e5a77833ff67fdb8cc91595d573b8f1b444cb4b Mon Sep 17 00:00:00 2001
+From c7403b18bfb8a6caaf0da51a8728a9dcb4e97980 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Wed, 29 Jul 2026 06:43:18 +0100
 Subject: [PATCH] feat(explorer): custom keymaps
 
 ---
  README.md                                 |  35 +++
- doc/codediff.txt                          |  40 ++++
+ doc/codediff.txt                          |  41 +++
  doc/tags                                  |   1 +
  lua/codediff/config.lua                   |   1 +
- lua/codediff/ui/explorer/keymaps.lua      |  42 ++++
+ lua/codediff/ui/explorer/keymaps.lua      |  41 ++-
  lua/codediff/ui/explorer/nodes.lua        |  45 +++-
- tests/ui/explorer/custom_keymaps_spec.lua | 249 ++++++++++++++++++++++
- 7 files changed, 406 insertions(+), 7 deletions(-)
+ lua/codediff/ui/keymap_help.lua           |  81 ++++--
+ tests/keymap/keymap_help_spec.lua         |  22 ++
+ tests/ui/explorer/custom_keymaps_spec.lua | 289 ++++++++++++++++++++++
+ 9 files changed, 520 insertions(+), 36 deletions(-)
  create mode 100644 tests/ui/explorer/custom_keymaps_spec.lua
 
 diff --git a/README.md b/README.md
-index efb1036..f19e403 100644
+index 8029a2b..b8e68a7 100644
 --- a/README.md
 +++ b/README.md
 @@ -198,6 +198,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -26,7 +28,7 @@ index efb1036..f19e403 100644
          -- Fold keymaps (Vim-style)
          fold_open = "zo",           -- Open fold (expand current node)
          fold_open_recursive = "zO", -- Open fold recursively (expand all descendants)
-@@ -346,6 +347,40 @@ Three strategies are available:
+@@ -369,6 +370,40 @@ Three strategies are available:
  
  Custom Lua matcher callbacks are not supported.
  
@@ -62,13 +64,13 @@ index efb1036..f19e403 100644
 +{ kind = "group", name, group, stats, files }
 +```
 +
-+Directory and group `files` use the normalized `{ path, old_path, group, status, stats }` shape. `stats` is `nil` when line statistics are disabled. `ctx.redraw()` renders the existing tree again without rebuilding nodes, changing selection or fold state, or running Git. `ctx.refresh()` starts the normal asynchronous Explorer refresh. Both functions become no-ops after the Explorer closes. Custom mappings are installed after built-in Explorer mappings, so matching keys intentionally override them.
++Directory and group `files` use the normalized `{ path, old_path, group, status, stats }` shape. `stats` is `nil` when line statistics are disabled. `ctx.redraw()` renders the existing tree again without rebuilding nodes, changing selection or fold state, or running Git. `ctx.refresh()` starts the normal asynchronous Explorer refresh. Both functions become no-ops after the Explorer closes. Custom mappings override matching built-ins, appear in the `g?` keymap help, and are restored or removed with the Explorer lifecycle.
 +
  The C library will be downloaded automatically on first use. No `build` step needed!
  
  ### Native gutter signs
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 0db59c0..ad5544c 100644
+index 0db59c0..8d7cc13 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -383,6 +383,7 @@ Setup entry point:
@@ -79,7 +81,7 @@ index 0db59c0..ad5544c 100644
          fold_open = "zo",
          fold_open_recursive = "zO",
          fold_close = "zc",
-@@ -507,6 +508,45 @@ Example: replace only group rows and right-align the file count:
+@@ -507,6 +508,46 @@ Example: replace only group rows and right-align the file count:
    })
  <
  
@@ -119,8 +121,9 @@ index 0db59c0..ad5544c 100644
 +statistics are disabled. `ctx.redraw()` renders the existing tree again without
 +rebuilding nodes, changing selection or fold state, or running Git.
 +`ctx.refresh()` starts the normal asynchronous Explorer refresh. Both functions
-+become no-ops after the Explorer closes. Custom mappings are installed after
-+built-in Explorer mappings, so matching keys intentionally override them.
++become no-ops after the Explorer closes. Custom mappings override matching
++built-ins, appear in the `g?` keymap help, and are restored or removed with the
++Explorer lifecycle.
 +
  ==============================================================================
  NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
@@ -150,11 +153,11 @@ index 4bcd573..6898b2e 100644
        fold_open = "zo", -- Open fold (expand current node)
        fold_open_recursive = "zO", -- Open fold recursively (expand current node and all descendants)
 diff --git a/lua/codediff/ui/explorer/keymaps.lua b/lua/codediff/ui/explorer/keymaps.lua
-index 4256c02..1ce6745 100644
+index 66cb09d..4c2c4c3 100644
 --- a/lua/codediff/ui/explorer/keymaps.lua
 +++ b/lua/codediff/ui/explorer/keymaps.lua
-@@ -2,10 +2,50 @@
- local config = require("codediff.config")
+@@ -3,10 +3,42 @@ local config = require("codediff.config")
+ local resolve = require("codediff.keymap.resolve")
  local actions_module = require("codediff.ui.explorer.actions")
  local refresh_module = require("codediff.ui.explorer.refresh")
 +local nodes_module = require("codediff.ui.explorer.nodes")
@@ -182,33 +185,39 @@ index 4256c02..1ce6745 100644
 +  }
 +end
 +
-+local function setup_custom_keymaps(explorer, custom_keymaps, map_options)
++local function setup_custom_keymaps(explorer, custom_keymaps, panel_map)
 +  for _, keymap in ipairs(custom_keymaps or {}) do
-+    vim.keymap.set(
-+      "n",
-+      keymap.key,
-+      function()
-+        local node = explorer.tree:get_node()
-+        if node then
-+          keymap.callback(custom_keymap_context(explorer, node))
-+        end
-+      end,
-+      vim.tbl_extend("force", map_options, {
-+        buffer = explorer.bufnr,
-+        desc = keymap.desc,
-+      })
-+    )
++    panel_map(keymap.key, function()
++      local node = explorer.tree:get_node()
++      if node then
++        keymap.callback(custom_keymap_context(explorer, node))
++      end
++    end, keymap.desc, { priority = 1 })
 +  end
 +end
 +
  -- Setup keymaps for explorer panel
  -- @param explorer: explorer object with tree, split, git_root, on_file_select, etc.
  function M.setup(explorer)
-@@ -179,6 +219,8 @@ function M.setup(explorer)
-     bufnr = split.bufnr,
+@@ -21,8 +53,9 @@ function M.setup(explorer)
+   -- leak into user buffers and must survive tab switches (suspendable=false).
+   -- Required lazily to avoid a module cycle through the lifecycle package.
+   local lifecycle = require("codediff.ui.lifecycle")
+-  local function panel_map(lhs, rhs, desc)
+-    lifecycle.set_buf_keymap(explorer.tabpage, split.bufnr, "n", lhs, rhs, vim.tbl_extend("force", map_options, { desc = desc }), { suspendable = false })
++  local function panel_map(lhs, rhs, desc, meta)
++    local claim = vim.tbl_extend("force", { suspendable = false }, meta or {})
++    lifecycle.set_buf_keymap(explorer.tabpage, split.bufnr, "n", lhs, rhs, vim.tbl_extend("force", map_options, { desc = desc }), claim)
+   end
+ 
+   -- Toggle expand/collapse or select file
+@@ -189,6 +222,10 @@ function M.setup(explorer)
+     tabpage = explorer.tabpage,
    })
  
-+  setup_custom_keymaps(explorer, explorer_keymaps.custom, map_options)
++  lifecycle.begin_keymap_scope(explorer.tabpage, "explorer-custom")
++  setup_custom_keymaps(explorer, explorer_keymaps.custom, panel_map)
++  lifecycle.end_keymap_scope(explorer.tabpage, "explorer-custom")
 +
    -- Note: next_file/prev_file keymaps are set via view/keymaps.lua:setup_all_keymaps()
    -- which uses set_tab_keymap to set them on all buffers including explorer
@@ -279,16 +288,149 @@ index dae0e57..2e4ae07 100644
  -- Prepare node for rendering (format display)
  function M.prepare_node(node, max_width, selected_path, selected_group)
    local data = node.data or {}
+diff --git a/lua/codediff/ui/keymap_help.lua b/lua/codediff/ui/keymap_help.lua
+index 37758b0..aa64754 100644
+--- a/lua/codediff/ui/keymap_help.lua
++++ b/lua/codediff/ui/keymap_help.lua
+@@ -47,6 +47,59 @@ local function section(title, entries, is_bound)
+   return { title = title, items = items }
+ end
+ 
++local function explorer_entries(keymaps)
++  local custom = type(keymaps.custom) == "table" and keymaps.custom or {}
++  local overridden = {}
++  for index, mapping in ipairs(custom) do
++    local key = normalize.canonical(mapping.key)
++    if key then
++      overridden[key] = index
++    end
++  end
++
++  local builtins = {
++    { keymaps.select, "Select / toggle expand" },
++    { MOUSE_SELECT, "Select file (double click)" },
++    { "j", "Move down / auto-open file" },
++    { "k", "Move up / auto-open file" },
++    { "<Down>", "Move down / auto-open file" },
++    { "<Up>", "Move up / auto-open file" },
++    { keymaps.hover, "Show full path" },
++    { keymaps.refresh, "Refresh explorer" },
++    { keymaps.toggle_view_mode, "Toggle list/tree view" },
++    { keymaps.stage_all, "Stage all files" },
++    { keymaps.unstage_all, "Unstage all files" },
++    { keymaps.restore, "Discard changes to file" },
++    { keymaps.toggle_changes, "Toggle Changes visibility" },
++    { keymaps.toggle_staged, "Toggle Staged visibility" },
++    { keymaps.fold_open, "Open fold" },
++    { keymaps.fold_open_recursive, "Open fold recursively" },
++    { keymaps.fold_close, "Close fold" },
++    { keymaps.fold_close_recursive, "Close fold recursively" },
++    { keymaps.fold_toggle, "Toggle fold" },
++    { keymaps.fold_toggle_recursive, "Toggle fold recursively" },
++    { keymaps.fold_open_all, "Open all folds" },
++    { keymaps.fold_close_all, "Close all folds" },
++  }
++
++  local entries = {}
++  for _, entry in ipairs(builtins) do
++    local keys = vim.tbl_filter(function(key)
++      return overridden[normalize.canonical(key)] == nil
++    end, normalize.key_list(entry[1]))
++    if #keys > 0 then
++      table.insert(entries, { keys, entry[2] })
++    end
++  end
++  for index, mapping in ipairs(custom) do
++    local key = normalize.canonical(mapping.key)
++    if key and overridden[key] == index then
++      table.insert(entries, { mapping.key, mapping.desc })
++    end
++  end
++  return entries
++end
++
+ -- Build sections for the current session.
+ --
+ -- Section inclusion follows the session shape (a standalone diff has no
+@@ -85,33 +138,7 @@ local function build_sections(keymaps, is_bound, shape)
+ 
+   if shape.explorer then
+     local ekm = keymaps.explorer
+-    table.insert(
+-      sections,
+-      section("EXPLORER", {
+-        { ekm.select, "Select / toggle expand" },
+-        { MOUSE_SELECT, "Select file (double click)" },
+-        { "j", "Move down / auto-open file" },
+-        { "k", "Move up / auto-open file" },
+-        { "<Down>", "Move down / auto-open file" },
+-        { "<Up>", "Move up / auto-open file" },
+-        { ekm.hover, "Show full path" },
+-        { ekm.refresh, "Refresh explorer" },
+-        { ekm.toggle_view_mode, "Toggle list/tree view" },
+-        { ekm.stage_all, "Stage all files" },
+-        { ekm.unstage_all, "Unstage all files" },
+-        { ekm.restore, "Discard changes to file" },
+-        { ekm.toggle_changes, "Toggle Changes visibility" },
+-        { ekm.toggle_staged, "Toggle Staged visibility" },
+-        { ekm.fold_open, "Open fold" },
+-        { ekm.fold_open_recursive, "Open fold recursively" },
+-        { ekm.fold_close, "Close fold" },
+-        { ekm.fold_close_recursive, "Close fold recursively" },
+-        { ekm.fold_toggle, "Toggle fold" },
+-        { ekm.fold_toggle_recursive, "Toggle fold recursively" },
+-        { ekm.fold_open_all, "Open all folds" },
+-        { ekm.fold_close_all, "Close all folds" },
+-      }, is_bound)
+-    )
++    table.insert(sections, section("EXPLORER", explorer_entries(ekm), is_bound))
+   end
+ 
+   if shape.history then
+diff --git a/tests/keymap/keymap_help_spec.lua b/tests/keymap/keymap_help_spec.lua
+index 653e8dd..895d056 100644
+--- a/tests/keymap/keymap_help_spec.lua
++++ b/tests/keymap/keymap_help_spec.lua
+@@ -270,6 +270,28 @@ describe("keymap help popup", function()
+     cleanup()
+   end)
+ 
++  it("shows custom Explorer mappings in place of overridden built-ins", function()
++    local tabpage, cleanup = open_explorer({
++      keymaps = {
++        explorer = {
++          custom = {
++            {
++              key = "R",
++              desc = "Inspect explorer entry",
++              callback = function() end,
++            },
++          },
++        },
++      },
++    })
++
++    local rendered = table.concat(help_lines(tabpage), "\n")
++    assert.is_truthy(rendered:find("Inspect explorer entry", 1, true))
++    assert.is_nil(rendered:find("Refresh explorer", 1, true))
++
++    cleanup()
++  end)
++
+   it("does not advertise gm when move detection is off", function()
+     -- compute_moves defaults to false, so align_move is never bound.
+     local tabpage, cleanup = open_standalone()
 diff --git a/tests/ui/explorer/custom_keymaps_spec.lua b/tests/ui/explorer/custom_keymaps_spec.lua
 new file mode 100644
-index 0000000..13e3cac
+index 0000000..84e371d
 --- /dev/null
 +++ b/tests/ui/explorer/custom_keymaps_spec.lua
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,289 @@
 +local Tree = require("codediff.ui.lib.tree")
 +local Line = require("codediff.ui.lib.line")
 +local config = require("codediff.config")
 +local keymaps = require("codediff.ui.explorer.keymaps")
++local lifecycle = require("codediff.ui.lifecycle")
 +local nodes = require("codediff.ui.explorer.nodes")
 +local refresh = require("codediff.ui.explorer.refresh")
 +local explorer_tree = require("codediff.ui.explorer.tree")
@@ -330,22 +472,30 @@ index 0000000..13e3cac
 +  roots[1]:expand()
 +  roots[1]._children[1]:expand()
 +  tree:render()
++  local tabpage = vim.api.nvim_get_current_tabpage()
++  local winid = vim.api.nvim_get_current_win()
++  local explorer = {
++    bufnr = bufnr,
++    winid = winid,
++    tabpage = tabpage,
++    split = { bufnr = bufnr },
++    tree = tree,
++  }
++  local empty_ref = { relative = "" }
++  lifecycle.create_session(tabpage, "explorer", nil, empty_ref, empty_ref, nil, nil, previous_bufnr, previous_bufnr, winid, winid, {})
++  lifecycle.set_explorer(tabpage, explorer)
++
 +  return {
 +    previous_bufnr = previous_bufnr,
 +    root = roots[1],
 +    directory = roots[1]._children[1],
 +    file = roots[1]._children[1]._children[2],
-+    explorer = {
-+      bufnr = bufnr,
-+      winid = vim.api.nvim_get_current_win(),
-+      tabpage = vim.api.nvim_get_current_tabpage(),
-+      split = { bufnr = bufnr },
-+      tree = tree,
-+    },
++    explorer = explorer,
 +  }
 +end
 +
 +local cleanup_explorer = function(fixture)
++  lifecycle.cleanup(fixture.explorer.tabpage)
 +  if vim.api.nvim_buf_is_valid(fixture.previous_bufnr) then
 +    vim.api.nvim_win_set_buf(0, fixture.previous_bufnr)
 +  end
@@ -449,6 +599,14 @@ index 0000000..13e3cac
 +    }
 +
 +    keymaps.setup(fixture.explorer)
++    lifecycle.begin_keymap_scope(fixture.explorer.tabpage, "view")
++    lifecycle.set_tab_keymap(fixture.explorer.tabpage, "n", "R", function()
++      refresh_calls = refresh_calls + 1
++    end, { desc = "Later built-in action" })
++    lifecycle.end_keymap_scope(fixture.explorer.tabpage, "view")
++    lifecycle.set_buf_keymap(fixture.explorer.tabpage, fixture.explorer.bufnr, "n", "R", function()
++      refresh_calls = refresh_calls + 1
++    end, { desc = "Later panel action" }, { suspendable = false })
 +    local mapping = vim.fn.maparg("R", "n", false, true)
 +    mapping.callback()
 +
@@ -456,6 +614,29 @@ index 0000000..13e3cac
 +    assert.equals(1, mapping.buffer)
 +    assert.equals(1, calls)
 +    assert.equals(0, refresh_calls)
++    cleanup_explorer(fixture)
++  end)
++
++  it("keeps panel ownership through suspension and restores the previous mapping on teardown", function()
++    local fixture = create_explorer()
++    vim.keymap.set("n", "x", function() end, { buffer = fixture.explorer.bufnr, desc = "Previous mapping" })
++    config.options.keymaps.explorer.custom = {
++      {
++        key = "x",
++        desc = "Custom panel action",
++        callback = function() end,
++      },
++    }
++
++    keymaps.setup(fixture.explorer)
++    assert.is_true(lifecycle.owns_keymap(fixture.explorer.tabpage, "x", "n", fixture.explorer.bufnr))
++    assert.equals("Custom panel action", vim.fn.maparg("x", "n", false, true).desc)
++
++    lifecycle.clear_tab_keymaps(fixture.explorer.tabpage)
++    assert.equals("Custom panel action", vim.fn.maparg("x", "n", false, true).desc)
++
++    lifecycle.dispose_keymaps(fixture.explorer.tabpage)
++    assert.equals("Previous mapping", vim.fn.maparg("x", "n", false, true).desc)
 +    cleanup_explorer(fixture)
 +  end)
 +
