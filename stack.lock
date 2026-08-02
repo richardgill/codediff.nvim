@@ -1,7 +1,7 @@
 [stack]
 upstream = 31510a9b34c032b6fe98fc158d4066702f68cff2
-expectedHead = 203657d7a062af9a7b0d62bc9f71c3b332631f63
-expectedTree = aa193c0a8fa1093a4bfa4b21403a9a289775f6b2
+expectedHead = 1f684e65ebb8b4750c3323a82c2cefcddf0c4094
+expectedTree = 917ea51e93c158f54e9f2e443e4859b78e6bd08d
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -10,12 +10,12 @@ noticePatch = fork-notice
 referencePatches =
     perf-improvements
     design-line-wrapping
+    pi-code-annotations
 patches =
     local-benchmarks
     intraline-line-matching
     native-gutter-signs
     explorer-custom-keymaps
-    pi-code-annotations
     local-native-build
     fork-notice
 

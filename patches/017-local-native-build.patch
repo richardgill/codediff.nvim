@@ -1,4 +1,4 @@
-From f39023a7c1e643b198c56a485d311460ce3243d6 Mon Sep 17 00:00:00 2001
+From 2a4024646e6713e4210bd5f592c4d2ad5bb3b696 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 16:30:00 +0100
 Subject: [PATCH] fix: build fork native library locally
@@ -18,7 +18,7 @@ Subject: [PATCH] fix: build fork native library locally
  create mode 100644 tests/core/local_builder_spec.lua
 
 diff --git a/README.md b/README.md
-index 19ab066..88ab0f4 100644
+index b8e68a7..7b25a73 100644
 --- a/README.md
 +++ b/README.md
 @@ -404,7 +404,7 @@ The callback receives the selected Explorer row as `ctx.entry`:
