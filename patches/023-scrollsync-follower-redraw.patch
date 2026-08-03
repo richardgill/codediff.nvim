@@ -1,15 +1,15 @@
-From f1c39190a8d712ead2143822fdbbcb3ed26c99bb Mon Sep 17 00:00:00 2001
+From 64bdd832266fa82ed583bbee9fd0552bf3770fb1 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
-Date: Mon, 3 Aug 2026 20:01:14 +0100
-Subject: [PATCH] fix(scrollsync): ignore follower redraw echoes
+Date: Mon, 3 Aug 2026 20:48:00 +0100
+Subject: [PATCH] fix(scrollsync): stabilize follower filler redraws
 
 ---
- lua/codediff/scrollsync.lua | 62 +++++++++++++++++++++++------
- tests/scrollsync_spec.lua   | 77 +++++++++++++++++++++++++++++++++++++
- 2 files changed, 128 insertions(+), 11 deletions(-)
+ lua/codediff/scrollsync.lua |  92 +++++++++++++++++++++++++++----
+ tests/scrollsync_spec.lua   | 107 +++++++++++++++++++++++++++++++++++-
+ 2 files changed, 184 insertions(+), 15 deletions(-)
 
 diff --git a/lua/codediff/scrollsync.lua b/lua/codediff/scrollsync.lua
-index 6f8bab7..ca1cd6a 100644
+index 6f8bab7..8124ffd 100644
 --- a/lua/codediff/scrollsync.lua
 +++ b/lua/codediff/scrollsync.lua
 @@ -154,6 +154,21 @@ local function win_view(w)
@@ -34,7 +34,30 @@ index 6f8bab7..ca1cd6a 100644
  function Group:_valid_wins()
    local out = {}
    for _, w in ipairs(self.wins) do
-@@ -182,6 +197,7 @@ function Group:refresh()
+@@ -173,15 +188,30 @@ function Group:_is_member(w)
+   return false
+ end
+ 
++function Group:_restore_scrolloff(w)
++  local saved = self.saved_scrolloff[w]
++  if saved == nil then
++    return
++  end
++  self.saved_scrolloff[w] = nil
++  if api.nvim_win_is_valid(w) then
++    api.nvim_set_option_value("scrolloff", saved, { win = w, scope = "local" })
++  end
++end
++
+ --- Rebuild the per-window fill tables from current buffer fillers. Call after
+ --- the diff/fillers are re-rendered.
+ function Group:refresh()
++  for w in pairs(self.saved_scrolloff) do
++    self:_restore_scrolloff(w)
++  end
+   self.ft = {}
+   for _, w in ipairs(self:_valid_wins()) do
+     self.ft[w] = build_fill_table(api.nvim_win_get_buf(w))
    end
    -- Fill tables changed; stored fingerprints are stale.
    self.expected = {}
@@ -42,15 +65,16 @@ index 6f8bab7..ca1cd6a 100644
  end
  
  --- Align every window other than `leader` to `leader`'s virtual-row position.
-@@ -196,6 +212,7 @@ function Group:_apply(leader, jump)
+@@ -196,6 +226,8 @@ function Group:_apply(leader, jump)
    if not ftl then
      return
    end
 +  self.pending_echo[leader] = nil
++  self:_restore_scrolloff(leader)
    local lv = win_view(leader)
    local vrow = view_to_vrow(ftl, lv.topline, lv.topfill)
    self.vrow = vrow
-@@ -222,6 +239,7 @@ function Group:_apply(leader, jump)
+@@ -222,6 +254,7 @@ function Group:_apply(leader, jump)
          local delta = target_top_vrow - cur_top_vrow
  
          if delta ~= 0 then
@@ -58,7 +82,22 @@ index 6f8bab7..ca1cd6a 100644
            if not jump then
              -- Relative scroll (<C-e>/<C-y>) preserves the grid_scroll
              -- optimization so the follower is not fully repainted.
-@@ -244,6 +262,7 @@ function Group:_apply(leader, jump)
+@@ -235,8 +268,13 @@ function Group:_apply(leader, jump)
+           -- scroll fell short (e.g. near the top/bottom of the buffer).
+           local after = win_view(w)
+           if jump or after.topline ~= target_tl or (after.topfill or 0) ~= target_tf then
++            local scrolloff = api.nvim_get_option_value("scrolloff", { win = w })
++            if scrolloff > 0 and self.saved_scrolloff[w] == nil then
++              self.saved_scrolloff[w] = api.nvim_get_option_value("scrolloff", { win = w, scope = "local" })
++              api.nvim_set_option_value("scrolloff", 0, { win = w, scope = "local" })
++            end
+             api.nvim_win_call(w, function()
+-              vim.fn.winrestview({ topline = target_tl, topfill = target_tf })
++              vim.fn.winrestview({ topline = target_tl, topfill = target_tf, lnum = target_tl })
+             end)
+           end
+         end
+@@ -244,6 +282,7 @@ function Group:_apply(leader, jump)
          -- Mirror horizontal scroll (leftcol) without disturbing the vertical view.
          local fv = win_view(w)
          if (fv.leftcol or 0) ~= leftcol then
@@ -66,7 +105,7 @@ index 6f8bab7..ca1cd6a 100644
            api.nvim_win_call(w, function()
              local v = vim.fn.winsaveview()
              v.leftcol = leftcol
-@@ -284,26 +303,45 @@ end
+@@ -284,26 +323,46 @@ end
  --- topfill-only scrolls and mouse scrolls of a non-focused window, and it
  --- ignores the echo scroll events produced by our own winrestview (their
  --- fingerprint matches `expected`).
@@ -97,12 +136,14 @@ index 6f8bab7..ca1cd6a 100644
 -  if self.syncing or self.paused then
 +function Group:_consume_pending_echoes(changed)
 +  if not changed then
-+    return
-+  end
+     return
+   end
+-  local leader = self:_detect_leader()
 +  local current = api.nvim_get_current_win()
 +  for w in pairs(changed) do
 +    if w ~= current and self.pending_echo[w] then
 +      self.pending_echo[w] = nil
++      self:_restore_scrolloff(w)
 +      self.expected[w] = view_fp(win_view(w))
 +    end
 +  end
@@ -110,9 +151,8 @@ index 6f8bab7..ca1cd6a 100644
 +
 +function Group:_on_scroll(changed)
 +  if self.syncing then
-     return
-   end
--  local leader = self:_detect_leader()
++    return
++  end
 +  self:_consume_pending_echoes(changed)
 +  if self.paused then
 +    return
@@ -121,15 +161,36 @@ index 6f8bab7..ca1cd6a 100644
    if not leader then
      return
    end
-@@ -352,6 +390,7 @@ function M.bind(opts)
+@@ -326,6 +385,9 @@ end
+ function Group:resume()
+   self.paused = false
+   self:resync()
++  for w in pairs(self.saved_scrolloff) do
++    self:_restore_scrolloff(w)
++  end
+ end
+ 
+ --- Tear down: remove autocmds and mark inactive.
+@@ -334,6 +396,9 @@ function Group:unbind()
+     pcall(api.nvim_del_augroup_by_id, self.augroup)
+     self.augroup = nil
+   end
++  for w in pairs(self.saved_scrolloff) do
++    self:_restore_scrolloff(w)
++  end
+   self.active = false
+ end
+ 
+@@ -352,6 +417,8 @@ function M.bind(opts)
      wins = vim.deepcopy(opts.wins),
      ft = {},
      expected = {},
 +    pending_echo = {},
++    saved_scrolloff = {},
      syncing = false,
      paused = false,
      active = true,
-@@ -368,12 +407,12 @@ function M.bind(opts)
+@@ -368,12 +435,12 @@ function M.bind(opts)
    self.augroup = api.nvim_create_augroup("codediff_scrollsync_" .. tostring(self):gsub("%W", ""), { clear = true })
    api.nvim_create_autocmd("WinScrolled", {
      group = self.augroup,
@@ -144,7 +205,7 @@ index 6f8bab7..ca1cd6a 100644
      end,
    })
    -- A height change alters the topfill clamp; re-align to stay consistent.
-@@ -407,6 +446,7 @@ end
+@@ -407,6 +474,7 @@ end
  -- Exposed for tests.
  M._internal = {
    build_fill_table = build_fill_table,
@@ -153,7 +214,7 @@ index 6f8bab7..ca1cd6a 100644
    view_to_vrow = view_to_vrow,
    vrow_to_view = vrow_to_view,
 diff --git a/tests/scrollsync_spec.lua b/tests/scrollsync_spec.lua
-index 3f5955b..d9771f6 100644
+index 3f5955b..408c92d 100644
 --- a/tests/scrollsync_spec.lua
 +++ b/tests/scrollsync_spec.lua
 @@ -37,6 +37,11 @@ describe("scrollsync virtual-row mapping", function()
@@ -168,7 +229,31 @@ index 3f5955b..d9771f6 100644
    it("vrow_to_view is the inverse of view_to_vrow", function()
      local _, buf = make_win({ "a", "b", "c", "d", "e", "f" }, { { after = 3, count = 4 } })
      local ft = internal.build_fill_table(buf)
-@@ -93,6 +98,26 @@ describe("scrollsync manager alignment", function()
+@@ -71,19 +76,20 @@ describe("scrollsync manager alignment", function()
+     pcall(vim.cmd, "tabclose")
+   end)
+ 
+-  local function setup_pair()
++  local function setup_pair(insert_count)
++    insert_count = insert_count or 30
+     -- left = "delete" side (30 real lines + a 30-filler block replaced), right normal
+     local left = {}
+     for i = 1, 60 do
+       left[i] = string.format("C%03d", i)
+     end
+-    local win_left = make_win(left, { { after = 20, count = 30 } })
++    local win_left = make_win(left, { { after = 20, count = insert_count } })
+     vim.cmd("rightbelow vsplit")
+     local right = {}
+     for i = 1, 20 do
+       right[i] = string.format("C%03d", i)
+     end
+-    for k = 0, 29 do
++    for k = 0, insert_count - 1 do
+       right[20 + k + 1] = string.format("I%03d", k)
+     end
+     for i = 21, 60 do
+@@ -93,6 +99,26 @@ describe("scrollsync manager alignment", function()
      return win_left, win_right
    end
  
@@ -195,7 +280,7 @@ index 3f5955b..d9771f6 100644
    it("binds windows and keeps native scrollbind off", function()
      local wl, wr = setup_pair()
      scroll.bind(tab, { wl, wr })
-@@ -181,6 +206,58 @@ describe("scrollsync manager alignment", function()
+@@ -181,6 +207,81 @@ describe("scrollsync manager alignment", function()
      assert.is_true(max_backjump <= 1, "follower topline should not oscillate; max backward jump was " .. max_backjump)
    end)
  
@@ -229,6 +314,29 @@ index 3f5955b..d9771f6 100644
 +      leader_after.topfill,
 +      "follower redraw must not change the leader's filler offset"
 +    )
++  end)
++
++  it("keeps the follower on the aligned baseline after leaving a full-screen filler", function()
++    local follower, leader = setup_pair(214)
++    local group = scroll.bind(tab, { follower, leader })
++    vim.api.nvim_set_current_win(leader)
++    vim.wo[follower].scrolloff = 8
++    set_view(follower, 21, 21)
++    set_view(leader, 21, 25)
++    group:resync(leader)
++    fire_win_scrolled(group, follower)
++
++    set_view(leader, 20, 24)
++    fire_win_scrolled(group, leader)
++    local follower_view = view(follower)
++    local follower_cursor = vim.api.nvim_win_get_cursor(follower)[1]
++
++    assert.is_true(follower_cursor >= follower_view.topline, "the follower cursor must remain in the aligned view")
++    assert.equals(0, vim.wo[follower].scrolloff, "the follower view must remain stable until its redraw")
++    fire_win_scrolled(group, follower)
++    vim.cmd("redraw")
++    assert.equals(8, vim.wo[follower].scrolloff, "the follower's scrolloff must be restored after its redraw")
++    assert.equals(20, view(follower).topline, "the follower must not flash unrelated baseline text")
 +  end)
 +
 +  it("treats a later non-focused follower scroll as user input", function()

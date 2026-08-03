@@ -1,7 +1,7 @@
 [stack]
 upstream = 31510a9b34c032b6fe98fc158d4066702f68cff2
-expectedHead = 8bdc74735ca1987be58b3d5979712d4f27b20ebd
-expectedTree = 608ca95cee37713aa12aac13cb30f4779b22b5af
+expectedHead = 53a4b179f2ae2d155c50fa3eda6ada31f97c329f
+expectedTree = 87ed37b03ea7fed74d24600c99958e2f406dcf79
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -21,9 +21,9 @@ patches =
     fork-notice
 
 [patch "scrollsync-follower-redraw"]
-description = fix(scrollsync): ignore follower redraw echoes
+description = fix(scrollsync): stabilize follower filler redraws
 file = patches/023-scrollsync-follower-redraw.patch
-originCommit = af332fe3db0ffd5bd396603f4e9912df6270b6be
+originCommit = 3542fb46e8f48de7c197128db26110762b6ac22f
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/517
 
 [patch "local-benchmarks"]
