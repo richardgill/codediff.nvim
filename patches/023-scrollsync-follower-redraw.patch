@@ -1,0 +1,256 @@
+From f1c39190a8d712ead2143822fdbbcb3ed26c99bb Mon Sep 17 00:00:00 2001
+From: Richard Gill <richard@rgill.co.uk>
+Date: Mon, 3 Aug 2026 20:01:14 +0100
+Subject: [PATCH] fix(scrollsync): ignore follower redraw echoes
+
+---
+ lua/codediff/scrollsync.lua | 62 +++++++++++++++++++++++------
+ tests/scrollsync_spec.lua   | 77 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 128 insertions(+), 11 deletions(-)
+
+diff --git a/lua/codediff/scrollsync.lua b/lua/codediff/scrollsync.lua
+index 6f8bab7..ca1cd6a 100644
+--- a/lua/codediff/scrollsync.lua
++++ b/lua/codediff/scrollsync.lua
+@@ -154,6 +154,21 @@ local function win_view(w)
+   return api.nvim_win_call(w, vim.fn.winsaveview)
+ end
+ 
++local function changed_windows(event, first)
++  local changed = {}
++  for key in pairs(event or {}) do
++    local win = tonumber(key)
++    if win then
++      changed[win] = true
++    end
++  end
++  local first_win = tonumber(first)
++  if first_win then
++    changed[first_win] = true
++  end
++  return next(changed) and changed or nil
++end
++
+ function Group:_valid_wins()
+   local out = {}
+   for _, w in ipairs(self.wins) do
+@@ -182,6 +197,7 @@ function Group:refresh()
+   end
+   -- Fill tables changed; stored fingerprints are stale.
+   self.expected = {}
++  self.pending_echo = {}
+ end
+ 
+ --- Align every window other than `leader` to `leader`'s virtual-row position.
+@@ -196,6 +212,7 @@ function Group:_apply(leader, jump)
+   if not ftl then
+     return
+   end
++  self.pending_echo[leader] = nil
+   local lv = win_view(leader)
+   local vrow = view_to_vrow(ftl, lv.topline, lv.topfill)
+   self.vrow = vrow
+@@ -222,6 +239,7 @@ function Group:_apply(leader, jump)
+         local delta = target_top_vrow - cur_top_vrow
+ 
+         if delta ~= 0 then
++          self.pending_echo[w] = true
+           if not jump then
+             -- Relative scroll (<C-e>/<C-y>) preserves the grid_scroll
+             -- optimization so the follower is not fully repainted.
+@@ -244,6 +262,7 @@ function Group:_apply(leader, jump)
+         -- Mirror horizontal scroll (leftcol) without disturbing the vertical view.
+         local fv = win_view(w)
+         if (fv.leftcol or 0) ~= leftcol then
++          self.pending_echo[w] = true
+           api.nvim_win_call(w, function()
+             local v = vim.fn.winsaveview()
+             v.leftcol = leftcol
+@@ -284,26 +303,45 @@ end
+ --- topfill-only scrolls and mouse scrolls of a non-focused window, and it
+ --- ignores the echo scroll events produced by our own winrestview (their
+ --- fingerprint matches `expected`).
+-function Group:_detect_leader()
++function Group:_detect_leader(changed)
+   local cur = api.nvim_get_current_win()
+   local candidate
+   for _, w in ipairs(self:_valid_wins()) do
+-    local fp = view_fp(win_view(w))
+-    if fp ~= self.expected[w] then
+-      if w == cur then
+-        return w -- prefer the focused window when it moved
++    if not changed or changed[w] then
++      local fp = view_fp(win_view(w))
++      if fp ~= self.expected[w] then
++        if w == cur then
++          return w -- prefer the focused window when it moved
++        end
++        candidate = candidate or w
+       end
+-      candidate = candidate or w
+     end
+   end
+   return candidate
+ end
+ 
+-function Group:_on_scroll()
+-  if self.syncing or self.paused then
++function Group:_consume_pending_echoes(changed)
++  if not changed then
++    return
++  end
++  local current = api.nvim_get_current_win()
++  for w in pairs(changed) do
++    if w ~= current and self.pending_echo[w] then
++      self.pending_echo[w] = nil
++      self.expected[w] = view_fp(win_view(w))
++    end
++  end
++end
++
++function Group:_on_scroll(changed)
++  if self.syncing then
+     return
+   end
+-  local leader = self:_detect_leader()
++  self:_consume_pending_echoes(changed)
++  if self.paused then
++    return
++  end
++  local leader = self:_detect_leader(changed)
+   if not leader then
+     return
+   end
+@@ -352,6 +390,7 @@ function M.bind(opts)
+     wins = vim.deepcopy(opts.wins),
+     ft = {},
+     expected = {},
++    pending_echo = {},
+     syncing = false,
+     paused = false,
+     active = true,
+@@ -368,12 +407,12 @@ function M.bind(opts)
+   self.augroup = api.nvim_create_augroup("codediff_scrollsync_" .. tostring(self):gsub("%W", ""), { clear = true })
+   api.nvim_create_autocmd("WinScrolled", {
+     group = self.augroup,
+-    callback = function()
++    callback = function(args)
+       if not self.active then
+         return
+       end
+       -- Only react when a member window is involved.
+-      self:_on_scroll()
++      self:_on_scroll(changed_windows(vim.v.event, args.match))
+     end,
+   })
+   -- A height change alters the topfill clamp; re-align to stay consistent.
+@@ -407,6 +446,7 @@ end
+ -- Exposed for tests.
+ M._internal = {
+   build_fill_table = build_fill_table,
++  changed_windows = changed_windows,
+   vrow_of_line = vrow_of_line,
+   view_to_vrow = view_to_vrow,
+   vrow_to_view = vrow_to_view,
+diff --git a/tests/scrollsync_spec.lua b/tests/scrollsync_spec.lua
+index 3f5955b..d9771f6 100644
+--- a/tests/scrollsync_spec.lua
++++ b/tests/scrollsync_spec.lua
+@@ -37,6 +37,11 @@ describe("scrollsync virtual-row mapping", function()
+     assert.equals(6, internal.vrow_of_line(ft, 4))
+   end)
+ 
++  it("collects changed window IDs from WinScrolled data", function()
++    assert.same({ [12] = true, [13] = true, [14] = true }, internal.changed_windows({ all = {}, ["12"] = {}, [13] = {} }, "14"))
++    assert.is_nil(internal.changed_windows({}, ""))
++  end)
++
+   it("vrow_to_view is the inverse of view_to_vrow", function()
+     local _, buf = make_win({ "a", "b", "c", "d", "e", "f" }, { { after = 3, count = 4 } })
+     local ft = internal.build_fill_table(buf)
+@@ -93,6 +98,26 @@ describe("scrollsync manager alignment", function()
+     return win_left, win_right
+   end
+ 
++  local function set_view(win, topline, cursor_line)
++    vim.api.nvim_win_call(win, function()
++      vim.fn.winrestview({ topline = topline, lnum = cursor_line })
++    end)
++  end
++
++  local function fire_win_scrolled(group, win)
++    group:_on_scroll({ [win] = true })
++  end
++
++  local function setup_pending_follower_echo()
++    local follower, leader = setup_pair()
++    local group = scroll.bind(tab, { follower, leader })
++    vim.api.nvim_set_current_win(leader)
++    set_view(leader, 35, 40)
++    group:resync(leader)
++    group.pending_echo[follower] = true
++    return { group = group, leader = leader, follower = follower }
++  end
++
+   it("binds windows and keeps native scrollbind off", function()
+     local wl, wr = setup_pair()
+     scroll.bind(tab, { wl, wr })
+@@ -181,6 +206,58 @@ describe("scrollsync manager alignment", function()
+     assert.is_true(max_backjump <= 1, "follower topline should not oscillate; max backward jump was " .. max_backjump)
+   end)
+ 
++  it("waits for the pending follower's own WinScrolled event", function()
++    local scenario = setup_pending_follower_echo()
++
++    fire_win_scrolled(scenario.group, scenario.leader)
++    assert.is_true(
++      scenario.group.pending_echo[scenario.follower],
++      "another window must not consume the follower's echo"
++    )
++
++    fire_win_scrolled(scenario.group, scenario.follower)
++    assert.is_nil(
++      scenario.group.pending_echo[scenario.follower],
++      "the follower's own event must consume its echo"
++    )
++  end)
++
++  it("keeps the active leader fixed when a follower redraw corrects its view", function()
++    local scenario = setup_pending_follower_echo()
++    local leader_before = view(scenario.leader)
++    set_view(scenario.follower, 10, 20)
++
++    fire_win_scrolled(scenario.group, scenario.follower)
++
++    local leader_after = view(scenario.leader)
++    assert.equals(leader_before.topline, leader_after.topline, "follower redraw must not move the leader")
++    assert.equals(
++      leader_before.topfill,
++      leader_after.topfill,
++      "follower redraw must not change the leader's filler offset"
++    )
++  end)
++
++  it("treats a later non-focused follower scroll as user input", function()
++    local scenario = setup_pending_follower_echo()
++    fire_win_scrolled(scenario.group, scenario.follower)
++    assert.is_nil(
++      scenario.group.pending_echo[scenario.follower],
++      "the programmatic echo must be consumed first"
++    )
++    local leader_before = view(scenario.leader)
++    set_view(scenario.follower, 10, 20)
++
++    fire_win_scrolled(scenario.group, scenario.follower)
++
++    local leader_after = view(scenario.leader)
++    assert.not_equal(
++      leader_before.topline,
++      leader_after.topline,
++      "later user scrolling in the follower must move the leader"
++    )
++  end)
++
+   it("syncs three panes together (conflict/merge view)", function()
+     -- Three equal-height aligned panes, each with a small filler block in a
+     -- different place (blocks smaller than the window so nothing clamps). After

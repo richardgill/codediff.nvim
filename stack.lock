@@ -1,7 +1,7 @@
 [stack]
 upstream = 31510a9b34c032b6fe98fc158d4066702f68cff2
-expectedHead = 1f684e65ebb8b4750c3323a82c2cefcddf0c4094
-expectedTree = 917ea51e93c158f54e9f2e443e4859b78e6bd08d
+expectedHead = 8bdc74735ca1987be58b3d5979712d4f27b20ebd
+expectedTree = 608ca95cee37713aa12aac13cb30f4779b22b5af
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -12,12 +12,19 @@ referencePatches =
     design-line-wrapping
     pi-code-annotations
 patches =
+    scrollsync-follower-redraw
     local-benchmarks
     intraline-line-matching
     native-gutter-signs
     explorer-custom-keymaps
     local-native-build
     fork-notice
+
+[patch "scrollsync-follower-redraw"]
+description = fix(scrollsync): ignore follower redraw echoes
+file = patches/023-scrollsync-follower-redraw.patch
+originCommit = af332fe3db0ffd5bd396603f4e9912df6270b6be
+pullRequest = https://github.com/esmuellert/codediff.nvim/pull/517
 
 [patch "local-benchmarks"]
 description = Add local performance benchmarks
