@@ -1,4 +1,4 @@
-From 64bdd832266fa82ed583bbee9fd0552bf3770fb1 Mon Sep 17 00:00:00 2001
+From 6260cc532bb1f4a83d9d883bd61faf115542547e Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Mon, 3 Aug 2026 20:48:00 +0100
 Subject: [PATCH] fix(scrollsync): stabilize follower filler redraws
@@ -9,7 +9,7 @@ Subject: [PATCH] fix(scrollsync): stabilize follower filler redraws
  2 files changed, 184 insertions(+), 15 deletions(-)
 
 diff --git a/lua/codediff/scrollsync.lua b/lua/codediff/scrollsync.lua
-index 6f8bab7..8124ffd 100644
+index 6f8bab7d..8124ffdd 100644
 --- a/lua/codediff/scrollsync.lua
 +++ b/lua/codediff/scrollsync.lua
 @@ -154,6 +154,21 @@ local function win_view(w)
@@ -214,7 +214,7 @@ index 6f8bab7..8124ffd 100644
    view_to_vrow = view_to_vrow,
    vrow_to_view = vrow_to_view,
 diff --git a/tests/scrollsync_spec.lua b/tests/scrollsync_spec.lua
-index 3f5955b..408c92d 100644
+index 3f5955b0..408c92d9 100644
 --- a/tests/scrollsync_spec.lua
 +++ b/tests/scrollsync_spec.lua
 @@ -37,6 +37,11 @@ describe("scrollsync virtual-row mapping", function()

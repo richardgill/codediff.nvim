@@ -1,4 +1,4 @@
-From 1fff48f3b354b17fefc5defd1de74ce0302f3c74 Mon Sep 17 00:00:00 2001
+From fbc57bd7de64afc9a4bbd32ff269cf2fa3ef3d9c Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Wed, 29 Jul 2026 06:43:18 +0100
 Subject: [PATCH] feat(explorer): custom keymaps
@@ -17,7 +17,7 @@ Subject: [PATCH] feat(explorer): custom keymaps
  create mode 100644 tests/ui/explorer/custom_keymaps_spec.lua
 
 diff --git a/README.md b/README.md
-index 8029a2b..b8e68a7 100644
+index 985dff6d..1a41baed 100644
 --- a/README.md
 +++ b/README.md
 @@ -198,6 +198,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -68,9 +68,9 @@ index 8029a2b..b8e68a7 100644
 +
  The C library will be downloaded automatically on first use. No `build` step needed!
  
- ### Native gutter signs
+ ### Gutter signs
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 0db59c0..8d7cc13 100644
+index c29df7cf..183b9885 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -383,6 +383,7 @@ Setup entry point:
@@ -126,10 +126,10 @@ index 0db59c0..8d7cc13 100644
 +Explorer lifecycle.
 +
  ==============================================================================
- NATIVE GUTTER SIGNS                                  *codediff-gutter-signs*
+ GUTTER SIGNS                                         *codediff-gutter-signs*
  
 diff --git a/doc/tags b/doc/tags
-index ef4e68f..c411dd8 100644
+index ef4e68f6..c411dd88 100644
 --- a/doc/tags
 +++ b/doc/tags
 @@ -5,6 +5,7 @@ codediff	codediff.txt	/*codediff*
@@ -141,7 +141,7 @@ index ef4e68f..c411dd8 100644
  codediff-explorer-line-statistics	codediff.txt	/*codediff-explorer-line-statistics*
  codediff-filler-text	codediff.txt	/*codediff-filler-text*
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 4bcd573..6898b2e 100644
+index 0883550c..adc4449f 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -142,6 +142,7 @@ M.defaults = {
@@ -153,7 +153,7 @@ index 4bcd573..6898b2e 100644
        fold_open = "zo", -- Open fold (expand current node)
        fold_open_recursive = "zO", -- Open fold recursively (expand current node and all descendants)
 diff --git a/lua/codediff/ui/explorer/keymaps.lua b/lua/codediff/ui/explorer/keymaps.lua
-index 66cb09d..4c2c4c3 100644
+index 66cb09d4..4c2c4c38 100644
 --- a/lua/codediff/ui/explorer/keymaps.lua
 +++ b/lua/codediff/ui/explorer/keymaps.lua
 @@ -3,10 +3,42 @@ local config = require("codediff.config")
@@ -223,7 +223,7 @@ index 66cb09d..4c2c4c3 100644
    -- which uses set_tab_keymap to set them on all buffers including explorer
  end
 diff --git a/lua/codediff/ui/explorer/nodes.lua b/lua/codediff/ui/explorer/nodes.lua
-index dae0e57..2e4ae07 100644
+index dae0e576..2e4ae070 100644
 --- a/lua/codediff/ui/explorer/nodes.lua
 +++ b/lua/codediff/ui/explorer/nodes.lua
 @@ -96,16 +96,20 @@ local function context_stats(stats)
@@ -289,7 +289,7 @@ index dae0e57..2e4ae07 100644
  function M.prepare_node(node, max_width, selected_path, selected_group)
    local data = node.data or {}
 diff --git a/lua/codediff/ui/keymap_help.lua b/lua/codediff/ui/keymap_help.lua
-index 37758b0..aa64754 100644
+index 37758b03..aa647545 100644
 --- a/lua/codediff/ui/keymap_help.lua
 +++ b/lua/codediff/ui/keymap_help.lua
 @@ -47,6 +47,59 @@ local function section(title, entries, is_bound)
@@ -388,7 +388,7 @@ index 37758b0..aa64754 100644
  
    if shape.history then
 diff --git a/tests/keymap/keymap_help_spec.lua b/tests/keymap/keymap_help_spec.lua
-index 653e8dd..895d056 100644
+index 653e8dda..895d0561 100644
 --- a/tests/keymap/keymap_help_spec.lua
 +++ b/tests/keymap/keymap_help_spec.lua
 @@ -270,6 +270,28 @@ describe("keymap help popup", function()
@@ -422,7 +422,7 @@ index 653e8dd..895d056 100644
      local tabpage, cleanup = open_standalone()
 diff --git a/tests/ui/explorer/custom_keymaps_spec.lua b/tests/ui/explorer/custom_keymaps_spec.lua
 new file mode 100644
-index 0000000..84e371d
+index 00000000..84e371d9
 --- /dev/null
 +++ b/tests/ui/explorer/custom_keymaps_spec.lua
 @@ -0,0 +1,289 @@

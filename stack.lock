@@ -1,7 +1,7 @@
 [stack]
-upstream = 31510a9b34c032b6fe98fc158d4066702f68cff2
-expectedHead = 53a4b179f2ae2d155c50fa3eda6ada31f97c329f
-expectedTree = 87ed37b03ea7fed74d24600c99958e2f406dcf79
+upstream = e08a35a56a52c290398ebfaec33c34cfcf2d0f3c
+expectedHead = d1a77db927dbb866b9e1ea273dbbd18f40c192e0
+expectedTree = ee8a738a3543b882edf8247f603fbc5edd3177d7
 testCommand = make test
 publishRemote = origin
 publishBranch = main
@@ -15,7 +15,6 @@ patches =
     scrollsync-follower-redraw
     local-benchmarks
     intraline-line-matching
-    native-gutter-signs
     explorer-custom-keymaps
     local-native-build
     fork-notice
@@ -29,26 +28,20 @@ pullRequest = https://github.com/esmuellert/codediff.nvim/pull/517
 [patch "local-benchmarks"]
 description = Add local performance benchmarks
 file = patches/003-local-benchmarks.patch
-originCommit = 7873437263a5af86fa8d4830df56adfc55a6ee51
+originCommit = 3a46293d47e95b6556103e4bd33a7246ef271348
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/458
 
 [patch "explorer-custom-keymaps"]
 description = feat(explorer): custom keymaps
 file = patches/022-explorer-custom-keymaps.patch
-originCommit = 35f3f81d58873503214f2de1a1335686f056d724
+originCommit = 25140fa5f9ab10d7337cfcdf8b72a0943a7a2321
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/492
 
 [patch "intraline-line-matching"]
 description = feat: add line matching strategies
 file = patches/014-intraline-line-matching.patch
-originCommit = c52464a5bf61cf1eaab4ec364e4042aa710047eb
+originCommit = a3786cfa85327f76c0945b83878be9932eb0b38d
 pullRequest = https://github.com/esmuellert/codediff.nvim/pull/459
-
-[patch "native-gutter-signs"]
-description = Added native gutter signs support
-file = patches/015-native-gutter-signs.patch
-originCommit = d3cb2ea809b48a65404806051d97cf6fa23b4c24
-pullRequest = https://github.com/esmuellert/codediff.nvim/pull/451
 
 [patch "local-native-build"]
 description = fix: build fork native library locally

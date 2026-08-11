@@ -1,4 +1,4 @@
-From 078bcb57d8f80c14ceb945b8ba41991b778500c3 Mon Sep 17 00:00:00 2001
+From f9db43c45e7f5f30eb5c6d941826b407c6f38c55 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 15:25:25 +0100
 Subject: [PATCH] Added native line matcher implementation and tests
@@ -34,7 +34,7 @@ Subject: [PATCH] Added native line matcher implementation and tests
  create mode 100644 tests/core/line_matcher_spec.lua
 
 diff --git a/README.md b/README.md
-index ca13382..9c3bd5a 100644
+index 72fa369c..985dff6d 100644
 --- a/README.md
 +++ b/README.md
 @@ -90,6 +90,10 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
@@ -48,7 +48,7 @@ index ca13382..9c3bd5a 100644
        hide_merge_artifacts = false,       -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
        original_position = "left",         -- Position of original (old) content: "left" or "right"
        conflict_ours_position = "right",   -- Position of ours (:2) in conflict view: "left" or "right"
-@@ -315,6 +319,55 @@ require("codediff").setup({
+@@ -316,6 +320,55 @@ require("codediff").setup({
  })
  ```
  
@@ -103,9 +103,9 @@ index ca13382..9c3bd5a 100644
 +
  The C library will be downloaded automatically on first use. No `build` step needed!
  
- ### Managing Library Installation
+ ### Gutter signs
 diff --git a/build.cmd b/build.cmd
-index fb99b03..ffad2ff 100644
+index fb99b03d..ffad2ff9 100644
 --- a/build.cmd
 +++ b/build.cmd
 @@ -23,6 +23,7 @@ set SOURCES=^
@@ -117,7 +117,7 @@ index fb99b03..ffad2ff 100644
  src\optimize.c ^
  src\sequence.c ^
 diff --git a/build.sh b/build.sh
-index fd09ca3..fe0acb8 100755
+index fd09ca3a..fe0acb8a 100755
 --- a/build.sh
 +++ b/build.sh
 @@ -78,6 +78,7 @@ SOURCES="\
@@ -129,7 +129,7 @@ index fd09ca3..fe0acb8 100755
  src/optimize.c \
  src/sequence.c \
 diff --git a/doc/codediff.txt b/doc/codediff.txt
-index 63a3216..01e07ce 100644
+index 2b68e119..c29df7cf 100644
 --- a/doc/codediff.txt
 +++ b/doc/codediff.txt
 @@ -220,6 +220,65 @@ The toggle keymap can be customized:
@@ -210,10 +210,10 @@ index 63a3216..01e07ce 100644
        conflict_result_position = "bottom",
        conflict_result_height = 30,
 diff --git a/doc/tags b/doc/tags
-index f1c5ef0..e453b0d 100644
+index bddab00c..ef4e68f6 100644
 --- a/doc/tags
 +++ b/doc/tags
-@@ -12,6 +12,7 @@ codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
+@@ -13,6 +13,7 @@ codediff-highlight-groups	codediff.txt	/*codediff-highlight-groups*
  codediff-history	codediff.txt	/*codediff-history*
  codediff-history-line-range	codediff.txt	/*codediff-history-line-range*
  codediff-layout	codediff.txt	/*codediff-layout*
@@ -222,7 +222,7 @@ index f1c5ef0..e453b0d 100644
  codediff-moved-code	codediff.txt	/*codediff-moved-code*
  codediff-quickstart	codediff.txt	/*codediff-quickstart*
 diff --git a/docs/performance.md b/docs/performance.md
-index 4292685..6bc477a 100644
+index 42926856..6bc477ac 100644
 --- a/docs/performance.md
 +++ b/docs/performance.md
 @@ -4,14 +4,15 @@ This plugin provides high-quality character-level diff highlighting similar to V
@@ -287,7 +287,7 @@ index 4292685..6bc477a 100644
  
  
 diff --git a/libvscode-diff/CMakeLists.txt b/libvscode-diff/CMakeLists.txt
-index f4f1249..dca3653 100644
+index f4f12499..dca3653e 100644
 --- a/libvscode-diff/CMakeLists.txt
 +++ b/libvscode-diff/CMakeLists.txt
 @@ -127,6 +127,7 @@ set(DIFF_CORE_SOURCES
@@ -315,7 +315,7 @@ index f4f1249..dca3653 100644
  add_diff_test(test_dp_algorithm)
  add_diff_test(test_char_boundary_categories)
 diff --git a/libvscode-diff/build.cmd.in b/libvscode-diff/build.cmd.in
-index fb99b03..ffad2ff 100644
+index fb99b03d..ffad2ff9 100644
 --- a/libvscode-diff/build.cmd.in
 +++ b/libvscode-diff/build.cmd.in
 @@ -23,6 +23,7 @@ set SOURCES=^
@@ -327,7 +327,7 @@ index fb99b03..ffad2ff 100644
  src\optimize.c ^
  src\sequence.c ^
 diff --git a/libvscode-diff/build.sh.in b/libvscode-diff/build.sh.in
-index fd09ca3..fe0acb8 100644
+index fd09ca3a..fe0acb8a 100644
 --- a/libvscode-diff/build.sh.in
 +++ b/libvscode-diff/build.sh.in
 @@ -78,6 +78,7 @@ SOURCES="\
@@ -339,7 +339,7 @@ index fd09ca3..fe0acb8 100644
  src/optimize.c \
  src/sequence.c \
 diff --git a/libvscode-diff/default_lines_diff_computer.c b/libvscode-diff/default_lines_diff_computer.c
-index 1ebf8b8..5e35e23 100644
+index 1ebf8b83..5e35e23a 100644
 --- a/libvscode-diff/default_lines_diff_computer.c
 +++ b/libvscode-diff/default_lines_diff_computer.c
 @@ -12,311 +12,373 @@
@@ -1527,7 +1527,7 @@ index 1ebf8b8..5e35e23 100644
 -}
 +const char *get_version(void) { return VSCODE_DIFF_VERSION; }
 diff --git a/libvscode-diff/diff_tool.c b/libvscode-diff/diff_tool.c
-index 33ba9e6..9f37c92 100644
+index 33ba9e67..9f37c923 100644
 --- a/libvscode-diff/diff_tool.c
 +++ b/libvscode-diff/diff_tool.c
 @@ -234,7 +234,9 @@ int main(int argc, char* argv[]) {
@@ -1543,7 +1543,7 @@ index 33ba9e6..9f37c92 100644
      // Compute diff with timing
 diff --git a/libvscode-diff/include/line_matcher.h b/libvscode-diff/include/line_matcher.h
 new file mode 100644
-index 0000000..c214c40
+index 00000000..c214c409
 --- /dev/null
 +++ b/libvscode-diff/include/line_matcher.h
 @@ -0,0 +1,14 @@
@@ -1562,7 +1562,7 @@ index 0000000..c214c40
 +
 +#endif
 diff --git a/libvscode-diff/include/types.h b/libvscode-diff/include/types.h
-index e7fbf98..fa8a46b 100644
+index e7fbf985..fa8a46b5 100644
 --- a/libvscode-diff/include/types.h
 +++ b/libvscode-diff/include/types.h
 @@ -70,6 +70,11 @@ typedef struct {
@@ -1611,7 +1611,7 @@ index e7fbf98..fa8a46b 100644
  /**
 diff --git a/libvscode-diff/src/line_matcher.c b/libvscode-diff/src/line_matcher.c
 new file mode 100644
-index 0000000..57bd063
+index 00000000..57bd063a
 --- /dev/null
 +++ b/libvscode-diff/src/line_matcher.c
 @@ -0,0 +1,380 @@
@@ -1996,7 +1996,7 @@ index 0000000..57bd063
 +  return matches;
 +}
 diff --git a/libvscode-diff/tests/test_compute_diff.c b/libvscode-diff/tests/test_compute_diff.c
-index 0d215c4..cf03fc6 100644
+index 0d215c47..cf03fc64 100644
 --- a/libvscode-diff/tests/test_compute_diff.c
 +++ b/libvscode-diff/tests/test_compute_diff.c
 @@ -154,6 +154,57 @@ bool test_whitespace_changes() {
@@ -2067,7 +2067,7 @@ index 0d215c4..cf03fc6 100644
    printf("═══════════════════════════════════════════════════════════\n");
 diff --git a/libvscode-diff/tests/test_line_matcher.c b/libvscode-diff/tests/test_line_matcher.c
 new file mode 100644
-index 0000000..f4ced82
+index 00000000..f4ced826
 --- /dev/null
 +++ b/libvscode-diff/tests/test_line_matcher.c
 @@ -0,0 +1,175 @@
@@ -2247,7 +2247,7 @@ index 0000000..f4ced82
 +  return passed ? 0 : 1;
 +}
 diff --git a/lua/codediff/config.lua b/lua/codediff/config.lua
-index 51d5433..79dd1d8 100644
+index bf0cf35b..0883550c 100644
 --- a/lua/codediff/config.lua
 +++ b/lua/codediff/config.lua
 @@ -34,6 +34,10 @@ M.defaults = {
@@ -2261,7 +2261,7 @@ index 51d5433..79dd1d8 100644
      hide_merge_artifacts = false, -- Hide merge tool temp files (*.orig, *.BACKUP.*, *.BASE.*, *.LOCAL.*, *.REMOTE.*)
      original_position = "left", -- Position of original (old) content: "left" or "right"
      conflict_ours_position = "right", -- Position of ours (:2) in conflict view: "left" or "right" (independent of original_position)
-@@ -183,8 +187,50 @@ M.defaults = {
+@@ -184,8 +188,50 @@ M.defaults = {
  
  M.options = vim.deepcopy(M.defaults)
  
@@ -2314,7 +2314,7 @@ index 51d5433..79dd1d8 100644
  
  return M
 diff --git a/lua/codediff/core/diff.lua b/lua/codediff/core/diff.lua
-index b2fbe1f..a89289d 100644
+index b2fbe1fd..a89289db 100644
 --- a/lua/codediff/core/diff.lua
 +++ b/lua/codediff/core/diff.lua
 @@ -83,11 +83,19 @@ ffi.cdef([[
@@ -2410,10 +2410,10 @@ index b2fbe1f..a89289d 100644
    -- Call C function
    local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
 diff --git a/lua/codediff/ui/core.lua b/lua/codediff/ui/core.lua
-index bbe8927..dd1a69a 100644
+index b17bd324..82cccdc0 100644
 --- a/lua/codediff/ui/core.lua
 +++ b/lua/codediff/ui/core.lua
-@@ -159,118 +159,98 @@ end
+@@ -160,118 +160,98 @@ end
  -- Step 3: Filler Line Calculation
  -- ============================================================================
  
@@ -2462,7 +2462,7 @@ index bbe8927..dd1a69a 100644
 +local function mappings_cover_change(mapping)
 +  local original_line = mapping.original.start_line
 +  local modified_line = mapping.modified.start_line
-+  for _, line_mapping in ipairs(mapping.line_mappings) do
++  for _, line_mapping in ipairs(mapping.line_mappings or {}) do
 +    if line_mapping.original.start_line ~= original_line or line_mapping.modified.start_line ~= modified_line then
 +      return false
      end
@@ -2594,7 +2594,7 @@ index bbe8927..dd1a69a 100644
 +  local fillers = {}
 +  local original_line = mapping.original.start_line
 +  local modified_line = mapping.modified.start_line
-+  for _, line_mapping in ipairs(mapping.line_mappings) do
++  for _, line_mapping in ipairs(mapping.line_mappings or {}) do
 +    append_filler(fillers, original_line, line_mapping.original.start_line, modified_line, line_mapping.modified.start_line)
 +    append_filler(fillers, line_mapping.original.start_line, line_mapping.original.end_line, line_mapping.modified.start_line, line_mapping.modified.end_line)
 +    original_line = line_mapping.original.end_line
@@ -2605,7 +2605,7 @@ index bbe8927..dd1a69a 100644
  end
  
  -- ============================================================================
-@@ -289,9 +269,6 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -291,9 +271,6 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
    local total_left_fillers = 0
    local total_right_fillers = 0
  
@@ -2615,7 +2615,7 @@ index bbe8927..dd1a69a 100644
    for _, mapping in ipairs(lines_diff.changes) do
      local orig_is_empty = (mapping.original.end_line <= mapping.original.start_line)
      local mod_is_empty = (mapping.modified.end_line <= mapping.modified.start_line)
-@@ -316,10 +293,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
+@@ -318,10 +295,7 @@ function M.render_diff(left_bufnr, right_bufnr, original_lines, modified_lines,
        end
      end
  
@@ -2628,7 +2628,7 @@ index bbe8927..dd1a69a 100644
      for _, filler in ipairs(fillers) do
        if filler.buffer == "original" then
 diff --git a/lua/codediff/ui/merge_alignment.lua b/lua/codediff/ui/merge_alignment.lua
-index 78ef1cf..51d5ebd 100644
+index 78ef1cfb..51d5ebdd 100644
 --- a/lua/codediff/ui/merge_alignment.lua
 +++ b/lua/codediff/ui/merge_alignment.lua
 @@ -428,9 +428,7 @@ function M.compute_merge_fillers_and_conflicts(base_to_input1_diff, base_to_inpu
@@ -2644,7 +2644,7 @@ index 78ef1cf..51d5ebd 100644
        -- Add to conflict blocks for action handling
 diff --git a/tests/core/line_matcher_spec.lua b/tests/core/line_matcher_spec.lua
 new file mode 100644
-index 0000000..f72880c
+index 00000000..f72880c0
 --- /dev/null
 +++ b/tests/core/line_matcher_spec.lua
 @@ -0,0 +1,215 @@
@@ -2864,7 +2864,7 @@ index 0000000..f72880c
 +  end)
 +end)
 diff --git a/tests/ui/inline_spec.lua b/tests/ui/inline_spec.lua
-index 35cfce0..69526ec 100644
+index 35cfce08..69526ecb 100644
 --- a/tests/ui/inline_spec.lua
 +++ b/tests/ui/inline_spec.lua
 @@ -105,7 +105,7 @@ describe("Inline Diff Rendering", function()
@@ -2886,7 +2886,7 @@ index 35cfce0..69526ec 100644
      vim.api.nvim_buf_set_lines(buf, 0, -1, false, modified)
  
 diff --git a/tests/ui/render_core_spec.lua b/tests/ui/render_core_spec.lua
-index 98d8fdb..a2755e2 100644
+index 98d8fdbb..a2755e2d 100644
 --- a/tests/ui/render_core_spec.lua
 +++ b/tests/ui/render_core_spec.lua
 @@ -131,6 +131,29 @@ describe("Render Core", function()

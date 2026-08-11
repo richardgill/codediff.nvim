@@ -1,4 +1,4 @@
-From 497baea39c5e0bdc1ffc71e048bc4e8e37dae13e Mon Sep 17 00:00:00 2001
+From aafa2c39ad81c049b3fed2643d5cfe93602b05ba Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 16:30:00 +0100
 Subject: [PATCH] fix: build fork native library locally
@@ -18,7 +18,7 @@ Subject: [PATCH] fix: build fork native library locally
  create mode 100644 tests/core/local_builder_spec.lua
 
 diff --git a/README.md b/README.md
-index b8e68a7..7b25a73 100644
+index 1a41baed..3a0a244b 100644
 --- a/README.md
 +++ b/README.md
 @@ -404,7 +404,7 @@ The callback receives the selected Explorer row as `ctx.entry`:
@@ -28,10 +28,10 @@ index b8e68a7..7b25a73 100644
 -The C library will be downloaded automatically on first use. No `build` step needed!
 +The C library is built locally and cached automatically on first use.
  
- ### Native gutter signs
+ ### Gutter signs
  
 diff --git a/build.cmd b/build.cmd
-index ffad2ff..71c243b 100644
+index ffad2ff9..71c243b1 100644
 --- a/build.cmd
 +++ b/build.cmd
 @@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
@@ -97,7 +97,7 @@ index ffad2ff..71c243b 100644
  cd ..
  endlocal
 diff --git a/build.sh b/build.sh
-index fe0acb8..58d9ed0 100755
+index fe0acb8a..58d9ed01 100755
 --- a/build.sh
 +++ b/build.sh
 @@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
@@ -206,7 +206,7 @@ index fe0acb8..58d9ed0 100755
 +echo "✓ Build successful: $OUTPUT_PATH"
  cd ..
 diff --git a/libvscode-diff/build.cmd.in b/libvscode-diff/build.cmd.in
-index ffad2ff..71c243b 100644
+index ffad2ff9..71c243b1 100644
 --- a/libvscode-diff/build.cmd.in
 +++ b/libvscode-diff/build.cmd.in
 @@ -5,14 +5,18 @@ REM Auto-detects compiler: MSVC, Clang, MinGW GCC
@@ -272,7 +272,7 @@ index ffad2ff..71c243b 100644
  cd ..
  endlocal
 diff --git a/libvscode-diff/build.sh.in b/libvscode-diff/build.sh.in
-index fe0acb8..58d9ed0 100644
+index fe0acb8a..58d9ed01 100644
 --- a/libvscode-diff/build.sh.in
 +++ b/libvscode-diff/build.sh.in
 @@ -31,17 +31,20 @@ if [ -z "$CC" ]; then
@@ -381,7 +381,7 @@ index fe0acb8..58d9ed0 100644
 +echo "✓ Build successful: $OUTPUT_PATH"
  cd ..
 diff --git a/lua/codediff/commands.lua b/lua/codediff/commands.lua
-index 4dfa55e..82cb126 100644
+index 4dfa55ee..82cb1262 100644
 --- a/lua/codediff/commands.lua
 +++ b/lua/codediff/commands.lua
 @@ -890,7 +890,7 @@ local function build_app()
@@ -394,7 +394,7 @@ index 4dfa55e..82cb126 100644
        vim.notify("Reinstalling libvscode-diff...", vim.log.levels.INFO)
      end
 diff --git a/lua/codediff/core/diff.lua b/lua/codediff/core/diff.lua
-index a89289d..13277ec 100644
+index a89289db..13277ec4 100644
 --- a/lua/codediff/core/diff.lua
 +++ b/lua/codediff/core/diff.lua
 @@ -19,26 +19,22 @@ else
@@ -432,7 +432,7 @@ index a89289d..13277ec 100644
      )
 diff --git a/lua/codediff/core/local_builder.lua b/lua/codediff/core/local_builder.lua
 new file mode 100644
-index 0000000..c0b852b
+index 00000000..c0b852b8
 --- /dev/null
 +++ b/lua/codediff/core/local_builder.lua
 @@ -0,0 +1,191 @@
@@ -629,7 +629,7 @@ index 0000000..c0b852b
 +return M
 diff --git a/tests/core/local_builder_spec.lua b/tests/core/local_builder_spec.lua
 new file mode 100644
-index 0000000..2e36c2a
+index 00000000..2e36c2af
 --- /dev/null
 +++ b/tests/core/local_builder_spec.lua
 @@ -0,0 +1,42 @@

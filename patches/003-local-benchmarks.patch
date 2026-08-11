@@ -1,4 +1,4 @@
-From 77860a73aa0333cd78e67d0b6d0a02ba14af251f Mon Sep 17 00:00:00 2001
+From 140d539f8a9ff1da3ab5f25836941b0864f3a872 Mon Sep 17 00:00:00 2001
 From: Richard Gill <richard@rgill.co.uk>
 Date: Sat, 18 Jul 2026 11:56:21 +0000
 Subject: [PATCH] chore: add local benchmark suites
@@ -32,7 +32,7 @@ Subject: [PATCH] chore: add local benchmark suites
  create mode 100755 scripts/benchmark.sh
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 9e01e00..b373f90 100644
+index 9e01e009..b373f907 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -50,7 +50,7 @@ file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/Makefile"
@@ -64,7 +64,7 @@ index 9e01e00..b373f90 100644
  ")
  
 diff --git a/Makefile b/Makefile
-index 1901925..f25c017 100644
+index 19019255..f25c0173 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -2,7 +2,7 @@
@@ -95,7 +95,7 @@ index 1901925..f25c017 100644
  	@echo "Version: bump-patch, bump-minor, bump-major, bump-prerelease"
 diff --git a/benchmarks/bootstrap.lua b/benchmarks/bootstrap.lua
 new file mode 100644
-index 0000000..cd702c6
+index 00000000..cd702c6b
 --- /dev/null
 +++ b/benchmarks/bootstrap.lua
 @@ -0,0 +1,2 @@
@@ -103,7 +103,7 @@ index 0000000..cd702c6
 +vim.env.VSCODE_DIFF_NO_AUTO_INSTALL = "1"
 diff --git a/benchmarks/diff.lua b/benchmarks/diff.lua
 new file mode 100644
-index 0000000..e5ad640
+index 00000000..e5ad640b
 --- /dev/null
 +++ b/benchmarks/diff.lua
 @@ -0,0 +1,52 @@
@@ -161,7 +161,7 @@ index 0000000..e5ad640
 +vim.cmd("quit")
 diff --git a/benchmarks/fixtures.lua b/benchmarks/fixtures.lua
 new file mode 100644
-index 0000000..30ef4d8
+index 00000000..30ef4d86
 --- /dev/null
 +++ b/benchmarks/fixtures.lua
 @@ -0,0 +1,207 @@
@@ -374,7 +374,7 @@ index 0000000..30ef4d8
 +return M
 diff --git a/benchmarks/harness.lua b/benchmarks/harness.lua
 new file mode 100644
-index 0000000..a8d0c9b
+index 00000000..a8d0c9b1
 --- /dev/null
 +++ b/benchmarks/harness.lua
 @@ -0,0 +1,179 @@
@@ -559,7 +559,7 @@ index 0000000..a8d0c9b
 +return M
 diff --git a/benchmarks/normalize.lua b/benchmarks/normalize.lua
 new file mode 100644
-index 0000000..d8508b8
+index 00000000..d8508b81
 --- /dev/null
 +++ b/benchmarks/normalize.lua
 @@ -0,0 +1,36 @@
@@ -601,7 +601,7 @@ index 0000000..d8508b8
 +return M
 diff --git a/benchmarks/render.lua b/benchmarks/render.lua
 new file mode 100644
-index 0000000..578dd61
+index 00000000..578dd619
 --- /dev/null
 +++ b/benchmarks/render.lua
 @@ -0,0 +1,156 @@
@@ -763,7 +763,7 @@ index 0000000..578dd61
 +vim.cmd("quit")
 diff --git a/benchmarks/report.lua b/benchmarks/report.lua
 new file mode 100644
-index 0000000..9acfc43
+index 00000000..9acfc43f
 --- /dev/null
 +++ b/benchmarks/report.lua
 @@ -0,0 +1,163 @@
@@ -932,7 +932,7 @@ index 0000000..9acfc43
 +vim.cmd("quit")
 diff --git a/benchmarks/timeout.lua b/benchmarks/timeout.lua
 new file mode 100644
-index 0000000..37fc512
+index 00000000..37fc5122
 --- /dev/null
 +++ b/benchmarks/timeout.lua
 @@ -0,0 +1,97 @@
@@ -1035,7 +1035,7 @@ index 0000000..37fc512
 +vim.cmd("quit")
 diff --git a/benchmarks/workflows.lua b/benchmarks/workflows.lua
 new file mode 100644
-index 0000000..786706b
+index 00000000..786706b1
 --- /dev/null
 +++ b/benchmarks/workflows.lua
 @@ -0,0 +1,327 @@
@@ -1368,7 +1368,7 @@ index 0000000..786706b
 +vim.cmd("qall!")
 diff --git a/docs/BENCHMARKS.md b/docs/BENCHMARKS.md
 new file mode 100644
-index 0000000..337f4bd
+index 00000000..337f4bd7
 --- /dev/null
 +++ b/docs/BENCHMARKS.md
 @@ -0,0 +1,41 @@
@@ -1414,7 +1414,7 @@ index 0000000..337f4bd
 +
 +Pinned real-world fixtures use CodeDiff files at fixed Git commits, so fixture content is stable across checked-out revisions. Rendering timings measure clearing and applying side-by-side highlights and filler lines, not terminal or GUI drawing. Workflow timings run inside an already-started headless Neovim and do not include Neovim startup.
 diff --git a/docs/README.md b/docs/README.md
-index e5e3c4f..e7e5d9b 100644
+index e5e3c4f8..e7e5d9b2 100644
 --- a/docs/README.md
 +++ b/docs/README.md
 @@ -8,6 +8,7 @@
@@ -1427,7 +1427,7 @@ index e5e3c4f..e7e5d9b 100644
  
 diff --git a/scripts/benchmark.sh b/scripts/benchmark.sh
 new file mode 100755
-index 0000000..adc0728
+index 00000000..adc07283
 --- /dev/null
 +++ b/scripts/benchmark.sh
 @@ -0,0 +1,61 @@
